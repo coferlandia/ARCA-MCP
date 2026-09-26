@@ -36,6 +36,7 @@ bld/
 appsettings.json
 appsettings.*.json
 !appsettings.example.json
+!appsettings.Testing.json
 
 # Certificate files
 Certificados/
