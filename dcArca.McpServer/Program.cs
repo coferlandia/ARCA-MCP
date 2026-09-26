@@ -2,6 +2,7 @@ using dcArca.Core;
 using dcArca.Core.Models;
 using dcArca.Core.Services;
 using dcArca.Core.Services.Logging;
+using dcArca.McpServer;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
