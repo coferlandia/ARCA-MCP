@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "dcArca.TestApp", "dcArca.Te
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "dcArca.Core.Tests", "dcArca.Core.Tests\dcArca.Core.Tests.csproj", "{3B8ACB7C-6181-4F55-A343-61DDCF0CEF91}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "dcArca.Service", "dcArca.Service\dcArca.Service.csproj", "{FECE2D97-99C2-46C5-BF4E-86D206583A10}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -55,6 +57,18 @@ Global
 		{3B8ACB7C-6181-4F55-A343-61DDCF0CEF91}.Release|x64.Build.0 = Release|Any CPU
 		{3B8ACB7C-6181-4F55-A343-61DDCF0CEF91}.Release|x86.ActiveCfg = Release|Any CPU
 		{3B8ACB7C-6181-4F55-A343-61DDCF0CEF91}.Release|x86.Build.0 = Release|Any CPU
+		{FECE2D97-99C2-46C5-BF4E-86D206583A10}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FECE2D97-99C2-46C5-BF4E-86D206583A10}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FECE2D97-99C2-46C5-BF4E-86D206583A10}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{FECE2D97-99C2-46C5-BF4E-86D206583A10}.Debug|x64.Build.0 = Debug|Any CPU
+		{FECE2D97-99C2-46C5-BF4E-86D206583A10}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{FECE2D97-99C2-46C5-BF4E-86D206583A10}.Debug|x86.Build.0 = Debug|Any CPU
+		{FECE2D97-99C2-46C5-BF4E-86D206583A10}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FECE2D97-99C2-46C5-BF4E-86D206583A10}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FECE2D97-99C2-46C5-BF4E-86D206583A10}.Release|x64.ActiveCfg = Release|Any CPU
+		{FECE2D97-99C2-46C5-BF4E-86D206583A10}.Release|x64.Build.0 = Release|Any CPU
+		{FECE2D97-99C2-46C5-BF4E-86D206583A10}.Release|x86.ActiveCfg = Release|Any CPU
+		{FECE2D97-99C2-46C5-BF4E-86D206583A10}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

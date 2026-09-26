@@ -357,6 +357,40 @@ La WinForms Test App incluye un formulario dedicado para consultar cualquier com
 - `EsNota()`: Indica si es nota de crédito/débito
 - `CumpleReglaNotas10197()`: Valida que notas tengan comprobante asociado
 
+## 🐳 Docker (servidores Linux)
+
+`dcArca.Service` es un ejecutable único que corre en Linux (a diferencia de `dcArca.TestApp`, que es WinForms y requiere Windows). Por defecto levanta una API REST; pasándole argumentos, corre un comando puntual y termina.
+
+### Build
+```bash
+docker build -f dcArca.Service/Dockerfile -t dcarca-service .
+```
+
+### Modo API (por defecto)
+```bash
+docker run -d -p 8080:8080 \
+  -v /ruta/segura/certificado.pfx:/certs/certificado.pfx:ro \
+  -v /ruta/segura/appsettings.json:/app/appsettings.json:ro \
+  dcarca-service
+```
+Endpoints: `GET /health`, `POST /api/facturas`, `GET /api/facturas/ultimo-autorizado/{tipoComprobante}`, `GET /api/comprobantes/{numero}/{tipoComprobante}`, `GET /api/padron/{cuit}`, `GET /api/condiciones-iva?docTipo=&docNro=&tipoComprobante=`.
+
+### Modo CLI (comando puntual, mismo contenedor)
+```bash
+docker run --rm \
+  -v /ruta/segura/certificado.pfx:/certs/certificado.pfx:ro \
+  -v /ruta/segura/appsettings.json:/app/appsettings.json:ro \
+  dcarca-service padron 20123456789
+
+docker run --rm -i \
+  -v /ruta/segura/certificado.pfx:/certs/certificado.pfx:ro \
+  -v /ruta/segura/appsettings.json:/app/appsettings.json:ro \
+  dcarca-service facturar < factura.json
+```
+Comandos disponibles: `facturar [archivo.json]` (o JSON por stdin), `ultimo-autorizado <tipoComprobante>`, `consultar <numero> <tipoComprobante>`, `padron <cuit>`, `condiciones-iva <docTipo> <docNro> <tipoComprobante>`.
+
+La config se resuelve igual que en `appsettings.json` pero también acepta variables de entorno (`dcArcaConfig__Cuit`, `dcArcaConfig__CertificatePath`, etc.), útil para no montar un `appsettings.json` con secretos.
+
 ## 🐛 Troubleshooting
 
 ### Certificado no encontrado
