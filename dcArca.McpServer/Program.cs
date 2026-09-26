@@ -16,9 +16,14 @@ var jwtAuthority = builder.Configuration["Jwt:Authority"]
 var jwtAudience = builder.Configuration["Jwt:Audience"]
     ?? throw new InvalidOperationException("Falta configurar Jwt:Audience en appsettings.json");
 
-// dcArcaConfig se carga con el mismo helper que usa dcArca.TestApp, valida CUIT/certificado al arrancar
+// dcArcaConfig se carga con el mismo helper que usa dcArca.TestApp, valida CUIT/certificado al arrancar.
+// appsettings.Development.json no trae su propia seccion dcArcaConfig (solo overrides de Logging), asi que
+// solo "Testing" (que sí trae dcArcaConfig con el certificado placeholder) se resuelve a un archivo distinto.
+var arcaSettingsFile = builder.Environment.EnvironmentName == "Testing"
+    ? $"appsettings.{builder.Environment.EnvironmentName}.json"
+    : "appsettings.json";
 var arcaConfig = dcConfigurationHelper.LoadFromJson(
-    Path.Combine(builder.Environment.ContentRootPath, "appsettings.json"));
+    Path.Combine(builder.Environment.ContentRootPath, arcaSettingsFile));
 
 builder.Services.AddSingleton(arcaConfig);
 builder.Services.AddSingleton<IAfipLogger>(sp =>
