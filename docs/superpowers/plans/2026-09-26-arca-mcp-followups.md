@@ -89,7 +89,37 @@ Se agregó una policy `"ArcaFacturar"` (valida el claim `scope` del JWT, split p
 
 Este es más una tarea de investigación + diseño que un cambio mecánico — no hay un snippet "correcto" ya escrito como en el punto 2.1.
 
-### 2.3 Authorization Server externo no implementado
+### 2.3 Authorization Server externo no implementado — ✅ VERIFICADO END-TO-END localmente (commit `133f5e4`), pendiente el IdP real de Cadencia
+
+Se agregó `deploy/local-keycloak/` (Keycloak vía Docker Compose, con un realm pre-configurado — cliente `dcarca-mcp` con client credentials grant, scopes `arca:consultar`/`arca:facturar`, mapper de audience) para poder emitir JWT reales sin depender del IdP definitivo. Se corrió `dcArca.McpServer` contra ese Keycloak y se confirmó con tokens reales (firmados, con `iss`/`aud` reales, validados vía OIDC discovery real):
+- Token con solo `arca:consultar` → `solicitar_cae` no aparece en `tools/list`, y llamarlo devuelve `-32600 "Access forbidden"`.
+- Token con `arca:facturar` → `solicitar_cae` aparece y es invocable.
+- Sin token → `401`.
+
+`Program.cs` ahora relaja `RequireHttpsMetadata` solo en `Development` (necesario para un Keycloak local sin TLS) — `Testing`/`Production` siguen exigiendo HTTPS igual que antes.
+
+**Cómo levantar el entorno de nuevo:**
+```bash
+cd deploy/local-keycloak && docker compose up -d
+# esperar ~10s a que importe el realm, después:
+python3 -c "
+import json, urllib.request, urllib.parse
+data = {'grant_type':'client_credentials','client_id':'dcarca-mcp','client_secret':'dcarca-mcp-local-dev-secret','scope':'arca:facturar'}
+req = urllib.request.Request('http://localhost:8081/realms/dcarca/protocol/openid-connect/token', data=urllib.parse.urlencode(data).encode())
+print(json.load(urllib.request.urlopen(req))['access_token'])
+"
+# correr dcArca.McpServer con ASPNETCORE_ENVIRONMENT=Development y su appsettings.json local
+# apuntando Jwt:Authority a http://localhost:8081/realms/dcarca y Jwt:Audience a dcarca-mcp,
+# después usar deploy/local-keycloak/call_mcp.py <token> tools/list (o tools/call ...)
+```
+
+**Lo que queda pendiente de verdad:** conectar esto al Authorization Server real que use Cadencia en producción (no Keycloak local). Cuando ese IdP esté decidido/disponible, solo hace falta:
+1. Dar de alta un cliente (o el mecanismo que use ese IdP) con los scopes `arca:facturar`/`arca:consultar`.
+2. Configurar `Jwt:Authority`/`Jwt:Audience` en el `appsettings.json` real de producción (o env vars) apuntando a ese IdP.
+3. No se toca código — el resource server ya es agnóstico del IdP (funciona con cualquiera que hable OIDC/JWT), ya probado end-to-end con Keycloak.
+
+Detalle original de la tarea abajo, dejado para referencia.
+
 
 **Estado:** deliberadamente fuera de alcance del plan original (`docs/superpowers/plans/2026-09-24-arca-mcp-server.md`, sección "Fuera de alcance (deliberado)"). `dcArca.McpServer` asume que ya existe un IdP externo (Auth0, Entra ID, Keycloak, o cualquiera que hable OIDC/JWT) emitiendo los tokens que los clientes MCP van a usar.
 
