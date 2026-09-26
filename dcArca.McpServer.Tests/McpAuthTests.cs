@@ -15,6 +15,17 @@ public class McpAuthTests : IClassFixture<WebApplicationFactory<Program>>
         var contentRoot = Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..", "dcArca.McpServer");
 
+        // The Testing config's CertificatePath ("test-cert-placeholder.pfx") only needs to
+        // exist (auth rejects the request with 401 before it's ever read) -- but
+        // dcConfigurationHelper.ValidateConfig checks it with a relative File.Exists,
+        // which resolves against the process's current directory, not the content
+        // root. It's gitignored, so create it here instead of committing a binary.
+        var certPath = Path.Combine(Directory.GetCurrentDirectory(), "test-cert-placeholder.pfx");
+        if (!File.Exists(certPath))
+        {
+            File.WriteAllBytes(certPath, Array.Empty<byte>());
+        }
+
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseContentRoot(contentRoot);
