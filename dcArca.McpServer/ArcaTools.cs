@@ -46,6 +46,14 @@ public sealed class ArcaTools
         [Description("Importe de IVA.")] decimal importeIva,
         [Description("Importe total (debe ser ImporteNeto + ImporteIva).")] decimal importeTotal,
         [Description("Fecha del comprobante en formato YYYYMMDD.")] string fechaComprobante,
+        [Description("Fecha de servicio desde, formato YYYYMMDD. Obligatorio si concepto es Servicios o ProductosYServicios.")] string? fechaServicioDesde,
+        [Description("Fecha de servicio hasta, formato YYYYMMDD. Obligatorio si concepto es Servicios o ProductosYServicios.")] string? fechaServicioHasta,
+        [Description("Fecha de vencimiento de pago, formato YYYYMMDD. Obligatorio si concepto es Servicios o ProductosYServicios.")] string? fechaVencimiento,
+        [Description("Tipo de comprobante asociado. Junto con puntoVentaAsociado y numeroAsociado, identifica la factura original que esta Nota de Crédito/Débito ajusta (obligatorio en Notas, salvo que se informe periodoAsociadoDesde/Hasta en su lugar).")] int? tipoComprobanteAsociado,
+        [Description("Punto de venta del comprobante asociado.")] int? puntoVentaAsociado,
+        [Description("Número del comprobante asociado.")] long? numeroAsociado,
+        [Description("Fecha desde del período asociado, formato YYYYMMDD. Alternativa a informar el comprobante asociado en Notas de Crédito/Débito.")] string? periodoAsociadoDesde,
+        [Description("Fecha hasta del período asociado, formato YYYYMMDD. Alternativa a informar el comprobante asociado en Notas de Crédito/Débito.")] string? periodoAsociadoHasta,
         CancellationToken cancellationToken)
     {
         var factura = new dcFacturaRequest
@@ -60,6 +68,14 @@ public sealed class ArcaTools
             ImporteIva = importeIva,
             ImporteTotal = importeTotal,
             FechaComprobante = fechaComprobante,
+            FechaServicioDesde = fechaServicioDesde,
+            FechaServicioHasta = fechaServicioHasta,
+            FechaVencimiento = fechaVencimiento,
+            CbteAsociadoTipo = tipoComprobanteAsociado,
+            CbteAsociadoPtoVta = puntoVentaAsociado,
+            CbteAsociadoNro = numeroAsociado,
+            PeriodoAsocDesde = periodoAsociadoDesde,
+            PeriodoAsocHasta = periodoAsociadoHasta,
         };
 
         return _wsfe.FECAESolicitarAsync(factura, cancellationToken);
