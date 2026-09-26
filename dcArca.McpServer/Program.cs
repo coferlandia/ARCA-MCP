@@ -42,6 +42,9 @@ builder.Services.AddAuthentication(options =>
 .AddJwtBearer(options =>
 {
     options.Authority = jwtAuthority;
+    // Solo en Development se permite un Authority http:// (ej. un IdP local en Docker sin TLS).
+    // En cualquier otro ambiente (Testing, Production) sigue exigiendo HTTPS por default.
+    options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuer = true,

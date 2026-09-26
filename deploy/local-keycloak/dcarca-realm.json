@@ -1,0 +1,47 @@
+{
+  "realm": "dcarca",
+  "enabled": true,
+  "clientScopes": [
+    {
+      "name": "arca:consultar",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
+      "name": "arca:facturar",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "dcarca-mcp",
+      "secret": "dcarca-mcp-local-dev-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "defaultClientScopes": ["arca:consultar"],
+      "optionalClientScopes": ["arca:facturar"],
+      "protocolMappers": [
+        {
+          "name": "aud-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "dcarca-mcp",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
+}
