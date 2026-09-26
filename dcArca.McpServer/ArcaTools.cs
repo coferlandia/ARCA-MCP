@@ -40,7 +40,7 @@ public sealed class ArcaTools
         [Description("Número de comprobante a autorizar (CbteDesde/CbteHasta).")] long numeroComprobante,
         [Description("Concepto: 1=Productos, 2=Servicios, 3=Productos y Servicios.")] dcConcepto concepto,
         [Description("CUIT del receptor (sin guiones).")] long cuitReceptor,
-        [Description("Tipo de documento del receptor (80=CUIT, 96=DNI, 99=Consumidor Final).")] int tipoDocReceptor,
+        [Description("Tipo de documento del receptor.")] dcTipoDocumento tipoDocReceptor,
         [Description("Condición frente al IVA del receptor (obligatoria por RG 5616).")] dcCondicionIvaReceptor condicionIvaReceptor,
         [Description("Importe neto gravado (sin IVA).")] decimal importeNeto,
         [Description("Importe de IVA.")] decimal importeIva,
@@ -54,7 +54,7 @@ public sealed class ArcaTools
             NumeroComprobante = numeroComprobante,
             Concepto = concepto,
             CuitReceptor = cuitReceptor,
-            TipoDocReceptor = tipoDocReceptor,
+            TipoDocReceptor = (int)tipoDocReceptor,
             CondicionIvaReceptor = condicionIvaReceptor,
             ImporteNeto = importeNeto,
             ImporteIva = importeIva,
@@ -67,11 +67,11 @@ public sealed class ArcaTools
 
     [McpServerTool, Description("Consulta las condiciones de IVA válidas para un receptor dado, según el tipo de comprobante a emitir.")]
     public Task<List<dcCondicionIvaOption>> ConsultarCondicionesIva(
-        [Description("Tipo de documento del receptor (80=CUIT, 96=DNI).")] int docTipo,
+        [Description("Tipo de documento del receptor.")] dcTipoDocumento docTipo,
         [Description("Número de documento del receptor.")] long docNro,
         [Description("Tipo de comprobante AFIP a emitir.")] dcTipoComprobante tipoComprobante,
         CancellationToken cancellationToken)
-        => _wsfe.GetCondicionesIVAReceptorAsync(docTipo, docNro, tipoComprobante, cancellationToken);
+        => _wsfe.GetCondicionesIVAReceptorAsync((int)docTipo, docNro, tipoComprobante, cancellationToken);
 
     [McpServerTool, Description("Consulta los datos registrales de un CUIT en el padrón de AFIP (razón social, estado, actividades).")]
     public Task<dcPadronPersonaResult> ConsultarPadron(
