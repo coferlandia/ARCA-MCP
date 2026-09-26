@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using dcArca.Core.Models;
 using dcArca.Core.Services;
+using Microsoft.AspNetCore.Authorization;
 using ModelContextProtocol.Server;
 
 namespace dcArca.McpServer;
@@ -35,6 +36,7 @@ public sealed class ArcaTools
         => _wsfe.FECompConsultarAsync(numeroComprobante, tipoComprobante, cancellationToken);
 
     [McpServerTool, Description("Solicita a AFIP la autorización (CAE) de una factura. Los importes deben cumplir ImporteTotal = ImporteNeto + ImporteIva.")]
+    [Authorize(Policy = "ArcaFacturar")]
     public Task<dcFacturaResponse> SolicitarCae(
         [Description("Tipo de comprobante AFIP a autorizar.")] dcTipoComprobante tipoComprobante,
         [Description("Número de comprobante a autorizar (CbteDesde/CbteHasta).")] long numeroComprobante,
