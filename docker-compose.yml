@@ -1,0 +1,29 @@
+services:
+  mcpserver:
+    build:
+      context: .
+      dockerfile: dcArca.McpServer/Dockerfile
+    image: dcarca-mcpserver:latest
+    container_name: dcarca-mcpserver
+    restart: unless-stopped
+    networks:
+      - red-consultora
+    expose:
+      - "8080"
+    environment:
+      - Jwt__Authority=${JWT_AUTHORITY}
+      - Jwt__Audience=${JWT_AUDIENCE}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=red-consultora"
+
+      # HTTPS router
+      - "traefik.http.routers.dcarca-mcpserver.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.dcarca-mcpserver.entrypoints=websecure"
+      - "traefik.http.routers.dcarca-mcpserver.tls=true"
+      - "traefik.http.routers.dcarca-mcpserver.tls.certresolver=${CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.services.dcarca-mcpserver.loadbalancer.server.port=8080"
+
+networks:
+  red-consultora:
+    external: true
