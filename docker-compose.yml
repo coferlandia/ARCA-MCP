@@ -12,6 +12,7 @@ services:
       - "8080"
     volumes:
       - ${APPSETTINGS_PATH}:/app/appsettings.json:ro
+      - ${CERTIFICATE_PATH}:/certs/certificado.pfx:ro
     environment:
       - Jwt__Authority=${JWT_AUTHORITY}
       - Jwt__Audience=${JWT_AUDIENCE}
