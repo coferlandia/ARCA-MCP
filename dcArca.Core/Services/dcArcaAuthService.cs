@@ -94,6 +94,37 @@ public class dcArcaAuthService
         }
     }
 
+    /// <summary>
+    /// Invalida el token rechazado, salvo que otra llamada ya lo haya renovado.
+    /// </summary>
+    public async Task InvalidateCacheAsync(string rejectedToken, CancellationToken cancellationToken = default)
+    {
+        var gate = _tokenLocks.GetOrAdd(_cacheKey, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            LoadTokenFromCache();
+            if (!string.IsNullOrEmpty(_token) && _token != rejectedToken
+                && !string.IsNullOrEmpty(_sign) && DateTime.UtcNow < _tokenExpiration - _renewalSkew)
+            {
+                return;
+            }
+
+            _token = null;
+            _sign = null;
+            _tokenExpiration = DateTime.MinValue;
+            if (File.Exists(_cachePath))
+            {
+                File.Delete(_cachePath);
+                _logger.LogInformation("[dcAuthService] Cache invalidado manualmente");
+            }
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     private async Task RequestNewTokenAsync(CancellationToken cancellationToken)
     {
         try

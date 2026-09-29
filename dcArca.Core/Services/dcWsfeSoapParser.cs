@@ -46,6 +46,10 @@ public sealed class dcWsfeSoapParser
         var fault = ExtractFault(xmlDoc);
         if (fault != null)
         {
+            if (dcTokenFaultDetector.IsInvalidSignature(fault.Reason))
+            {
+                throw new dcTokenInvalidException($"Token inválido detectado: {fault.Reason}");
+            }
             return BuildFaultResponse(fault, $"Error al consultar el último comprobante autorizado para tipo {tipoComprobante}.");
         }
 
@@ -80,6 +84,10 @@ public sealed class dcWsfeSoapParser
         var fault = ExtractFault(xmlDoc);
         if (fault != null)
         {
+            if (dcTokenFaultDetector.IsInvalidSignature(fault.Reason))
+            {
+                throw new dcTokenInvalidException($"Token inválido detectado: {fault.Reason}");
+            }
             var response = BuildFaultResponse(fault, "La solicitud de CAE fue rechazada por AFIP.");
             response.NumeroComprobante = nroComprobante;
             return response;
@@ -144,6 +152,10 @@ public sealed class dcWsfeSoapParser
         var fault = ExtractFault(xmlDoc);
         if (fault != null)
         {
+            if (dcTokenFaultDetector.IsInvalidSignature(fault.Reason))
+            {
+                throw new dcTokenInvalidException($"Token inválido detectado: {fault.Reason}");
+            }
             var response = BuildFaultResponse(fault, "La consulta de comprobante fue rechazada por AFIP.");
             response.NumeroComprobante = nroComprobante;
             return response;
@@ -312,6 +324,10 @@ public sealed class dcWsfeSoapParser
         var fault = ExtractFault(xmlDoc);
         if (fault != null)
         {
+            if (dcTokenFaultDetector.IsInvalidSignature(fault.Reason))
+            {
+                throw new dcTokenInvalidException($"Token inválido detectado: {fault.Reason}");
+            }
             _logger.LogError($"Consulta de Condición IVA rechazada: {fault.ToSingleLine()}");
             return new List<dcCondicionIvaOption>();
         }

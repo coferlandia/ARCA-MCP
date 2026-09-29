@@ -64,13 +64,33 @@ public class dcPadronClient : IdcPadronClient, IDisposable
     public async Task<dcPadronPersonaResult> GetPersonaAsync(long cuit, CancellationToken cancellationToken = default)
     {
         var result = new dcPadronPersonaResult { CuitConsultado = cuit };
+        var rejectedToken = string.Empty;
 
         try
         {
             var (token, sign) = await _authService.GetTokenAsync(cancellationToken);
+            rejectedToken = token;
             var soapRequest = BuildGetPersonaRequest(token, sign, cuit);
             var (responseBody, statusCode) = await SendSoapRequestAsync(soapRequest, "http://a5.soap.ws.server.puc.sr/getPersona_v2", cancellationToken);
             return ParsePersonaResponse(responseBody, cuit, statusCode);
+        }
+        catch (dcTokenInvalidException)
+        {
+            _logger.LogWarning("[dcPadronClient] Token inválido detectado, refrescando...");
+            try
+            {
+                await _authService.InvalidateCacheAsync(rejectedToken, cancellationToken);
+                var (token, sign) = await _authService.GetTokenAsync(cancellationToken);
+                var soapRequest = BuildGetPersonaRequest(token, sign, cuit);
+                var (responseBody, statusCode) = await SendSoapRequestAsync(soapRequest, "http://a5.soap.ws.server.puc.sr/getPersona_v2", cancellationToken);
+                return ParsePersonaResponse(responseBody, cuit, statusCode);
+            }
+            catch (Exception retryEx)
+            {
+                result.Success = false;
+                result.Mensaje = $"Error tras reintento por token inválido: {retryEx.Message}";
+                return result;
+            }
         }
         catch (dcWsaaFaultException wsaaEx)
         {
@@ -148,6 +168,12 @@ public class dcPadronClient : IdcPadronClient, IDisposable
         {
             var faultCode = faultNode.SelectSingleNode("./faultcode")?.InnerText?.Trim();
             var faultString = faultNode.SelectSingleNode("./faultstring")?.InnerText?.Trim();
+
+            if (dcTokenFaultDetector.IsInvalidSignature(faultString))
+            {
+                throw new dcTokenInvalidException($"Token inválido detectado: {faultString}");
+            }
+
             var detailNode = faultNode.SelectSingleNode("./detail");
             var detailInfo = detailNode?.InnerXml?.Trim();
             var detailText = detailNode?.InnerText?.Trim();

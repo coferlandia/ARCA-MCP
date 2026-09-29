@@ -9,6 +9,7 @@
 
 using System.Globalization;
 using System.Text;
+using System.Xml;
 using dcArca.Core.Models;
 using dcArca.Core.Services.Logging;
 
@@ -70,11 +71,13 @@ public class dcWsfeClient : IdcWsfeClient, IDisposable
     /// <returns>Respuesta con el número de comprobante o detalle de error.</returns>
     public async Task<dcFacturaResponse> FECompUltimoAutorizadoAsync(dcTipoComprobante tipoComprobante, CancellationToken cancellationToken = default)
     {
+        var rejectedToken = string.Empty;
         try
         {
             var tipo = (int)tipoComprobante;
             _logger.LogInformation($"[dcWsfeClient] Consultando último comprobante autorizado (PV: {_config.PuntoVenta}, Tipo: {tipo})");
             var (token, sign) = await _authService.GetTokenAsync(cancellationToken);
+            rejectedToken = token;
 
             var soapRequest = _soapBuilder.BuildUltimoComprobanteRequest(token, sign, tipo);
             var response = await SendSoapRequestAsync(soapRequest, "http://ar.gov.afip.dif.FEV1/FECompUltimoAutorizado", cancellationToken);
@@ -89,6 +92,26 @@ public class dcWsfeClient : IdcWsfeClient, IDisposable
             }
 
             return parsed;
+        }
+        catch (dcTokenInvalidException)
+        {
+            _logger.LogWarning("[dcWsfeClient] Token inválido detectado, refrescando...");
+            try
+            {
+                await _authService.InvalidateCacheAsync(rejectedToken, cancellationToken);
+                var tipo = (int)tipoComprobante;
+                var (token, sign) = await _authService.GetTokenAsync(cancellationToken);
+                var soapRequest = _soapBuilder.BuildUltimoComprobanteRequest(token, sign, tipo);
+                var response = await SendSoapRequestAsync(soapRequest, "http://ar.gov.afip.dif.FEV1/FECompUltimoAutorizado", cancellationToken);
+                var parsed = _soapParser.ParseUltimoComprobanteResponse(response, tipo);
+                _logger.LogInformation($"[dcWsfeClient] Reintento exitoso. Último comprobante autorizado: {parsed.NumeroComprobante}");
+                return parsed;
+            }
+            catch (Exception retryEx)
+            {
+                _logger.LogError($"[dcWsfeClient] Error tras reintento por token inválido: {retryEx.Message}", retryEx);
+                return CrearRespuestaValidacion("FEULTIMO_ERROR", $"Error tras reintento por token inválido: {retryEx.Message}");
+            }
         }
         catch (Exception ex)
         {
@@ -106,12 +129,14 @@ public class dcWsfeClient : IdcWsfeClient, IDisposable
     /// <returns>Respuesta con los datos del comprobante.</returns>
     public async Task<dcFacturaResponse> FECompConsultarAsync(long numeroComprobante, dcTipoComprobante tipoComprobante, CancellationToken cancellationToken = default)
     {
+        var rejectedToken = string.Empty;
         try
         {
             var tipo = (int)tipoComprobante;
             _logger.LogInformation($"[dcWsfeClient] Consultando comprobante {numeroComprobante} (Tipo: {tipo})...");
 
             var (token, sign) = await _authService.GetTokenAsync(cancellationToken);
+            rejectedToken = token;
             var soapRequest = _soapBuilder.BuildConsultarComprobanteRequest(token, sign, tipo, numeroComprobante);
             var response = await SendSoapRequestAsync(soapRequest, "http://ar.gov.afip.dif.FEV1/FECompConsultar", cancellationToken);
             var parsed = _soapParser.ParseFECompConsultarResponse(response, numeroComprobante);
@@ -121,6 +146,29 @@ public class dcWsfeClient : IdcWsfeClient, IDisposable
             }
 
             return parsed;
+        }
+        catch (dcTokenInvalidException)
+        {
+            // Token inválido detectado, invalidar cache y reintentar una vez
+            _logger.LogWarning("[dcWsfeClient] Token inválido detectado, refrescando...");
+            try
+            {
+                await _authService.InvalidateCacheAsync(rejectedToken, cancellationToken);
+                var tipo = (int)tipoComprobante;
+                var (token, sign) = await _authService.GetTokenAsync(cancellationToken);
+                var soapRequest = _soapBuilder.BuildConsultarComprobanteRequest(token, sign, tipo, numeroComprobante);
+                var response = await SendSoapRequestAsync(soapRequest, "http://ar.gov.afip.dif.FEV1/FECompConsultar", cancellationToken);
+                var parsed = _soapParser.ParseFECompConsultarResponse(response, numeroComprobante);
+                _logger.LogInformation($"[dcWsfeClient] Reintento exitoso para consulta de comprobante {numeroComprobante}");
+                return parsed;
+            }
+            catch (Exception retryEx)
+            {
+                _logger.LogError($"[dcWsfeClient] Error tras reintento por token inválido: {retryEx.Message}", retryEx);
+                var respuesta = CrearRespuestaValidacion("FECOMP_ERROR", $"Error tras reintento por token inválido: {retryEx.Message}");
+                respuesta.NumeroComprobante = numeroComprobante;
+                return respuesta;
+            }
         }
         catch (Exception ex)
         {
@@ -139,6 +187,7 @@ public class dcWsfeClient : IdcWsfeClient, IDisposable
     /// <returns>Respuesta con el CAE o detalles del rechazo.</returns>
     public async Task<dcFacturaResponse> FECAESolicitarAsync(dcFacturaRequest factura, CancellationToken cancellationToken = default)
     {
+        var rejectedToken = string.Empty;
         try
         {
             _logger.LogInformation("[dcWsfeClient] Solicitando CAE para factura...");
@@ -233,32 +282,58 @@ public class dcWsfeClient : IdcWsfeClient, IDisposable
             }
 
             var (token, sign) = await _authService.GetTokenAsync(cancellationToken);
+            rejectedToken = token;
 
-            if (factura.CondicionIvaReceptor ==null)
+            if (factura.CondicionIvaReceptor == null)
             {
                 _logger.LogWarning("[dcWsfeClient] No se especificó Condición IVA; se enviará vacío y AFIP determinará el resultado.");
             }
-
-
-            var soapRequest = _soapBuilder.BuildSolicitarCaeRequest(token, sign, factura, nroComprobante, tipoComprobante, concepto);
 
             _logger.LogDebug($"[dcWsfeClient] Tipo Comprobante: {tipoComprobante} ({tipoComprobanteEnum}) (Clase: {claseComprobante ?? "N/D"})");
             _logger.LogDebug($"[dcWsfeClient] Condición IVA enviada: {factura.CondicionIvaReceptor}");
             _logger.LogDebug($"[dcWsfeClient] CUIT Receptor: {factura.CuitReceptor}");
 
-            var response = await SendSoapRequestAsync(soapRequest, "http://ar.gov.afip.dif.FEV1/FECAESolicitar", cancellationToken);
-            var result = _soapParser.ParseFECAESolicitarResponse(response, nroComprobante);
-
-            if (result.Success)
+            try
             {
-                _logger.LogInformation($"[dcWsfeClient] CAE obtenido exitosamente: {result.Cae}");
-            }
-            else
-            {
-                _logger.LogError($"[dcWsfeClient] Error al obtener CAE: {result.Mensaje}");
-            }
+                var soapRequest = _soapBuilder.BuildSolicitarCaeRequest(token, sign, factura, nroComprobante, tipoComprobante, concepto);
+                var response = await SendSoapRequestAsync(soapRequest, "http://ar.gov.afip.dif.FEV1/FECAESolicitar", cancellationToken);
+                var result = _soapParser.ParseFECAESolicitarResponse(response, nroComprobante);
 
-            return result;
+                if (result.Success)
+                {
+                    _logger.LogInformation($"[dcWsfeClient] CAE obtenido exitosamente: {result.Cae}");
+                }
+                else
+                {
+                    _logger.LogError($"[dcWsfeClient] Error al obtener CAE: {result.Mensaje}");
+                }
+
+                return result;
+            }
+            catch (dcTokenInvalidException)
+            {
+                _logger.LogWarning("[dcWsfeClient] Token inválido detectado, refrescando...");
+                try
+                {
+                    await _authService.InvalidateCacheAsync(rejectedToken, cancellationToken);
+                    var newToken = await _authService.GetTokenAsync(cancellationToken);
+                    var soapRequest = _soapBuilder.BuildSolicitarCaeRequest(newToken.token, newToken.sign, factura, nroComprobante, tipoComprobante, concepto);
+                    var response = await SendSoapRequestAsync(soapRequest, "http://ar.gov.afip.dif.FEV1/FECAESolicitar", cancellationToken);
+                    var result = _soapParser.ParseFECAESolicitarResponse(response, nroComprobante);
+                    _logger.LogInformation($"[dcWsfeClient] Reintento exitoso para solicitud de CAE");
+                    return result;
+                }
+                catch (Exception retryEx)
+                {
+                    _logger.LogError($"[dcWsfeClient] Error tras reintento por token inválido: {retryEx.Message}", retryEx);
+                    return CrearRespuestaValidacion("FECAESOLICITAR_ERROR", $"Error tras reintento por token inválido: {retryEx.Message}");
+                }
+            }
+        }
+        catch (dcTokenInvalidException ex)
+        {
+            _logger.LogError($"[dcWsfeClient] Token inválido en FECAESolicitar: {ex.Message}", ex);
+            return CrearRespuestaValidacion("FECAESOLICITAR_ERROR", $"Token inválido: {ex.Message}");
         }
         catch (Exception ex)
         {
@@ -299,6 +374,19 @@ public class dcWsfeClient : IdcWsfeClient, IDisposable
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogError($"[dcWsfeClient] Error HTTP {(int)response.StatusCode}: {responseText}");
+            try
+            {
+                var soap = new XmlDocument();
+                soap.LoadXml(responseText);
+                if (soap.SelectSingleNode("//*[local-name()='Fault']") != null)
+                {
+                    return responseText;
+                }
+            }
+            catch (XmlException)
+            {
+                // Una respuesta no SOAP conserva el error HTTP original.
+            }
             throw new dcWsfeHttpException(response.StatusCode, responseText);
         }
 
@@ -310,11 +398,13 @@ public class dcWsfeClient : IdcWsfeClient, IDisposable
 
     private async Task<List<dcCondicionIvaOption>> ObtenerCondicionesIVAReceptorInternoAsync(int docTipo, long docNro, int tipoComprobante, CancellationToken cancellationToken)
     {
+        var rejectedToken = string.Empty;
         try
         {
             _logger.LogInformation($"[dcWsfeClient] Buscando Condiciones IVA receptor (DocTipo: {docTipo}, DocNro: {docNro})...");
 
             var (token, sign) = await _authService.GetTokenAsync(cancellationToken);
+            rejectedToken = token;
             var soapRequest = _soapBuilder.BuildCondicionIvaRequest(token, sign, tipoComprobante, docTipo, docNro);
             var response = await SendSoapRequestAsync(soapRequest, "http://ar.gov.afip.dif.FEV1/FEParamGetCondicionIvaReceptor", cancellationToken);
             var clase = ObtenerClaseComprobante(tipoComprobante);
@@ -335,6 +425,33 @@ public class dcWsfeClient : IdcWsfeClient, IDisposable
             }
 
             return opciones;
+        }
+        catch (dcTokenInvalidException)
+        {
+            // Token inválido detectado, invalidar cache y reintentar una vez
+            _logger.LogWarning("[dcWsfeClient] Token inválido detectado, refrescando...");
+            try
+            {
+                await _authService.InvalidateCacheAsync(rejectedToken, cancellationToken);
+                var (token, sign) = await _authService.GetTokenAsync(cancellationToken);
+                var soapRequest = _soapBuilder.BuildCondicionIvaRequest(token, sign, tipoComprobante, docTipo, docNro);
+                var response = await SendSoapRequestAsync(soapRequest, "http://ar.gov.afip.dif.FEV1/FEParamGetCondicionIvaReceptor", cancellationToken);
+                var clase = ObtenerClaseComprobante(tipoComprobante);
+                var opciones = _soapParser.ParseCondicionIvaResponse(response);
+
+                if (!string.IsNullOrWhiteSpace(clase))
+                {
+                    opciones = opciones.Where(o => o.AplicaAClase(clase)).ToList();
+                }
+
+                _logger.LogInformation($"[dcWsfeClient] Reintento exitoso para Condiciones IVA");
+                return opciones;
+            }
+            catch (Exception retryEx)
+            {
+                _logger.LogError($"[dcWsfeClient] Error tras reintento por token inválido: {retryEx.Message}", retryEx);
+                return new List<dcCondicionIvaOption>();
+            }
         }
         catch (Exception ex)
         {
