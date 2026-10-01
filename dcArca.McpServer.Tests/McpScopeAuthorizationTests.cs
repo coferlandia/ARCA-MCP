@@ -13,7 +13,7 @@ using Xunit;
 namespace dcArca.McpServer.Tests;
 
 /// <summary>
-/// Reemplaza JWT Bearer por un esquema de prueba que arma el ClaimsPrincipal a partir de un
+/// Reemplaza API key por un esquema de prueba que arma el ClaimsPrincipal a partir de un
 /// header, para poder probar la policy "ArcaFacturar" sin tener que firmar un JWT real.
 /// </summary>
 public class ScopeTestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
@@ -64,10 +64,7 @@ public class McpScopeAuthorizationTests : IClassFixture<WebApplicationFactory<Pr
                 services.AddAuthentication()
                     .AddScheme<AuthenticationSchemeOptions, ScopeTestAuthHandler>(ScopeTestAuthHandler.SchemeName, null);
 
-                // Program.cs ya fijó DefaultAuthenticateScheme/DefaultChallengeScheme explícitos
-                // (JwtBearer/Mcp) en su propio Configure<AuthenticationOptions>; PostConfigure
-                // corre después de todos los Configure, así que gana y reemplaza esos valores
-                // por el esquema de prueba para este test.
+                // PostConfigure reemplaza el esquema ApiKey por el esquema de prueba.
                 services.PostConfigure<AuthenticationOptions>(options =>
                 {
                     options.DefaultScheme = ScopeTestAuthHandler.SchemeName;
