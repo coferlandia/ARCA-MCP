@@ -28,7 +28,17 @@ public sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAu
         if (parts.Length != 2 || !parts[0].Equals("Bearer", StringComparison.OrdinalIgnoreCase))
             return AuthenticateResult.Fail("Credenciales inválidas.");
 
-        var record = await _store.ValidateAsync(parts[1].Trim(), Context.RequestAborted);
+        ApiKeyRecord? record;
+        try
+        {
+            record = await _store.ValidateAsync(parts[1].Trim(), Context.RequestAborted);
+        }
+        catch (InvalidDataException exception)
+        {
+            Logger.LogError(exception, "El store de API keys está corrupto.");
+            return AuthenticateResult.Fail("Credenciales inválidas.");
+        }
+
         if (record is null) return AuthenticateResult.Fail("Credenciales inválidas.");
 
         var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, record.Id), new(ClaimTypes.Name, record.Name) };
