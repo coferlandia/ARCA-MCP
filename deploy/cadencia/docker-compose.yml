@@ -1,0 +1,35 @@
+services:
+  mcpserver:
+    build:
+      context: ../..
+      dockerfile: dcArca.McpServer/Dockerfile
+    image: dcarca-mcpserver:latest
+    container_name: dcarca-mcpserver
+    restart: unless-stopped
+    networks:
+      - red-consultora
+      - red-cadencia
+    expose:
+      - "8080"
+    volumes:
+      - ${APPSETTINGS_PATH}:/app/appsettings.json:ro
+      - ${CERTIFICATE_PATH}:/certs/certificado.pfx:ro
+      - /home/ubuntu/apps/dcarca-mcpserver-data:/data
+    environment:
+      ApiKeys__Directory: /data
+      Pdf__BaseUrl: http://creadorpdf:8080
+      Pdf__ApiKey: ${PDF_API_KEY}
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=red-consultora
+      - traefik.http.routers.dcarca-mcpserver.rule=Host(`${DOMAIN}`)
+      - traefik.http.routers.dcarca-mcpserver.entrypoints=websecure
+      - traefik.http.routers.dcarca-mcpserver.tls=true
+      - traefik.http.routers.dcarca-mcpserver.tls.certresolver=${CERT_RESOLVER:-letsencrypt}
+      - traefik.http.services.dcarca-mcpserver.loadbalancer.server.port=8080
+
+networks:
+  red-consultora:
+    external: true
+  red-cadencia:
+    external: true
