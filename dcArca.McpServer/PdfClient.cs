@@ -8,16 +8,26 @@ public sealed record PdfTemplateReference(string Id, string Version);
 
 public interface IPdfClient
 {
+    void ValidateConfiguration();
     Task<byte[]> RenderAsync(PdfTemplateReference template, JsonElement data, CancellationToken cancellationToken = default);
 }
 
 public sealed class PdfClient(HttpClient httpClient, IConfiguration configuration) : IPdfClient
 {
-    public async Task<byte[]> RenderAsync(PdfTemplateReference template, JsonElement data, CancellationToken cancellationToken = default)
+    public void ValidateConfiguration()
     {
+        if (httpClient.BaseAddress is null)
+            throw new InvalidOperationException("Falta configurar Pdf:BaseUrl.");
+
         var apiKey = configuration["Pdf:ApiKey"];
         if (string.IsNullOrWhiteSpace(apiKey))
             throw new InvalidOperationException("Falta configurar Pdf:ApiKey.");
+    }
+
+    public async Task<byte[]> RenderAsync(PdfTemplateReference template, JsonElement data, CancellationToken cancellationToken = default)
+    {
+        ValidateConfiguration();
+        var apiKey = configuration["Pdf:ApiKey"]!;
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/documents")
         {

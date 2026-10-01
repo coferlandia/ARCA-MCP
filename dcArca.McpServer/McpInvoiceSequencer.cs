@@ -4,7 +4,7 @@ using dcArca.Core.Services;
 
 namespace dcArca.McpServer;
 
-public sealed class McpInvoiceSequencer
+public sealed class McpInvoiceSequencer : IInvoiceIssuer
 {
     private readonly IdcWsfeClient _wsfe;
     private readonly dcArcaConfig _config;

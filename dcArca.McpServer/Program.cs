@@ -28,6 +28,7 @@ builder.Services.AddSingleton<dcArcaAuthService>(sp => new dcArcaAuthService(
 builder.Services.AddSingleton<IdcWsfeClient, dcWsfeClient>();
 builder.Services.AddSingleton<IdcPadronClient, dcPadronClient>();
 builder.Services.AddSingleton<McpInvoiceSequencer>();
+builder.Services.AddSingleton<IInvoiceIssuer>(sp => sp.GetRequiredService<McpInvoiceSequencer>());
 builder.Services.AddSingleton<InvoicePdfService>();
 builder.Services.AddSingleton<IApiKeyStore>(_ => new FileSystemApiKeyStore(apiKeysDirectory));
 builder.Services.AddHttpClient<IPdfClient, PdfClient>(client =>

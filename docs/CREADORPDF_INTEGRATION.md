@@ -1,14 +1,55 @@
 # Integración con creadorpdf
 
-La tool `emitir_comprobante_con_pdf` ejecuta un único flujo de negocio:
+La tool `emitir_comprobante_con_pdf` ejecuta un flujo compuesto con dos etapas independientes:
 
-1. asigna la numeración y solicita el CAE;
-2. si ARCA rechaza la emisión, devuelve el resultado fiscal sin PDF;
-3. si ARCA autoriza, agrega el resultado bajo el campo reservado `fiscal`;
-4. envía esos datos y una referencia de template publicado a creadorpdf;
-5. devuelve el resultado fiscal y `pdfBase64` a SecretarIA.
+1. valida todas las precondiciones locales de render antes de tocar ARCA;
+2. asigna la numeración y solicita el CAE;
+3. si ARCA rechaza la emisión, devuelve el resultado fiscal con `pdf.status = NotAttempted`;
+4. si ARCA autoriza, agrega el resultado bajo el campo reservado `fiscal` y solicita el render;
+5. si creadorpdf responde correctamente, devuelve `pdf.status = Rendered` y el PDF en Base64;
+6. si creadorpdf falla por transporte, timeout o contenido inválido, conserva el resultado fiscal autorizado y devuelve `pdf.status = Failed`.
 
-`templateData` debe ser un objeto JSON y no puede definir `fiscal`. Esto impide que el caller reemplace CAE, número o importes autorizados.
+Una factura con `fiscal.success = true` y `pdf.status = Failed` **ya existe fiscalmente**. El caller debe persistir número/CAE y reintentar únicamente la generación documental; nunca debe solicitar otro CAE por el fallo de PDF.
+
+`templateData` debe ser un objeto JSON y no puede definir `fiscal`. Esa condición, junto con `templateId`, `templateVersion` y la configuración local del renderer, se valida antes de emitir para evitar side effects fiscales seguidos de errores determinísticos locales.
+
+Contrato conceptual de resultado:
+
+```json
+{
+  "fiscal": {
+    "success": true,
+    "emissionOutcome": "Authorized",
+    "numeroComprobante": 123,
+    "cae": "..."
+  },
+  "pdf": {
+    "status": "Rendered",
+    "base64": "JVBERi0x...",
+    "errorCode": null,
+    "message": null
+  }
+}
+```
+
+Ante fallo exclusivo del renderer:
+
+```json
+{
+  "fiscal": {
+    "success": true,
+    "emissionOutcome": "Authorized",
+    "numeroComprobante": 123,
+    "cae": "..."
+  },
+  "pdf": {
+    "status": "Failed",
+    "base64": null,
+    "errorCode": "PDF_UNAVAILABLE",
+    "message": "No fue posible comunicarse con el renderer de PDF."
+  }
+}
+```
 
 Configuración:
 
