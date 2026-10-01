@@ -1,5 +1,3 @@
-using System.Net;
-using System.Text;
 using System.Text.Json;
 using dcArca.Core.Models;
 using Xunit;
@@ -9,63 +7,31 @@ namespace dcArca.McpServer.Tests;
 public class InvoicePdfServiceTests
 {
     [Fact]
-    public async Task FiscalReservado_SeRechazaAntesDeEmitir()
+    public async Task PrecondicionInvalida_SeDetectaAntesDeEmitir()
     {
         var issuer = new FakeIssuer(Authorized());
-        var pdf = new FakePdfClient();
-        var service = new InvoicePdfService(issuer, pdf);
-        var data = JsonSerializer.SerializeToElement(new { fiscal = new { cae = "fake" } });
+        var renderer = new FakeRenderer { ValidationError = new ArgumentException("invalid template") };
+        var service = new InvoicePdfService(issuer, renderer, Config());
 
         await Assert.ThrowsAsync<ArgumentException>(() => service.EmitAsync(
-            Invoice(), new PdfTemplateReference("tpl", "1.0.0"), data));
+            Invoice(), new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { })));
 
         Assert.Equal(0, issuer.CallCount);
-        Assert.Equal(0, pdf.RenderCallCount);
-    }
-
-    [Fact]
-    public async Task TemplateDataNoObjeto_SeRechazaAntesDeEmitir()
-    {
-        var issuer = new FakeIssuer(Authorized());
-        var pdf = new FakePdfClient();
-        var service = new InvoicePdfService(issuer, pdf);
-        var data = JsonSerializer.SerializeToElement(new[] { "invalid" });
-
-        await Assert.ThrowsAsync<ArgumentException>(() => service.EmitAsync(
-            Invoice(), new PdfTemplateReference("tpl", "1.0.0"), data));
-
-        Assert.Equal(0, issuer.CallCount);
-        Assert.Equal(0, pdf.RenderCallCount);
-    }
-
-    [Theory]
-    [InlineData("", "1.0.0")]
-    [InlineData("tpl", "")]
-    public async Task TemplateInvalido_SeRechazaAntesDeEmitir(string templateId, string version)
-    {
-        var issuer = new FakeIssuer(Authorized());
-        var pdf = new FakePdfClient();
-        var service = new InvoicePdfService(issuer, pdf);
-
-        await Assert.ThrowsAsync<ArgumentException>(() => service.EmitAsync(
-            Invoice(), new PdfTemplateReference(templateId, version), JsonSerializer.SerializeToElement(new { cliente = "x" })));
-
-        Assert.Equal(0, issuer.CallCount);
-        Assert.Equal(0, pdf.RenderCallCount);
+        Assert.Equal(0, renderer.RenderCallCount);
     }
 
     [Fact]
     public async Task ConfiguracionPdfInvalida_SeDetectaAntesDeEmitir()
     {
         var issuer = new FakeIssuer(Authorized());
-        var pdf = new FakePdfClient { ConfigurationError = new InvalidOperationException("missing config") };
-        var service = new InvoicePdfService(issuer, pdf);
+        var renderer = new FakeRenderer { ConfigurationError = new InvalidOperationException("missing config") };
+        var service = new InvoicePdfService(issuer, renderer, Config());
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.EmitAsync(
             Invoice(), new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { })));
 
         Assert.Equal(0, issuer.CallCount);
-        Assert.Equal(0, pdf.RenderCallCount);
+        Assert.Equal(0, renderer.RenderCallCount);
     }
 
     [Fact]
@@ -78,42 +44,49 @@ public class InvoicePdfServiceTests
             Codigo = "REJECTED"
         };
         var issuer = new FakeIssuer(fiscal);
-        var pdf = new FakePdfClient();
-        var service = new InvoicePdfService(issuer, pdf);
+        var renderer = new FakeRenderer();
+        var service = new InvoicePdfService(issuer, renderer, Config());
 
         var result = await service.EmitAsync(
             Invoice(), new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { }));
 
         Assert.Same(fiscal, result.Fiscal);
         Assert.Equal(PdfRenderStatus.NotAttempted, result.Pdf.Status);
-        Assert.Null(result.Pdf.Base64);
-        Assert.Equal(0, pdf.RenderCallCount);
+        Assert.Equal(0, renderer.RenderCallCount);
     }
 
     [Fact]
-    public async Task PdfCorrecto_DevuelveFiscalYPdf()
+    public async Task Autorizado_ConstruyeSnapshotYRendereiza()
     {
         var fiscal = Authorized();
         var issuer = new FakeIssuer(fiscal);
-        var pdf = new FakePdfClient { Bytes = Encoding.ASCII.GetBytes("%PDF-test") };
-        var service = new InvoicePdfService(issuer, pdf);
+        var renderer = new FakeRenderer
+        {
+            Result = new PdfRenderResult(PdfRenderStatus.Rendered, "JVBERg==", null, null)
+        };
+        var service = new InvoicePdfService(issuer, renderer, Config());
 
         var result = await service.EmitAsync(
             Invoice(), new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { cliente = "Ñandú" }));
 
-        Assert.Same(fiscal, result.Fiscal);
+        Assert.True(result.Fiscal.Success);
         Assert.Equal(PdfRenderStatus.Rendered, result.Pdf.Status);
-        Assert.NotNull(result.Pdf.Base64);
-        Assert.Equal(1, pdf.RenderCallCount);
+        Assert.Equal(1, renderer.RenderCallCount);
+        Assert.NotNull(renderer.LastFiscal);
+        Assert.Equal(123, renderer.LastFiscal!.NumeroComprobante);
+        Assert.Equal("CAE123", renderer.LastFiscal.Cae);
+        Assert.Equal("20123456786", renderer.LastFiscal.EmisorCuit);
     }
 
     [Fact]
-    public async Task PdfHttpError_PreservaExitoFiscal()
+    public async Task FalloPdf_PreservaExitoFiscal()
     {
         var fiscal = Authorized();
-        var issuer = new FakeIssuer(fiscal);
-        var pdf = new FakePdfClient { RenderError = new HttpRequestException("secret body", null, HttpStatusCode.BadGateway) };
-        var service = new InvoicePdfService(issuer, pdf);
+        var renderer = new FakeRenderer
+        {
+            Result = new PdfRenderResult(PdfRenderStatus.Failed, null, "PDF_UNAVAILABLE", "renderer unavailable")
+        };
+        var service = new InvoicePdfService(new FakeIssuer(fiscal), renderer, Config());
 
         var result = await service.EmitAsync(
             Invoice(), new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { }));
@@ -123,32 +96,21 @@ public class InvoicePdfServiceTests
         Assert.Equal(123, result.Fiscal.NumeroComprobante);
         Assert.Equal(PdfRenderStatus.Failed, result.Pdf.Status);
         Assert.Equal("PDF_UNAVAILABLE", result.Pdf.ErrorCode);
-        Assert.Null(result.Pdf.Base64);
     }
 
-    [Fact]
-    public async Task PdfContenidoInvalido_PreservaExitoFiscal()
-    {
-        var issuer = new FakeIssuer(Authorized());
-        var pdf = new FakePdfClient { RenderError = new InvalidDataException("bad mime") };
-        var service = new InvoicePdfService(issuer, pdf);
-
-        var result = await service.EmitAsync(
-            Invoice(), new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { }));
-
-        Assert.True(result.Fiscal.Success);
-        Assert.Equal(PdfRenderStatus.Failed, result.Pdf.Status);
-        Assert.Equal("PDF_INVALID_RESPONSE", result.Pdf.ErrorCode);
-    }
+    private static dcArcaConfig Config() => new() { Cuit = "20123456786", PuntoVenta = 7 };
 
     private static dcFacturaRequest Invoice() => new()
     {
         TipoComprobante = dcTipoComprobante.FacturaB,
         Concepto = dcConcepto.Productos,
-        CuitReceptor = 20123456786,
+        CuitReceptor = 20333444559,
+        TipoDocReceptor = 80,
+        CondicionIvaReceptor = dcCondicionIvaReceptor.ResponsableInscripto,
         ImporteNeto = 100m,
         ImporteIva = 21m,
         ImporteTotal = 121m,
+        AlicuotaIva = dcAlicuotaIva.Veintiuno,
         FechaComprobante = "20261001"
     };
 
@@ -158,7 +120,8 @@ public class InvoicePdfServiceTests
         EmissionOutcome = dcEmissionOutcome.Authorized,
         NumeroComprobante = 123,
         Cae = "CAE123",
-        CaeVencimiento = "20261011"
+        CaeVencimiento = "20261011",
+        Resultado = "A"
     };
 
     private sealed class FakeIssuer(dcFacturaResponse result) : IInvoiceIssuer
@@ -172,23 +135,33 @@ public class InvoicePdfServiceTests
         }
     }
 
-    private sealed class FakePdfClient : IPdfClient
+    private sealed class FakeRenderer : IPdfDocumentRenderer
     {
-        public int RenderCallCount { get; private set; }
-        public byte[] Bytes { get; init; } = Encoding.ASCII.GetBytes("%PDF-test");
+        public Exception? ValidationError { get; init; }
         public Exception? ConfigurationError { get; init; }
-        public Exception? RenderError { get; init; }
+        public PdfRenderResult Result { get; init; } = new(PdfRenderStatus.Rendered, "JVBERg==", null, null);
+        public int RenderCallCount { get; private set; }
+        public FiscalDocumentSnapshot? LastFiscal { get; private set; }
+
+        public void ValidateRequest(PdfTemplateReference template, JsonElement templateData)
+        {
+            if (ValidationError is not null) throw ValidationError;
+        }
 
         public void ValidateConfiguration()
         {
             if (ConfigurationError is not null) throw ConfigurationError;
         }
 
-        public Task<byte[]> RenderAsync(PdfTemplateReference template, JsonElement data, CancellationToken cancellationToken = default)
+        public Task<PdfRenderResult> RenderAsync(
+            FiscalDocumentSnapshot fiscal,
+            PdfTemplateReference template,
+            JsonElement templateData,
+            CancellationToken cancellationToken = default)
         {
             RenderCallCount++;
-            if (RenderError is not null) throw RenderError;
-            return Task.FromResult(Bytes);
+            LastFiscal = fiscal;
+            return Task.FromResult(Result);
         }
     }
 }
