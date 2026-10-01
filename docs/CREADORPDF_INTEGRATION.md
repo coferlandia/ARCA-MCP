@@ -5,15 +5,50 @@ La tool `emitir_comprobante_con_pdf` ejecuta un flujo compuesto con dos etapas i
 1. valida todas las precondiciones locales de render antes de tocar ARCA;
 2. asigna la numeración y solicita el CAE;
 3. si ARCA rechaza la emisión, devuelve el resultado fiscal con `pdf.status = NotAttempted`;
-4. si ARCA autoriza, agrega el resultado bajo el campo reservado `fiscal` y solicita el render;
-5. si creadorpdf responde correctamente, devuelve `pdf.status = Rendered` y el PDF en Base64;
-6. si creadorpdf falla por transporte, timeout o contenido inválido, conserva el resultado fiscal autorizado y devuelve `pdf.status = Failed`.
+4. si ARCA autoriza, construye un `FiscalDocumentSnapshot` canónico y lo agrega bajo el campo reservado `fiscal`;
+5. envía el snapshot más los datos visuales a creadorpdf;
+6. si creadorpdf responde correctamente, devuelve `pdf.status = Rendered` y el PDF en Base64;
+7. si creadorpdf falla por transporte, timeout o contenido inválido, conserva el resultado fiscal autorizado y devuelve `pdf.status = Failed`.
 
 Una factura con `fiscal.success = true` y `pdf.status = Failed` **ya existe fiscalmente**. El caller debe persistir número/CAE y reintentar únicamente la generación documental; nunca debe solicitar otro CAE por el fallo de PDF.
 
-`templateData` debe ser un objeto JSON y no puede definir `fiscal`. Esa condición, junto con `templateId`, `templateVersion` y la configuración local del renderer, se valida antes de emitir para evitar side effects fiscales seguidos de errores determinísticos locales.
+`templateData` debe ser un objeto JSON y no puede definir `fiscal`. Esa condición, junto con `templateId`, `templateVersion` y la configuración local del renderer, se valida antes de emitir.
 
-Contrato conceptual de resultado:
+## Contrato fiscal canónico
+
+creadorpdf no recibe directamente `dcFacturaResponse`. ARCA-MCP normaliza la información autorizada a `FiscalDocumentSnapshot`, independientemente de si los datos provinieron de una emisión nueva o de una consulta `FECompConsultar`.
+
+El bloque `fiscal` usa nombres JSON estables e incluye, entre otros:
+
+```json
+{
+  "emisorCuit": "20123456786",
+  "puntoVenta": 7,
+  "tipoComprobante": 6,
+  "numeroComprobante": 123,
+  "concepto": 1,
+  "documentoReceptorTipo": 80,
+  "documentoReceptorNumero": 20333444559,
+  "condicionIvaReceptor": 1,
+  "fechaComprobante": "20261001",
+  "importeNeto": 100.00,
+  "importeIva": 21.00,
+  "importeTotal": 121.00,
+  "iva": [
+    { "alicuota": 5, "baseImponible": 100.00, "importe": 21.00 }
+  ],
+  "tributos": [],
+  "monedaId": "PES",
+  "monedaCotizacion": 1,
+  "cae": "...",
+  "caeVencimiento": "20261011",
+  "resultado": "A"
+}
+```
+
+Los datos comerciales o de presentación —por ejemplo razón social visual, domicilio mostrado, logo, items/descripciones o branding— siguen perteneciendo a `templateData`; no se inventan ni se mezclan con el snapshot fiscal.
+
+## Resultado compuesto
 
 ```json
 {
