@@ -44,10 +44,11 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
         }
         catch (EmissionIdempotencyConflictException)
         {
-            return Error(
-                "IDEMPOTENCY_KEY_REUSED",
-                "La idempotencyKey ya fue utilizada con una solicitud fiscal diferente.");
+            return IdempotencyConflict();
         }
+
+        if (!MatchesFiscalIdentity(record, tipo))
+            return IdempotencyConflict();
 
         var replay = ReplayTerminal(record);
         if (replay is not null) return replay;
@@ -61,11 +62,10 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
             record = await _store.GetAsync(keyHash, cancellationToken)
                 ?? throw new InvalidDataException("El registro de idempotencia desapareció durante la emisión.");
 
-            if (!string.Equals(record.RequestHash, requestHash, StringComparison.Ordinal))
+            if (!string.Equals(record.RequestHash, requestHash, StringComparison.Ordinal)
+                || !MatchesFiscalIdentity(record, tipo))
             {
-                return Error(
-                    "IDEMPOTENCY_KEY_REUSED",
-                    "La idempotencyKey ya fue utilizada con una solicitud fiscal diferente.");
+                return IdempotencyConflict();
             }
 
             replay = ReplayTerminal(record);
@@ -128,9 +128,9 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
 
             var state = result.Success
                 ? EmissionIdempotencyState.Authorized
-                : result.EmissionOutcome == dcEmissionOutcome.Uncertain
-                    ? EmissionIdempotencyState.Uncertain
-                    : EmissionIdempotencyState.FiscalRejected;
+                : result.EmissionOutcome == dcEmissionOutcome.FiscalRejected
+                    ? EmissionIdempotencyState.FiscalRejected
+                    : EmissionIdempotencyState.Uncertain;
 
             await SaveOutcomeAsync(record, state, result, cancellationToken);
             return result;
@@ -188,10 +188,18 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
         await _store.SaveAsync(updated, cancellationToken);
     }
 
+    private bool MatchesFiscalIdentity(EmissionIdempotencyRecord record, dcTipoComprobante tipo)
+        => record.TipoComprobante == (int)tipo && record.PuntoVenta == _config.PuntoVenta;
+
     private static dcFacturaResponse? ReplayTerminal(EmissionIdempotencyRecord record)
         => record.State is EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected
             ? record.FiscalResult?.ToResponse()
             : null;
+
+    private static dcFacturaResponse IdempotencyConflict()
+        => Error(
+            "IDEMPOTENCY_KEY_REUSED",
+            "La idempotencyKey ya fue utilizada con una solicitud o identidad fiscal diferente.");
 
     private static dcFacturaResponse Error(
         string code,
