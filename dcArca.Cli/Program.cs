@@ -16,13 +16,18 @@ if (args.Length == 0)
     return 1;
 }
 
-var config = LoadConfig();
-IdcWsfeClient wsfe = new dcWsfeClient(config);
-IdcPadronClient padron = new dcPadronClient(config);
 var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
 
 try
 {
+    if (args[0] is "create-key" or "list-keys" or "revoke-key")
+    {
+        return await ManageApiKeysAsync(args, jsonOptions);
+    }
+
+    var config = LoadConfig();
+    IdcWsfeClient wsfe = new dcWsfeClient(config);
+    IdcPadronClient padron = new dcPadronClient(config);
     object result = args[0] switch
     {
         "facturar" => await FacturarAsync(args, wsfe),
@@ -70,6 +75,62 @@ static async Task<dcFacturaResponse> FacturarAsync(string[] args, IdcWsfeClient 
     return await wsfe.FECAESolicitarAsync(factura);
 }
 
+static async Task<int> ManageApiKeysAsync(string[] args, JsonSerializerOptions jsonOptions)
+{
+    var configuration = new ConfigurationBuilder().AddEnvironmentVariables().Build();
+    var store = new FileSystemApiKeyStore(configuration["ApiKeys:Directory"]);
+
+    switch (args[0])
+    {
+        case "create-key":
+        {
+            var name = Option(args, "--name")
+                ?? throw new ArgumentException("Falta --name <nombre>.");
+            var scopes = (Option(args, "--scope") ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var (record, rawKey) = await store.CreateAsync(name, scopes);
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                record.Id,
+                record.Name,
+                record.Scopes,
+                record.Active,
+                record.CreatedAt,
+                Secret = rawKey,
+            }, jsonOptions));
+            return 0;
+        }
+        case "list-keys":
+        {
+            var records = await store.ListAsync();
+            Console.WriteLine(JsonSerializer.Serialize(records.Select(record => new
+            {
+                record.Id,
+                record.Name,
+                record.Scopes,
+                record.Active,
+                record.CreatedAt,
+                record.RevokedAt,
+                record.LastUsedAt,
+            }), jsonOptions));
+            return 0;
+        }
+        case "revoke-key":
+            if (args.Length < 2) throw new ArgumentException("Falta el id de la API key.");
+            if (!await store.RevokeAsync(args[1])) throw new ArgumentException("La API key no existe o ya fue revocada.");
+            Console.WriteLine(JsonSerializer.Serialize(new { Revoked = args[1] }, jsonOptions));
+            return 0;
+        default:
+            throw new ArgumentException($"Comando desconocido: {args[0]}");
+    }
+}
+
+static string? Option(string[] args, string name)
+{
+    var index = Array.IndexOf(args, name);
+    return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+}
+
 static void PrintUsage()
 {
     Console.Error.WriteLine(
@@ -78,5 +139,8 @@ static void PrintUsage()
         "  ultimo-autorizado <tipoComprobante>\n" +
         "  consultar <numero> <tipoComprobante>\n" +
         "  padron <cuit>\n" +
-        "  condiciones-iva <docTipo> <docNro> <tipoComprobante>");
+        "  condiciones-iva <docTipo> <docNro> <tipoComprobante>\n" +
+        "  create-key --name <nombre> --scope <scope1,scope2>\n" +
+        "  list-keys\n" +
+        "  revoke-key <id>");
 }

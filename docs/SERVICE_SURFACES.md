@@ -10,7 +10,7 @@ Utilidad local de consola. Ejecuta una operación y termina. No abre sockets ni 
 
 ## dcArca.McpServer
 
-Única superficie remota soportada por el proyecto público. Requiere autenticación JWT/OIDC y autorización por scopes.
+Única superficie remota soportada por el proyecto público. Requiere una API key propia y autorización por scopes.
 
 ## Decisión sobre la antigua dcArca.Service
 

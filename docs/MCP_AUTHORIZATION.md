@@ -11,4 +11,13 @@ dcArca.McpServer trata los scopes de lectura y escritura como capacidades indepe
 scope=arca:consultar arca:facturar
 ```
 
-El servidor acepta la convención OIDC habitual donde el claim JWT `scope` contiene valores separados por espacios. El parsing se centraliza en el servidor y no depende de un IdP específico.
+Cada API key guarda sus scopes en el store propio. El secreto se muestra una sola vez, solo se persiste su hash SHA-256 y una revocación se aplica al request siguiente.
+
+Las claves se administran con `dcArca.Cli`:
+
+```bash
+ApiKeys__Directory=/data dotnet run --project dcArca.Cli -- \
+  create-key --name secretaria --scope arca:consultar,arca:facturar
+ApiKeys__Directory=/data dotnet run --project dcArca.Cli -- list-keys
+ApiKeys__Directory=/data dotnet run --project dcArca.Cli -- revoke-key key_ID
+```

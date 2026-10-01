@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json;
 using dcArca.Core.Models;
 using dcArca.Core.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -16,13 +17,25 @@ public sealed class ArcaTools
     private readonly IdcWsfeClient _wsfe;
     private readonly IdcPadronClient _padron;
     private readonly McpInvoiceSequencer _sequencer;
+    private readonly InvoicePdfService _invoicePdf;
 
-    public ArcaTools(IdcWsfeClient wsfe, IdcPadronClient padron, McpInvoiceSequencer sequencer)
+    public ArcaTools(IdcWsfeClient wsfe, IdcPadronClient padron, McpInvoiceSequencer sequencer, InvoicePdfService invoicePdf)
     {
         _wsfe = wsfe;
         _padron = padron;
         _sequencer = sequencer;
+        _invoicePdf = invoicePdf;
     }
+
+    [McpServerTool, Description("Emite un comprobante, agrega el resultado fiscal al JSON de una plantilla publicada y devuelve el PDF en Base64.")]
+    [Authorize(Policy = "ArcaFacturar")]
+    public Task<InvoiceWithPdfResult> EmitirComprobanteConPdf(
+        [Description("Modelo fiscal completo. La numeración es asignada por el servidor.")] dcFacturaRequest factura,
+        [Description("Id de la plantilla publicada en creadorpdf.")] string templateId,
+        [Description("Versión inmutable de la plantilla.")] string templateVersion,
+        [Description("Datos visuales de la plantilla. No puede contener el campo reservado fiscal.")] JsonElement templateData,
+        CancellationToken cancellationToken)
+        => _invoicePdf.EmitAsync(factura, new PdfTemplateReference(templateId, templateVersion), templateData, cancellationToken);
 
     [McpServerTool, Description("Consulta el último número de comprobante autorizado por AFIP para un tipo de comprobante dado, en el punto de venta configurado.")]
     [Authorize(Policy = "ArcaConsultar")]

@@ -3,20 +3,12 @@ using dcArca.Core.Models;
 using dcArca.Core.Services;
 using dcArca.Core.Services.Logging;
 using dcArca.McpServer;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Logging;
-using Microsoft.IdentityModel.Tokens;
 using ModelContextProtocol.AspNetCore;
-using ModelContextProtocol.AspNetCore.Authentication;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var jwtAuthority = builder.Configuration["Jwt:Authority"]
-    ?? throw new InvalidOperationException("Falta configurar Jwt:Authority en appsettings.json");
-var jwtAudience = builder.Configuration["Jwt:Audience"]
-    ?? throw new InvalidOperationException("Falta configurar Jwt:Audience en appsettings.json");
-
-McpConfigurationValidator.ValidateJwt(jwtAuthority, jwtAudience, builder.Environment.IsDevelopment());
+var apiKeysDirectory = builder.Configuration["ApiKeys:Directory"];
 
 // dcArcaConfig se carga con el mismo helper que usa dcArca.TestApp, valida CUIT/certificado al arrancar.
 // appsettings.Development.json no trae su propia seccion dcArcaConfig (solo overrides de Logging), asi que
@@ -36,36 +28,18 @@ builder.Services.AddSingleton<dcArcaAuthService>(sp => new dcArcaAuthService(
 builder.Services.AddSingleton<IdcWsfeClient, dcWsfeClient>();
 builder.Services.AddSingleton<IdcPadronClient, dcPadronClient>();
 builder.Services.AddSingleton<McpInvoiceSequencer>();
-
-builder.Services.AddAuthentication(options =>
+builder.Services.AddSingleton<InvoicePdfService>();
+builder.Services.AddSingleton<IApiKeyStore>(_ => new FileSystemApiKeyStore(apiKeysDirectory));
+builder.Services.AddHttpClient<IPdfClient, PdfClient>(client =>
 {
-    options.DefaultChallengeScheme = McpAuthenticationDefaults.AuthenticationScheme;
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-})
-.AddJwtBearer(options =>
-{
-    options.Authority = jwtAuthority;
-    // Solo en Development se permite un Authority http:// (ej. un IdP local en Docker sin TLS).
-    // En cualquier otro ambiente (Testing, Production) sigue exigiendo HTTPS por default.
-    options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuer = true,
-        ValidateAudience = true,
-        ValidateLifetime = true,
-        ValidateIssuerSigningKey = true,
-        ValidAudience = jwtAudience,
-        ValidIssuer = jwtAuthority,
-    };
-})
-.AddMcp(options =>
-{
-    options.ResourceMetadata = new()
-    {
-        AuthorizationServers = { jwtAuthority },
-        ScopesSupported = ["arca:facturar", "arca:consultar"],
-    };
+    var baseUrl = builder.Configuration["Pdf:BaseUrl"];
+    if (!string.IsNullOrWhiteSpace(baseUrl)) client.BaseAddress = new Uri(baseUrl);
+    client.Timeout = TimeSpan.FromSeconds(15);
 });
+
+builder.Services.AddAuthentication(ApiKeyAuthenticationHandler.SchemeName)
+    .AddScheme<ApiKeyAuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
+        ApiKeyAuthenticationHandler.SchemeName, _ => { });
 
 builder.Services.AddAuthorization(options =>
 {

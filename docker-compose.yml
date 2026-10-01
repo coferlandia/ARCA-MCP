@@ -10,9 +10,11 @@ services:
     volumes:
       - ${APPSETTINGS_PATH:-./dcArca.McpServer/appsettings.json}:/app/appsettings.json:ro
       - ${CERTIFICATE_PATH}:/certs/certificado.pfx:ro
+      - dcarca_data:/data
     environment:
-      Jwt__Authority: ${JWT_AUTHORITY}
-      Jwt__Audience: ${JWT_AUDIENCE}
+      ApiKeys__Directory: /data
+      Pdf__BaseUrl: ${PDF_BASE_URL:-http://creadorpdf:8080}
+      Pdf__ApiKey: ${PDF_API_KEY}
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8080/health/live"]
       interval: 30s
@@ -23,3 +25,6 @@ services:
 # Este compose es deliberadamente genérico: no configura proxy reverso, TLS,
 # redes privadas ni infraestructura de producción. El host debe aportar
 # certificados, secretos y controles de red mediante variables/volúmenes.
+
+volumes:
+  dcarca_data:
