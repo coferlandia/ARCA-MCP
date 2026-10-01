@@ -31,6 +31,7 @@ builder.Services.AddSingleton<McpInvoiceSequencer>();
 builder.Services.AddSingleton<IInvoiceIssuer>(sp => sp.GetRequiredService<McpInvoiceSequencer>());
 builder.Services.AddSingleton<IPdfDocumentRenderer, PdfDocumentRenderer>();
 builder.Services.AddSingleton<InvoicePdfService>();
+builder.Services.AddSingleton<ExistingInvoicePdfService>();
 builder.Services.AddSingleton<IApiKeyStore>(_ => new FileSystemApiKeyStore(apiKeysDirectory));
 builder.Services.AddHttpClient<IPdfClient, PdfClient>(client =>
 {
