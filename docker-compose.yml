@@ -13,6 +13,8 @@ services:
       - dcarca_data:/data
     environment:
       ApiKeys__Directory: /data
+      Pdf__BaseUrl: ${PDF_BASE_URL:-http://creadorpdf:8080}
+      Pdf__ApiKey: ${PDF_API_KEY}
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8080/health/live"]
       interval: 30s

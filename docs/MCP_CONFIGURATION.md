@@ -13,8 +13,7 @@ Las respuestas sólo contienen `status`; no incluyen CUIT, certificado, rutas, t
 
 Se requiere:
 
-- `Jwt:Authority` / `Jwt__Authority`;
-- `Jwt:Audience` / `Jwt__Audience`;
+- `ApiKeys:Directory` / `ApiKeys__Directory`;
 - `dcArcaConfig:Cuit`;
 - `dcArcaConfig:CertificatePath`;
 - `dcArcaConfig:CertificatePassword` cuando el PFX lo requiera;
@@ -22,13 +21,8 @@ Se requiere:
 - `dcArcaConfig:WsfeUrl`;
 - `dcArcaConfig:PadronUrl`;
 - `dcArcaConfig:PuntoVenta`.
+- `Pdf:BaseUrl` / `Pdf__BaseUrl` y `Pdf:ApiKey` / `Pdf__ApiKey` cuando se use creadorpdf.
 
 El certificado y sus secretos deben provenir del host/secret manager y no del repositorio.
 
-## Development vs Production
-
-En `Development` se permite un Authorization Server HTTP para entornos locales, por ejemplo Keycloak en Docker.
-
-Fuera de `Development`, `Jwt:Authority` debe ser una URI HTTPS. El middleware OIDC mantiene `RequireHttpsMetadata=true`.
-
-Las URLs y credenciales del entorno local son ejemplos de desarrollo y no deben reutilizarse en producción.
+El directorio de API keys y el certificado necesitan almacenamiento persistente. `Pdf:ApiKey` debe provenir del secret manager; nunca debe escribirse en el repositorio ni exponerse a SecretarIA.

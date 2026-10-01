@@ -1,19 +1,11 @@
 # dcArca.McpServer
 
-`dcArca.McpServer` expone las operaciones de facturación electrónica de `dcArca.Core` como tools MCP sobre HTTP, protegidas con OAuth/OIDC y JWT Bearer.
+`dcArca.McpServer` expone las operaciones de facturación electrónica de `dcArca.Core` como tools MCP sobre HTTP, protegidas con API keys Bearer y scopes.
 
 ## Arquitectura
 
 ```text
-cliente MCP
-   |
-   | obtiene JWT
-   v
-Authorization Server externo
-   |
-   | Bearer token
-   v
-dcArca.McpServer
+SecretarIA -- API key --> dcArca.McpServer
    |
    v
 dcArca.Core
@@ -21,16 +13,16 @@ dcArca.Core
    +--> WSAA
    +--> WSFEv1
    +--> Padrón ARCA
+   +--> creadorpdf
 ```
 
-El MCP es un **resource server**. Valida JWT emitidos por un Authorization Server externo; **no emite tokens, client secrets ni credenciales propias**.
+El servidor administra credenciales propias con secreto visible una sola vez, hash persistido, scopes y revocación inmediata.
 
 ## Requisitos
 
 - .NET 10 SDK para compilar desde código;
 - certificado ARCA/PFX válido para el ambiente elegido;
 - servicios ARCA correspondientes autorizados para ese certificado;
-- un Authorization Server OIDC/JWT;
 - un punto de venta habilitado para WSFE.
 
 ## Compilar
@@ -65,9 +57,10 @@ Configuración principal:
     "PadronUrl": "https://awshomo.afip.gov.ar/sr-padron/webservices/personaServiceA5",
     "PuntoVenta": 1
   },
-  "Jwt": {
-    "Authority": "https://idp.example.com/",
-    "Audience": "dcarca-mcp"
+  "ApiKeys": { "Directory": "/data" },
+  "Pdf": {
+    "BaseUrl": "http://creadorpdf:8080",
+    "ApiKey": "DESDE_SECRET_MANAGER"
   }
 }
 ```
@@ -75,8 +68,9 @@ Configuración principal:
 Variables de entorno equivalentes usan `__` como separador:
 
 ```bash
-Jwt__Authority=https://idp.example.com/
-Jwt__Audience=dcarca-mcp
+ApiKeys__Directory=/data
+Pdf__BaseUrl=http://creadorpdf:8080
+Pdf__ApiKey=...
 dcArcaConfig__Cuit=...
 dcArcaConfig__CertificatePath=/certs/certificado.pfx
 dcArcaConfig__CertificatePassword=...
@@ -92,9 +86,7 @@ No guardar PFX, passwords, tokens, client secrets ni configuración privada en e
 
 Use certificado y endpoints del mismo ambiente. No mezcle un certificado de homologación con endpoints productivos.
 
-`Development` permite un `Jwt:Authority` HTTP para un IdP local. Fuera de Development, `Jwt:Authority` debe usar HTTPS y la metadata OIDC también se exige por HTTPS.
-
-## OAuth y scopes
+## API keys y scopes
 
 Scopes soportados:
 
@@ -107,38 +99,7 @@ Son independientes. `arca:facturar` **no implica** `arca:consultar`. Un cliente 
 arca:consultar arca:facturar
 ```
 
-El JWT debe tener issuer, audience, lifetime y firma válidos para `Jwt:Authority` / `Jwt:Audience`.
-
-El claim `scope` se interpreta según la convención OIDC habitual de valores separados por espacios.
-
-### Client credentials / M2M
-
-Para una integración servidor-a-servidor, el cliente obtiene un token del IdP mediante client credentials y luego lo usa como Bearer token contra el MCP.
-
-El `client_secret` pertenece al backend/secret manager. Nunca debe entregarse a un frontend, a un LLM o a un usuario final.
-
-## Keycloak local de desarrollo
-
-El repositorio incluye `deploy/local-keycloak/` para probar OAuth sin depender de infraestructura privada.
-
-```bash
-cd deploy/local-keycloak
-docker compose up -d
-```
-
-Ejemplo de token local:
-
-```bash
-curl -s -X POST \
-  http://localhost:8081/realms/dcarca/protocol/openid-connect/token \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  -d 'grant_type=client_credentials' \
-  -d 'client_id=dcarca-mcp' \
-  -d 'client_secret=dcarca-mcp-local-dev-secret' \
-  -d 'scope=arca:consultar arca:facturar'
-```
-
-Ese secret es exclusivamente de desarrollo local y no debe reutilizarse en producción.
+La gestión se realiza con `dcArca.Cli create-key`, `list-keys` y `revoke-key`. El secreto pertenece al backend consumidor y nunca a un navegador o usuario final.
 
 ## Endpoint MCP
 
@@ -154,7 +115,7 @@ curl -s http://localhost:8080/ \
   --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-Sin token el endpoint MCP devuelve 401. Cuando un tool requiere un scope que el token no posee, el SDK MCP lo oculta de `tools/list` y rechaza llamadas directas.
+Sin una key válida el endpoint MCP devuelve 401. Cuando un tool requiere un scope que la key no posee, el SDK MCP lo oculta de `tools/list` y rechaza llamadas directas.
 
 ## Tools
 
@@ -287,8 +248,8 @@ No llaman a ARCA y no devuelven secretos ni CUIT.
 ## Seguridad
 
 - TLS obligatorio en producción.
-- No commitear certificados, PFX, passwords, JWT ni client secrets.
-- No usar el Keycloak/local secret de ejemplo en producción.
+- No commitear certificados, PFX, passwords ni API keys.
+- Usar una key distinta por consumidor y revocarla inmediatamente ante una exposición.
 - No entregar client secrets a frontend, LLM o usuario final.
 - Aplicar mínimo privilegio en scopes.
 - Preferir `emitir_comprobante` sobre numeración manual.
