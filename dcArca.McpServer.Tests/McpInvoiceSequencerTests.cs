@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using dcArca.Core.Models;
 using dcArca.Core.Services;
 using dcArca.McpServer;
@@ -44,12 +43,28 @@ public class McpInvoiceSequencerTests
         var fake = new FakeWsfeClient();
         var sequencer = new McpInvoiceSequencer(fake, Config(1), new MemoryStore());
 
-        var firstRequest = Request(dcTipoComprobante.FacturaB);
-        var first = await sequencer.EmitAsync(firstRequest, "business-key");
+        var first = await sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "business-key");
         var changed = Request(dcTipoComprobante.FacturaB);
         changed.ImporteTotal = 122m;
 
         var second = await sequencer.EmitAsync(changed, "business-key");
+
+        Assert.True(first.Success);
+        Assert.False(second.Success);
+        Assert.Equal("IDEMPOTENCY_KEY_REUSED", second.Codigo);
+        Assert.Single(fake.EmittedNumbers);
+    }
+
+    [Fact]
+    public async Task MismaKey_OtroPuntoVenta_SeRechazaSinReusarResultadoAnterior()
+    {
+        var fake = new FakeWsfeClient();
+        var store = new MemoryStore();
+        var firstSequencer = new McpInvoiceSequencer(fake, Config(1), store);
+        var secondSequencer = new McpInvoiceSequencer(fake, Config(2), store);
+
+        var first = await firstSequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "same-business-key");
+        var second = await secondSequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "same-business-key");
 
         Assert.True(first.Success);
         Assert.False(second.Success);
@@ -87,6 +102,27 @@ public class McpInvoiceSequencerTests
 
         Assert.True(retry.Success);
         Assert.Equal(dcEmissionOutcome.RecoveredSuccess, retry.EmissionOutcome);
+        Assert.Single(fake.EmittedNumbers);
+    }
+
+    [Fact]
+    public async Task FalloNoClasificado_QuedaUncertain_YNoSeMarcaComoRechazoTerminal()
+    {
+        var fake = new FakeWsfeClient { ReturnUnclassifiedFailureOnNextIssue = true };
+        var store = new MemoryStore();
+        var sequencer = new McpInvoiceSequencer(fake, Config(1), store);
+
+        var first = await sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "technical-failure-key");
+        var keyHash = EmissionRequestFingerprint.KeyHash("technical-failure-key");
+        var stored = await store.GetAsync(keyHash);
+
+        Assert.False(first.Success);
+        Assert.Equal(dcEmissionOutcome.None, first.EmissionOutcome);
+        Assert.NotNull(stored);
+        Assert.Equal(EmissionIdempotencyState.Uncertain, stored!.State);
+
+        var retry = await sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "technical-failure-key");
+        Assert.Equal(dcEmissionOutcome.Uncertain, retry.EmissionOutcome);
         Assert.Single(fake.EmittedNumbers);
     }
 
@@ -182,6 +218,7 @@ public class McpInvoiceSequencerTests
         internal HashSet<long> ConsultedAuthorizedNumbers { get; } = new();
         internal int MaxConcurrentOperations => _maxConcurrentOperations;
         internal bool ReturnUncertainOnNextIssue { get; set; }
+        internal bool ReturnUnclassifiedFailureOnNextIssue { get; set; }
 
         public async Task<dcFacturaResponse> FECompUltimoAutorizadoAsync(dcTipoComprobante tipoComprobante, CancellationToken cancellationToken = default)
         {
@@ -214,6 +251,19 @@ public class McpInvoiceSequencerTests
                     NumeroComprobante = number,
                     Codigo = "EMISSION_UNCERTAIN",
                     EmissionOutcome = dcEmissionOutcome.Uncertain
+                };
+            }
+
+            if (ReturnUnclassifiedFailureOnNextIssue)
+            {
+                ReturnUnclassifiedFailureOnNextIssue = false;
+                return new dcFacturaResponse
+                {
+                    Success = false,
+                    NumeroComprobante = number,
+                    Codigo = "TECHNICAL_ERROR",
+                    Mensaje = "simulated technical failure",
+                    EmissionOutcome = dcEmissionOutcome.None
                 };
             }
 
