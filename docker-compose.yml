@@ -13,6 +13,7 @@ services:
       - dcarca_data:/data
     environment:
       ApiKeys__Directory: /data
+      EmissionIdempotency__Directory: /data/emission-idempotency
       Pdf__BaseUrl: ${PDF_BASE_URL:-http://creadorpdf:8080}
       Pdf__ApiKey: ${PDF_API_KEY}
     healthcheck:

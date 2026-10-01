@@ -14,16 +14,19 @@ Los datos comerciales o de presentación —razón social visual, domicilio most
 
 ## Emisión + PDF
 
-La tool `emitir_comprobante_con_pdf` ejecuta un flujo compuesto:
+La tool `emitir_comprobante_con_pdf` requiere una `idempotencyKey` estable y ejecuta un flujo compuesto:
 
 1. valida template y configuración local del renderer;
-2. asigna numeración y solicita CAE;
-3. si ARCA rechaza, devuelve `pdf.status = NotAttempted`;
-4. si ARCA autoriza, construye `FiscalDocumentSnapshot`;
-5. renderiza el PDF;
-6. si creadorpdf falla, conserva el resultado fiscal y devuelve `pdf.status = Failed`.
+2. recupera o crea la operación fiscal idempotente;
+3. asigna/persiste la numeración y solicita CAE sólo cuando corresponde;
+4. si ARCA rechaza, devuelve `pdf.status = NotAttempted`;
+5. si ARCA autoriza o la key ya estaba autorizada, construye `FiscalDocumentSnapshot`;
+6. renderiza el PDF;
+7. si creadorpdf falla, conserva el resultado fiscal y devuelve `pdf.status = Failed`.
 
-Una respuesta con fiscal autorizado y PDF fallido significa que **el comprobante ya existe**. Sólo debe reintentarse la etapa documental.
+Una respuesta con fiscal autorizado y PDF fallido significa que **el comprobante ya existe**. Repetir la misma key con el mismo request fiscal recupera esa autorización y vuelve a intentar solamente la etapa documental.
+
+El template, su versión y `templateData` no forman parte del fingerprint fiscal; cambiar exclusivamente la presentación no genera un nuevo CAE.
 
 ## Generación o regeneración de un comprobante existente
 
@@ -84,6 +87,9 @@ Configuración:
 ```text
 Pdf__BaseUrl=http://creadorpdf:8080
 Pdf__ApiKey=sk-creadorpdf-...
+EmissionIdempotency__Directory=/data/emission-idempotency
 ```
 
 La clave de creadorpdf pertenece exclusivamente a ARCA-MCP y necesita `templates:read` y `documents:render`.
+
+Ver también `docs/MCP_IDEMPOTENCY.md`.

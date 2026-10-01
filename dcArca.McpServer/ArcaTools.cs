@@ -9,7 +9,7 @@ namespace dcArca.McpServer;
 
 /// <summary>
 /// Operaciones de facturación electrónica ARCA (WSFEv1 + padrón) expuestas como MCP tools.
-/// Delegan directamente en dcArca.Core; esta clase no tiene lógica de negocio propia.
+/// Delegan en dcArca.Core y en los servicios de orquestación del MCP.
 /// </summary>
 [McpServerToolType]
 public sealed class ArcaTools
@@ -34,15 +34,21 @@ public sealed class ArcaTools
         _existingInvoicePdf = existingInvoicePdf;
     }
 
-    [McpServerTool, Description("Emite un comprobante, agrega el resultado fiscal al JSON de una plantilla publicada y devuelve el PDF en Base64.")]
+    [McpServerTool, Description("Emite un comprobante de forma idempotente, incorpora el resultado fiscal a una plantilla publicada y devuelve el PDF.")]
     [Authorize(Policy = "ArcaFacturar")]
     public Task<InvoiceWithPdfResult> EmitirComprobanteConPdf(
         [Description("Modelo fiscal completo. La numeración es asignada por el servidor.")] dcFacturaRequest factura,
+        [Description("Clave idempotente estable para esta emisión fiscal. Repetirla con el mismo request recupera la misma operación.")] string idempotencyKey,
         [Description("Id de la plantilla publicada en creadorpdf.")] string templateId,
         [Description("Versión inmutable de la plantilla.")] string templateVersion,
         [Description("Datos visuales de la plantilla. No puede contener el campo reservado fiscal.")] JsonElement templateData,
         CancellationToken cancellationToken)
-        => _invoicePdf.EmitAsync(factura, new PdfTemplateReference(templateId, templateVersion), templateData, cancellationToken);
+        => _invoicePdf.EmitAsync(
+            factura,
+            idempotencyKey,
+            new PdfTemplateReference(templateId, templateVersion),
+            templateData,
+            cancellationToken);
 
     [McpServerTool, Description("Genera o regenera el PDF de un comprobante ya autorizado consultándolo primero en ARCA. Esta operación nunca solicita un nuevo CAE.")]
     [Authorize(Policy = "ArcaConsultar")]
@@ -75,9 +81,10 @@ public sealed class ArcaTools
         CancellationToken cancellationToken)
         => _wsfe.FECompConsultarAsync(numeroComprobante, tipoComprobante, cancellationToken);
 
-    [McpServerTool, Description("Emite un comprobante calculando el próximo número autorizado dentro del servidor. Es el flujo recomendado para emisión MCP.")]
+    [McpServerTool, Description("Emite un comprobante idempotente calculando el próximo número autorizado dentro del servidor. Es el flujo recomendado para emisión MCP.")]
     [Authorize(Policy = "ArcaFacturar")]
     public Task<dcFacturaResponse> EmitirComprobante(
+        [Description("Clave idempotente estable para esta emisión fiscal.")] string idempotencyKey,
         [Description("Tipo de comprobante AFIP a autorizar.")] dcTipoComprobante tipoComprobante,
         [Description("Concepto: 1=Productos, 2=Servicios, 3=Productos y Servicios.")] dcConcepto concepto,
         [Description("Número de documento del receptor.")] long cuitReceptor,
@@ -120,20 +127,21 @@ public sealed class ArcaTools
             PeriodoAsocHasta = periodoAsociadoHasta,
         };
 
-        return _sequencer.EmitAsync(factura, cancellationToken);
+        return _sequencer.EmitAsync(factura, idempotencyKey, cancellationToken);
     }
 
-    [McpServerTool, Description("Emite un comprobante usando el modelo fiscal completo de dcARCA (múltiples alícuotas, exentos/no gravados, tributos y moneda) y asigna la numeración server-side.")]
+    [McpServerTool, Description("Emite un comprobante idempotente usando el modelo fiscal completo de dcARCA y asigna la numeración server-side.")]
     [Authorize(Policy = "ArcaFacturar")]
     public Task<dcFacturaResponse> EmitirComprobanteAvanzado(
         [Description("Modelo completo del comprobante. NumeroComprobante se ignora y es asignado por el servidor.")] dcFacturaRequest factura,
+        [Description("Clave idempotente estable para esta emisión fiscal.")] string idempotencyKey,
         CancellationToken cancellationToken)
     {
         factura.NumeroComprobante = null;
-        return _sequencer.EmitAsync(factura, cancellationToken);
+        return _sequencer.EmitAsync(factura, idempotencyKey, cancellationToken);
     }
 
-    [McpServerTool, Description("Solicita a AFIP la autorización (CAE) de un comprobante con número elegido por el caller. Operación avanzada: el caller debe coordinar la numeración.")]
+    [McpServerTool, Description("Solicita a AFIP la autorización (CAE) de un comprobante con número elegido por el caller. Operación avanzada: el caller debe coordinar numeración e idempotencia.")]
     [Authorize(Policy = "ArcaFacturar")]
     public Task<dcFacturaResponse> SolicitarCae(
         [Description("Tipo de comprobante AFIP a autorizar.")] dcTipoComprobante tipoComprobante,

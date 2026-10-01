@@ -25,6 +25,7 @@ public sealed class InvoicePdfService(
 {
     public async Task<InvoiceWithPdfResult> EmitAsync(
         dcFacturaRequest invoice,
+        string idempotencyKey,
         PdfTemplateReference template,
         JsonElement templateData,
         CancellationToken cancellationToken = default)
@@ -33,7 +34,7 @@ public sealed class InvoicePdfService(
         renderer.ValidateConfiguration();
 
         invoice.NumeroComprobante = null;
-        var fiscal = await issuer.EmitAsync(invoice, cancellationToken);
+        var fiscal = await issuer.EmitAsync(invoice, idempotencyKey, cancellationToken);
         if (!fiscal.Success)
         {
             return new InvoiceWithPdfResult(
