@@ -14,7 +14,7 @@ public class InvoicePdfServiceTests
         var service = new InvoicePdfService(issuer, renderer, Config());
 
         await Assert.ThrowsAsync<ArgumentException>(() => service.EmitAsync(
-            Invoice(), new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { })));
+            Invoice(), "idem-1", new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { })));
 
         Assert.Equal(0, issuer.CallCount);
         Assert.Equal(0, renderer.RenderCallCount);
@@ -28,7 +28,7 @@ public class InvoicePdfServiceTests
         var service = new InvoicePdfService(issuer, renderer, Config());
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.EmitAsync(
-            Invoice(), new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { })));
+            Invoice(), "idem-1", new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { })));
 
         Assert.Equal(0, issuer.CallCount);
         Assert.Equal(0, renderer.RenderCallCount);
@@ -48,7 +48,7 @@ public class InvoicePdfServiceTests
         var service = new InvoicePdfService(issuer, renderer, Config());
 
         var result = await service.EmitAsync(
-            Invoice(), new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { }));
+            Invoice(), "idem-1", new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { }));
 
         Assert.Same(fiscal, result.Fiscal);
         Assert.Equal(PdfRenderStatus.NotAttempted, result.Pdf.Status);
@@ -67,7 +67,7 @@ public class InvoicePdfServiceTests
         var service = new InvoicePdfService(issuer, renderer, Config());
 
         var result = await service.EmitAsync(
-            Invoice(), new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { cliente = "Ñandú" }));
+            Invoice(), "idem-1", new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { cliente = "Ñandú" }));
 
         Assert.True(result.Fiscal.Success);
         Assert.Equal(PdfRenderStatus.Rendered, result.Pdf.Status);
@@ -89,7 +89,7 @@ public class InvoicePdfServiceTests
         var service = new InvoicePdfService(new FakeIssuer(fiscal), renderer, Config());
 
         var result = await service.EmitAsync(
-            Invoice(), new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { }));
+            Invoice(), "idem-1", new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { }));
 
         Assert.True(result.Fiscal.Success);
         Assert.Equal("CAE123", result.Fiscal.Cae);
@@ -128,7 +128,7 @@ public class InvoicePdfServiceTests
     {
         public int CallCount { get; private set; }
 
-        public Task<dcFacturaResponse> EmitAsync(dcFacturaRequest factura, CancellationToken cancellationToken = default)
+        public Task<dcFacturaResponse> EmitAsync(dcFacturaRequest factura, string idempotencyKey, CancellationToken cancellationToken = default)
         {
             CallCount++;
             return Task.FromResult(result);

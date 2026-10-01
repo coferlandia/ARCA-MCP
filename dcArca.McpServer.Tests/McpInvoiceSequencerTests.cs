@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using dcArca.Core.Models;
 using dcArca.Core.Services;
 using dcArca.McpServer;
@@ -8,28 +9,63 @@ namespace dcArca.McpServer.Tests;
 public class McpInvoiceSequencerTests
 {
     [Fact]
-    public async Task MismaClave_EmisionesConcurrentes_RecibenNumerosConsecutivos()
+    public async Task MismaIdempotencyKey_Concurrente_EmiteUnaSolaVez()
     {
-        var fake = new FakeWsfeClient();
-        var sequencer = new McpInvoiceSequencer(fake, Config(1));
+        var fake = new FakeWsfeClient(delayMs: 50);
+        var store = new MemoryStore();
+        var sequencer = new McpInvoiceSequencer(fake, Config(1), store);
 
-        var first = sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB));
-        var second = sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB));
+        var first = sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "same-key");
+        var second = sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "same-key");
 
         var results = await Task.WhenAll(first, second);
 
-        Assert.Equal([1L, 2L], results.Select(r => r.NumeroComprobante).OrderBy(x => x).ToArray());
-        Assert.Equal([1L, 2L], fake.EmittedNumbers.OrderBy(x => x).ToArray());
+        Assert.All(results, result => Assert.True(result.Success));
+        Assert.Single(fake.EmittedNumbers);
+        Assert.Equal(results[0].NumeroComprobante, results[1].NumeroComprobante);
+    }
+
+    [Fact]
+    public async Task KeysDiferentes_RecibenNumerosConsecutivos()
+    {
+        var fake = new FakeWsfeClient();
+        var sequencer = new McpInvoiceSequencer(fake, Config(1), new MemoryStore());
+
+        var first = await sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "key-1");
+        var second = await sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "key-2");
+
+        Assert.Equal([1L, 2L], new[] { first.NumeroComprobante, second.NumeroComprobante });
+        Assert.Equal([1L, 2L], fake.EmittedNumbers.ToArray());
+    }
+
+    [Fact]
+    public async Task MismaKey_RequestDistinto_SeRechazaSinEmitirOtraVez()
+    {
+        var fake = new FakeWsfeClient();
+        var sequencer = new McpInvoiceSequencer(fake, Config(1), new MemoryStore());
+
+        var firstRequest = Request(dcTipoComprobante.FacturaB);
+        var first = await sequencer.EmitAsync(firstRequest, "business-key");
+        var changed = Request(dcTipoComprobante.FacturaB);
+        changed.ImporteTotal = 122m;
+
+        var second = await sequencer.EmitAsync(changed, "business-key");
+
+        Assert.True(first.Success);
+        Assert.False(second.Success);
+        Assert.Equal("IDEMPOTENCY_KEY_REUSED", second.Codigo);
+        Assert.Single(fake.EmittedNumbers);
     }
 
     [Fact]
     public async Task TiposDiferentes_NoCompartenLock()
     {
         var fake = new FakeWsfeClient(delayMs: 100);
-        var sequencer = new McpInvoiceSequencer(fake, Config(1));
+        var store = new MemoryStore();
+        var sequencer = new McpInvoiceSequencer(fake, Config(1), store);
 
-        var a = sequencer.EmitAsync(Request(dcTipoComprobante.FacturaA));
-        var b = sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB));
+        var a = sequencer.EmitAsync(Request(dcTipoComprobante.FacturaA), "key-a");
+        var b = sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "key-b");
 
         await Task.WhenAll(a, b);
 
@@ -37,32 +73,21 @@ public class McpInvoiceSequencerTests
     }
 
     [Fact]
-    public async Task PuntosDeVentaDiferentes_NoCompartenLock()
+    public async Task ResultadoIncierto_SeReconciliaConElMismoNumero()
     {
-        var fake = new FakeWsfeClient(delayMs: 100);
-        var one = new McpInvoiceSequencer(fake, Config(1));
-        var two = new McpInvoiceSequencer(fake, Config(2));
+        var fake = new FakeWsfeClient { ReturnUncertainOnNextIssue = true };
+        var sequencer = new McpInvoiceSequencer(fake, Config(1), new MemoryStore());
 
-        await Task.WhenAll(
-            one.EmitAsync(Request(dcTipoComprobante.FacturaB)),
-            two.EmitAsync(Request(dcTipoComprobante.FacturaB)));
+        var first = await sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "uncertain-key");
+        Assert.Equal(dcEmissionOutcome.Uncertain, first.EmissionOutcome);
+        Assert.Single(fake.EmittedNumbers);
 
-        Assert.True(fake.MaxConcurrentOperations >= 2);
-    }
+        fake.ConsultedAuthorizedNumbers.Add(first.NumeroComprobante);
+        var retry = await sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "uncertain-key");
 
-    [Fact]
-    public async Task Excepcion_LiberaLock()
-    {
-        var fake = new FakeWsfeClient { ThrowOnNextIssue = true };
-        var sequencer = new McpInvoiceSequencer(fake, Config(1));
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB)));
-
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
-        var result = await sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), cts.Token);
-
-        Assert.True(result.Success);
+        Assert.True(retry.Success);
+        Assert.Equal(dcEmissionOutcome.RecoveredSuccess, retry.EmissionOutcome);
+        Assert.Single(fake.EmittedNumbers);
     }
 
     private static dcFacturaRequest Request(dcTipoComprobante tipo) => new()
@@ -85,6 +110,65 @@ public class McpInvoiceSequencerTests
         PuntoVenta = puntoVenta
     };
 
+    private sealed class MemoryStore : IEmissionIdempotencyStore
+    {
+        private readonly object _sync = new();
+        private readonly Dictionary<string, EmissionIdempotencyRecord> _records = new(StringComparer.Ordinal);
+
+        public Task<EmissionIdempotencyRecord> GetOrCreateAsync(
+            string keyHash,
+            string requestHash,
+            dcTipoComprobante tipoComprobante,
+            int puntoVenta,
+            CancellationToken cancellationToken = default)
+        {
+            lock (_sync)
+            {
+                if (_records.TryGetValue(keyHash, out var existing))
+                {
+                    if (!string.Equals(existing.RequestHash, requestHash, StringComparison.Ordinal))
+                        throw new EmissionIdempotencyConflictException();
+                    return Task.FromResult(existing);
+                }
+
+                var now = DateTimeOffset.UtcNow;
+                var created = new EmissionIdempotencyRecord(
+                    keyHash,
+                    requestHash,
+                    (int)tipoComprobante,
+                    puntoVenta,
+                    null,
+                    EmissionIdempotencyState.Created,
+                    null,
+                    now,
+                    now);
+                _records[keyHash] = created;
+                return Task.FromResult(created);
+            }
+        }
+
+        public Task<EmissionIdempotencyRecord?> GetAsync(string keyHash, CancellationToken cancellationToken = default)
+        {
+            lock (_sync)
+            {
+                _records.TryGetValue(keyHash, out var record);
+                return Task.FromResult(record);
+            }
+        }
+
+        public Task SaveAsync(EmissionIdempotencyRecord record, CancellationToken cancellationToken = default)
+        {
+            lock (_sync)
+            {
+                if (_records.TryGetValue(record.KeyHash, out var existing)
+                    && !string.Equals(existing.RequestHash, record.RequestHash, StringComparison.Ordinal))
+                    throw new EmissionIdempotencyConflictException();
+                _records[record.KeyHash] = record;
+                return Task.CompletedTask;
+            }
+        }
+    }
+
     private sealed class FakeWsfeClient : IdcWsfeClient
     {
         private readonly int _delayMs;
@@ -95,8 +179,9 @@ public class McpInvoiceSequencerTests
         internal FakeWsfeClient(int delayMs = 0) => _delayMs = delayMs;
 
         internal List<long> EmittedNumbers { get; } = new();
+        internal HashSet<long> ConsultedAuthorizedNumbers { get; } = new();
         internal int MaxConcurrentOperations => _maxConcurrentOperations;
-        internal bool ThrowOnNextIssue { get; set; }
+        internal bool ReturnUncertainOnNextIssue { get; set; }
 
         public async Task<dcFacturaResponse> FECompUltimoAutorizadoAsync(dcTipoComprobante tipoComprobante, CancellationToken cancellationToken = default)
         {
@@ -115,24 +200,53 @@ public class McpInvoiceSequencerTests
 
         public async Task<dcFacturaResponse> FECAESolicitarAsync(dcFacturaRequest factura, CancellationToken cancellationToken = default)
         {
-            if (ThrowOnNextIssue)
-            {
-                ThrowOnNextIssue = false;
-                throw new InvalidOperationException("simulated");
-            }
-
             if (_delayMs > 0) await Task.Delay(_delayMs, cancellationToken);
             var number = factura.NumeroComprobante!.Value;
             Interlocked.Exchange(ref _lastNumber, Math.Max(Interlocked.Read(ref _lastNumber), number));
             lock (EmittedNumbers) EmittedNumbers.Add(number);
-            return new dcFacturaResponse { Success = true, NumeroComprobante = number };
+
+            if (ReturnUncertainOnNextIssue)
+            {
+                ReturnUncertainOnNextIssue = false;
+                return new dcFacturaResponse
+                {
+                    Success = false,
+                    NumeroComprobante = number,
+                    Codigo = "EMISSION_UNCERTAIN",
+                    EmissionOutcome = dcEmissionOutcome.Uncertain
+                };
+            }
+
+            return new dcFacturaResponse
+            {
+                Success = true,
+                NumeroComprobante = number,
+                Cae = "CAE" + number,
+                CaeVencimiento = "20261011",
+                Resultado = "A",
+                EmissionOutcome = dcEmissionOutcome.Authorized
+            };
         }
 
         public Task<dcFacturaResponse> SolicitarCaeAsync(dcFacturaRequest factura, CancellationToken cancellationToken = default)
             => FECAESolicitarAsync(factura, cancellationToken);
 
         public Task<dcFacturaResponse> FECompConsultarAsync(long numeroComprobante, dcTipoComprobante tipoComprobante, CancellationToken cancellationToken = default)
-            => Task.FromResult(new dcFacturaResponse());
+        {
+            if (ConsultedAuthorizedNumbers.Contains(numeroComprobante))
+            {
+                return Task.FromResult(new dcFacturaResponse
+                {
+                    Success = true,
+                    NumeroComprobante = numeroComprobante,
+                    Cae = "CAE" + numeroComprobante,
+                    CaeVencimiento = "20261011",
+                    Resultado = "A"
+                });
+            }
+
+            return Task.FromResult(new dcFacturaResponse { Success = false, NumeroComprobante = numeroComprobante });
+        }
 
         public Task<List<dcCondicionIvaOption>> GetCondicionesIVAReceptorAsync(int docTipo, long docNro, dcTipoComprobante tipoComprobante, CancellationToken cancellationToken = default)
             => Task.FromResult(new List<dcCondicionIvaOption>());

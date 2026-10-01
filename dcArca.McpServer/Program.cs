@@ -9,10 +9,8 @@ using ModelContextProtocol.AspNetCore;
 var builder = WebApplication.CreateBuilder(args);
 
 var apiKeysDirectory = builder.Configuration["ApiKeys:Directory"];
+var emissionIdempotencyDirectory = builder.Configuration["EmissionIdempotency:Directory"];
 
-// dcArcaConfig se carga con el mismo helper que usa dcArca.TestApp, valida CUIT/certificado al arrancar.
-// appsettings.Development.json no trae su propia seccion dcArcaConfig (solo overrides de Logging), asi que
-// solo "Testing" (que sí trae dcArcaConfig con el certificado placeholder) se resuelve a un archivo distinto.
 var arcaSettingsFile = builder.Environment.EnvironmentName == "Testing"
     ? $"appsettings.{builder.Environment.EnvironmentName}.json"
     : "appsettings.json";
@@ -27,6 +25,8 @@ builder.Services.AddSingleton<dcArcaAuthService>(sp => new dcArcaAuthService(
     logger: sp.GetRequiredService<IAfipLogger>()));
 builder.Services.AddSingleton<IdcWsfeClient, dcWsfeClient>();
 builder.Services.AddSingleton<IdcPadronClient, dcPadronClient>();
+builder.Services.AddSingleton<IEmissionIdempotencyStore>(_ =>
+    new FileSystemEmissionIdempotencyStore(emissionIdempotencyDirectory));
 builder.Services.AddSingleton<McpInvoiceSequencer>();
 builder.Services.AddSingleton<IInvoiceIssuer>(sp => sp.GetRequiredService<McpInvoiceSequencer>());
 builder.Services.AddSingleton<IPdfDocumentRenderer, PdfDocumentRenderer>();
@@ -58,9 +58,6 @@ builder.Services.AddMcpServer()
     {
         options.SessionMode = HttpServerSessionMode.Stateless;
     })
-    // Habilita que [Authorize]/[AllowAnonymous] en los métodos de ArcaTools se
-    // respeten por-tool (sin esto, MapMcp().RequireAuthorization() solo exige
-    // "autenticado", cualquier scope vale para cualquier tool).
     .AddAuthorizationFilters();
 
 var app = builder.Build();

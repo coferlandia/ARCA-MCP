@@ -6,5 +6,6 @@ public interface IInvoiceIssuer
 {
     Task<dcFacturaResponse> EmitAsync(
         dcFacturaRequest factura,
+        string idempotencyKey,
         CancellationToken cancellationToken = default);
 }

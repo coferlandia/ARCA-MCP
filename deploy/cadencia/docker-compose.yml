@@ -17,6 +17,7 @@ services:
       - /home/ubuntu/apps/dcarca-mcpserver-data:/data
     environment:
       ApiKeys__Directory: /data
+      EmissionIdempotency__Directory: /data/emission-idempotency
       Pdf__BaseUrl: http://creadorpdf:8080
       Pdf__ApiKey: ${PDF_API_KEY}
     labels:
