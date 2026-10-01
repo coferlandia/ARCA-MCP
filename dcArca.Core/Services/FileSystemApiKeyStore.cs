@@ -89,8 +89,31 @@ public sealed class FileSystemApiKeyStore : IApiKeyStore
     {
         if (!File.Exists(_filePath)) return [];
         await using var stream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        return await JsonSerializer.DeserializeAsync<List<ApiKeyRecord>>(stream, cancellationToken: cancellationToken) ?? [];
+        List<ApiKeyRecord> records;
+        try
+        {
+            records = await JsonSerializer.DeserializeAsync<List<ApiKeyRecord>>(
+                stream, cancellationToken: cancellationToken) ?? [];
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("El store de API keys contiene JSON inválido.", exception);
+        }
+
+        if (records.Any(record => !IsValidRecord(record)))
+            throw new InvalidDataException("El store de API keys contiene registros inválidos.");
+
+        return records;
     }
+
+    private static bool IsValidRecord(ApiKeyRecord? record)
+        => record is not null
+            && !string.IsNullOrWhiteSpace(record.Id)
+            && !string.IsNullOrWhiteSpace(record.Name)
+            && record.KeyHash is { Length: 64 }
+            && record.KeyHash.All(Uri.IsHexDigit)
+            && record.Scopes is { Length: > 0 }
+            && record.Scopes.All(scope => !string.IsNullOrWhiteSpace(scope));
 
     private void WriteAll(dcWsaaFileCacheCoordinator coordinator, List<ApiKeyRecord> records)
     {

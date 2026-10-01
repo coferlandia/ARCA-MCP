@@ -14,6 +14,7 @@ public class McpAuthTests : IClassFixture<WebApplicationFactory<Program>>
 {
     private readonly WebApplicationFactory<Program> _factory;
     private readonly IApiKeyStore _store;
+    private readonly string _storeFilePath;
 
     public McpAuthTests(WebApplicationFactory<Program> factory)
     {
@@ -32,6 +33,7 @@ public class McpAuthTests : IClassFixture<WebApplicationFactory<Program>>
         }
 
         var directory = Path.Combine(Path.GetTempPath(), "dcarca-auth-tests", Guid.NewGuid().ToString("N"));
+        _storeFilePath = Path.Combine(directory, "api_keys.json");
         _store = new FileSystemApiKeyStore(directory);
         _factory = factory.WithWebHostBuilder(builder =>
         {
@@ -76,6 +78,19 @@ public class McpAuthTests : IClassFixture<WebApplicationFactory<Program>>
         var (record, rawKey) = await _store.CreateAsync("test", ["arca:consultar"]);
         Assert.True(await _store.RevokeAsync(record.Id));
         var response = await _factory.CreateClient().SendAsync(BuildRequest(rawKey));
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("{ json inválido")]
+    [InlineData("[{\"Id\":\"key_corrupta\",\"Name\":\"test\",\"KeyHash\":\"no-es-un-hash\",\"Scopes\":[\"arca:consultar\"],\"Active\":true,\"CreatedAt\":\"2026-10-01T00:00:00Z\"}]")]
+    [InlineData("[{\"Id\":\"key_corrupta\",\"Name\":\"test\",\"KeyHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"Scopes\":null,\"Active\":true,\"CreatedAt\":\"2026-10-01T00:00:00Z\"}]")]
+    public async Task McpEndpoint_ConStoreCorrupto_Devuelve401(string contents)
+    {
+        await File.WriteAllTextAsync(_storeFilePath, contents);
+
+        var response = await _factory.CreateClient().SendAsync(BuildRequest("sk-arca-cualquier-key"));
+
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 

@@ -5,7 +5,7 @@ Todos los cambios relevantes de dcARCA se documentan en este archivo.
 ## [2.0.0] - 2026-10-01
 
 ### Added
-- Servidor `dcArca.McpServer` como resource server MCP autenticado con JWT/OIDC.
+- Servidor `dcArca.McpServer` autenticado con API keys Bearer propias y scopes.
 - Scopes independientes `arca:consultar` y `arca:facturar`.
 - Emisión MCP con numeración server-side serializada por CUIT, punto de venta y tipo de comprobante.
 - Reconciliación de emisiones con resultado incierto antes de cualquier reintento.
@@ -20,12 +20,14 @@ Todos los cambios relevantes de dcARCA se documentan en este archivo.
 - La emisión MCP recomendada deja de requerir que el caller calcule el próximo número.
 - Los scopes de lectura y escritura son independientes; un cliente que necesita ambas capacidades debe solicitar ambos.
 - La configuración Docker pública es genérica y no contiene infraestructura privada.
+- La autenticación remota pasa de OAuth/JWT a API keys administradas localmente.
 
 ### Fixed
 - DNI y otros documentos dejan de validarse con el algoritmo de CUIT.
 - Cache WSAA coordinado entre procesos del mismo host mediante lock por archivo y escritura atómica.
 - Invalidación tardía de TA no elimina un token ya renovado por otra instancia.
 - Respuestas inciertas de `FECAESolicitar` se reconcilian consultando ARCA antes de decidir el estado.
+- Un store de API keys corrupto falla cerrado con `401` y registra el error, sin exponer un `500` al cliente.
 
 ### Security
 - Eliminado el workflow de deploy privado desde el repositorio público.
@@ -37,7 +39,7 @@ Todos los cambios relevantes de dcARCA se documentan en este archivo.
 ### Breaking changes / migration
 - `dcArcaAuthService` usa `MemoryWsaaTokenStore.Shared` por defecto. Para persistencia entre procesos/reinicios, inyectar `FileSystemWsaaTokenStore` o un `IWsaaTokenStore` propio.
 - Requests con `ImporteIva > 0` deben informar `AlicuotaIva` o `Iva`; dcARCA ya no infiere 21%.
-- `dcArca.Service` fue retirado. Para automatización local usar `dcArca.Cli`; para acceso remoto usar `dcArca.McpServer` con OAuth/JWT.
+- `dcArca.Service` fue retirado. Para automatización local usar `dcArca.Cli`; para acceso remoto usar `dcArca.McpServer` con API keys.
 - `arca:facturar` no implica `arca:consultar`; solicitar ambos scopes cuando el cliente necesite leer y emitir.
 
 ## [1.0.0] - 2026-09-24
