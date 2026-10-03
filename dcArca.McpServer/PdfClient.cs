@@ -95,10 +95,31 @@ public sealed class PdfClient : IPdfClient
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-        HttpResponseMessage response;
+        using var deadline = CreadorPdfHttpDeadline.Start(_httpClient.Timeout, cancellationToken);
+        var effectiveToken = deadline.Token;
+
         try
         {
-            response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var response = await _httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                effectiveToken);
+
+            if (!response.IsSuccessStatusCode)
+                throw await CreadorPdfHttpErrors.FromResponseAsync(response, effectiveToken);
+
+            if (!string.Equals(
+                    response.Content.Headers.ContentType?.MediaType,
+                    "application/pdf",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new CreadorPdfException(
+                    PdfFailureKind.InvalidResponse,
+                    PdfFailureContract.ToSafeMessage(PdfFailureKind.InvalidResponse),
+                    (int)response.StatusCode);
+            }
+
+            return await response.Content.ReadAsByteArrayAsync(effectiveToken);
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -114,25 +135,6 @@ public sealed class PdfClient : IPdfClient
                 PdfFailureContract.ToSafeMessage(PdfFailureKind.Unavailable),
                 exception.StatusCode.HasValue ? (int)exception.StatusCode.Value : null,
                 innerException: exception);
-        }
-
-        using (response)
-        {
-            if (!response.IsSuccessStatusCode)
-                throw await CreadorPdfHttpErrors.FromResponseAsync(response, cancellationToken);
-
-            if (!string.Equals(
-                    response.Content.Headers.ContentType?.MediaType,
-                    "application/pdf",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                throw new CreadorPdfException(
-                    PdfFailureKind.InvalidResponse,
-                    PdfFailureContract.ToSafeMessage(PdfFailureKind.InvalidResponse),
-                    (int)response.StatusCode);
-            }
-
-            return await response.Content.ReadAsByteArrayAsync(cancellationToken);
         }
     }
 }
