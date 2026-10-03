@@ -14,6 +14,8 @@ services:
     environment:
       ApiKeys__Directory: /data
       EmissionIdempotency__Directory: /data/emission-idempotency
+      FiscalContexts__Directory: /data/fiscal-contexts
+      Recovery__Directory: /data/recovery
       Pdf__BaseUrl: ${PDF_BASE_URL:-http://creadorpdf:8080}
       Pdf__ApiKey: ${PDF_API_KEY}
     healthcheck:
@@ -26,6 +28,8 @@ services:
 # Este compose es deliberadamente genérico: no configura proxy reverso, TLS,
 # redes privadas ni infraestructura de producción. El host debe aportar
 # certificados, secretos y controles de red mediante variables/volúmenes.
+# /health/live indica proceso vivo; /health/ready puede devolver 503 cuando
+# un restore exige reconciliación antes de habilitar nuevas autorizaciones.
 
 volumes:
   dcarca_data:
