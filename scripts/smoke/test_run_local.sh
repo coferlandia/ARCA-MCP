@@ -54,4 +54,14 @@ printf 'prompt-secret\n' | bash "$RUNNER" --url "https://arca.prompt.test" --con
 grep -q '^https://arca.prompt.test/$' "$tmp/capture/url"
 grep -q '^prompt-secret$' "$tmp/capture/token"
 
+export ARCA_MCP_TOKEN="dummy-secret"
+if bash "$RUNNER" --url "http://remote.example.test" --config "$config" --execute >"$tmp/insecure.out" 2>&1; then
+  echo "Expected insecure remote URL to be rejected" >&2
+  exit 1
+fi
+grep -q 'HTTPS is required' "$tmp/insecure.out"
+
+bash "$RUNNER" --url "http://127.0.0.1:8080" --config "$config" --execute
+grep -q '^http://127.0.0.1:8080/$' "$tmp/capture/url"
+
 printf 'OK: local external smoke client contract\n'
