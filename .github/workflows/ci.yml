@@ -35,6 +35,27 @@ jobs:
             exit 1
           fi
 
+      - name: Validate PDF template deploy assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n deploy/cadencia/bootstrap-pdf-template.sh
+          python3 - <<'PY'
+          import json, pathlib
+          root = pathlib.Path("deploy/cadencia/pdf-templates")
+          manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+          assert manifest.get("version") == 1
+          templates = manifest.get("templates")
+          assert isinstance(templates, list) and templates
+          seen = set()
+          for item in templates:
+              logical = (item["key"], item["version"])
+              assert logical not in seen, f"duplicate logical template: {logical}"
+              seen.add(logical)
+              assert (root / item["template"]).is_file(), item["template"]
+              assert (root / item["schema"]).is_file(), item["schema"]
+          PY
+
       - name: Restore Core tests
         run: dotnet restore dcArca.Core.Tests/dcArca.Core.Tests.csproj
 
