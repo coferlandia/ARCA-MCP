@@ -50,6 +50,14 @@ jobs:
           bash -n scripts/smoke/test_run_local.sh
           bash scripts/smoke/test_run_local.sh
 
+      - name: Validate API key management
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/api-keys/manage-key.sh
+          bash -n scripts/api-keys/test_manage_key.sh
+          bash scripts/api-keys/test_manage_key.sh
+
       - name: Restore Core tests
         run: dotnet restore dcArca.Core.Tests/dcArca.Core.Tests.csproj
 
@@ -74,6 +82,16 @@ jobs:
 
       - name: Build MCP container
         run: docker build -t dcarca-mcpserver:ci -f dcArca.McpServer/Dockerfile .
+
+      - name: Validate packaged admin CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -e ApiKeys__Directory=/tmp/api-keys \
+            --entrypoint dotnet \
+            dcarca-mcpserver:ci \
+            /tools/dcArca.Cli.dll list-keys | grep -q '^\[\]$'
 
       - name: Smoke MCP container and restart
         shell: bash
