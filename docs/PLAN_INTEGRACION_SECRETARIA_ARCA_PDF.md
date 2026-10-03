@@ -1,8 +1,40 @@
 # Plan de integración: SecretarIA + ARCA-MCP + creadorpdf
 
-**Fecha:** 1 de octubre de 2026  
+**Fecha:** 3 de octubre de 2026  
 **Destinatarios:** Diego, Pedro y equipo Cadencia  
-**Estado:** infraestructura desplegada; pendiente integración funcional y homologación fiscal
+**Estado:** infraestructura desplegada; contrato fiscal/idempotencia y hardening documental implementados; pendiente integración funcional y homologación fiscal
+
+## Actualización 2026-10-03 — contrato de templates y fallos PDF
+
+SecretarIA debe trabajar conceptualmente con una referencia lógica estable:
+
+```text
+templateKey = factura-ar
+templateVersion = 3
+```
+
+El schema MCP conserva temporalmente el nombre de parámetro `templateId` para no romper consumidores, pero su semántica actual es `templateKey`. ARCA-MCP resuelve internamente el `tpl_*` físico visible para su credencial runtime.
+
+SecretarIA debe persistir:
+
+```text
+templateKey
+templateVersion
+templateData snapshot
+```
+
+y no debe persistir como dependencia de negocio:
+
+```text
+tpl_* físico
+owner_id de creadorpdf
+API key
+BaseUrl del provider
+```
+
+ARCA-MCP cachea la resolución lógica. Si un ID físico cacheado desaparece y creadorpdf devuelve `404 unknown_template`, invalida la entrada, vuelve a resolver y reintenta una sola vez **la etapa documental**. Nunca repite numeración ni CAE.
+
+Los fallos documentales están normalizados a códigos públicos estables (`PDF_TEMPLATE_NOT_FOUND`, `PDF_PROVIDER_FORBIDDEN`, `PDF_INVALID_REQUEST`, `PDF_RATE_LIMITED`, `PDF_TIMEOUT`, `PDF_UNAVAILABLE`, etc.) y pueden incluir metadata diagnóstica segura (`providerStatusCode`, `providerErrorCode`). Un fallo PDF jamás modifica un resultado fiscal ya autorizado.
 
 ## 1. Objetivo
 
@@ -28,7 +60,9 @@ Mercado Pago o solicitud manual
               v
           ARCA-MCP ----------------> ARCA
               |
-              | template publicado + JSON fiscal autorizado
+              | templateKey + version
+              | resolver interno -> tpl_* opaco
+              | JSON fiscal autorizado
               v
          creadorpdf
               |
@@ -36,7 +70,7 @@ Mercado Pago o solicitud manual
               v
           ARCA-MCP
               |
-              | resultado fiscal + pdfBase64
+              | resultado fiscal + resultado PDF
               v
          SecretarIA
               |
@@ -48,9 +82,9 @@ Mercado Pago o solicitud manual
 
 | Sistema | Responsabilidad |
 | --- | --- |
-| SecretarIA | Decidir cuándo facturar, identificar tenant y cliente, crear la idempotency key, persistir el estado comercial y entregar el resultado |
-| ARCA-MCP | Validar la solicitud, coordinar numeración, emitir o reconciliar con ARCA, incorporar los datos fiscales definitivos y solicitar el PDF |
-| creadorpdf | Validar el JSON contra el schema de la plantilla publicada y devolver el PDF |
+| SecretarIA | Decidir cuándo facturar, identificar tenant y cliente, crear la idempotency key, persistir el estado comercial, `templateKey/version/templateData` y entregar el resultado |
+| ARCA-MCP | Validar la solicitud, coordinar numeración, emitir o reconciliar con ARCA, resolver la referencia lógica de template, incorporar los datos fiscales definitivos y solicitar el PDF |
+| creadorpdf | Resolver su ID físico interno, validar el JSON contra el schema de la plantilla publicada y devolver el PDF |
 | SIM | Ejecutar acciones posteriores como email, WhatsApp, avisos y reintentos de entrega |
 
 SecretarIA no llama directamente a creadorpdf y nunca recibe su API key.
@@ -66,26 +100,30 @@ SecretarIA no llama directamente a creadorpdf y nunca recibe su API key.
 - scopes independientes `arca:consultar` y `arca:facturar`;
 - creación, listado y revocación de claves mediante `dcArca.Cli`;
 - secretos visibles una sola vez y persistencia exclusiva del hash;
-- registro de último uso y revocación inmediata;
+- idempotencia fiscal durable y reconciliación de resultados inciertos;
 - templates versionados y publicados en creadorpdf;
+- manifest de deploy versionado para templates;
 - aislamiento de templates por propietario;
+- referencia lógica `templateKey + templateVersion` con resolución interna de `tpl_*`;
+- cache de resolución e invalidación/re-resolución única ante `unknown_template`;
+- compatibilidad temporal con `tpl_*` legacy;
 - tool MCP `emitir_comprobante_con_pdf`;
+- tool MCP `generar_pdf_comprobante` query-only;
 - campo `fiscal` reservado e incorporado por ARCA-MCP después de la autorización;
+- resultado fiscal separado del resultado documental;
+- taxonomía estructurada de fallos PDF y metadata diagnóstica segura;
 - retorno del PDF en Base64 para el MVP;
 - prueba productiva no fiscal de ARCA-MCP → creadorpdf aprobada;
 - backups previos al despliegue disponibles en el servidor.
 
 ### Pendiente
 
-- contrato definitivo SecretarIA → ARCA-MCP;
-- idempotencia durable de la solicitud completa;
-- plantilla fiscal real y su JSON Schema;
-- mapeo completo entre solicitud, respuesta ARCA y template;
+- integración funcional en SecretarIA usando la referencia lógica;
 - persistencia del PDF o definición de object storage;
-- integración en SecretarIA;
 - prueba con CAE en homologación;
 - reglas fiscales para pagos totales, señas y saldos;
-- soporte multi-tenant de certificados y perfiles fiscales.
+- soporte multi-tenant de certificados y perfiles fiscales;
+- política definitiva de delivery/retry fuera de ARCA-MCP.
 
 ## 4. Contrato propuesto para el MVP
 
@@ -110,8 +148,8 @@ Ejemplo conceptual:
     "fechaServicioHasta": "20261031",
     "fechaVencimiento": "20261110"
   },
-  "templateId": "tpl_...",
-  "templateVersion": "1.0.0",
+  "templateId": "factura-ar",
+  "templateVersion": "3",
   "templateData": {
     "emisor": {
       "razonSocial": "Cadencia",
@@ -131,30 +169,42 @@ Ejemplo conceptual:
 }
 ```
 
-`templateData` no puede incluir `fiscal`. ARCA-MCP agrega ese campo después de recibir la respuesta autorizada:
+> `templateId` mantiene ese nombre sólo por compatibilidad MCP. Para SecretarIA el valor `factura-ar` es la `templateKey` lógica, no un ID físico de creadorpdf.
+
+`templateData` no puede incluir `fiscal`. ARCA-MCP agrega ese campo después de recibir la respuesta autorizada.
+
+La respuesta separa explícitamente:
+
+```text
+Fiscal
+Pdf
+```
+
+Por ejemplo, una autorización fiscal puede ser exitosa aunque el renderer falle:
 
 ```json
 {
   "fiscal": {
     "success": true,
     "cae": "...",
-    "caeVencimiento": "20261011",
-    "numeroComprobante": 123,
-    "puntoVenta": 1,
-    "tipoComprobante": "FacturaB",
-    "importeNeto": 1000.00,
-    "importeIva": 210.00,
-    "importeTotal": 1210.00
+    "numeroComprobante": 123
   },
-  "pdfBase64": "JVBERi0x..."
+  "pdf": {
+    "status": "Failed",
+    "base64": null,
+    "errorCode": "PDF_TEMPLATE_NOT_FOUND",
+    "provider": "creadorpdf",
+    "providerStatusCode": 404,
+    "providerErrorCode": "unknown_template"
+  }
 }
 ```
 
-Si ARCA rechaza la emisión, `pdfBase64` será `null` y la respuesta conservará el error fiscal normalizado.
+Eso significa que **la factura ya existe** y sólo debe corregirse/reintentarse la etapa documental.
 
 ## 5. Idempotencia y estados
 
-Antes de usar el flujo para pagos automáticos se debe incorporar una `idempotencyKey` obligatoria, por ejemplo:
+La `idempotencyKey` es obligatoria para el flujo recomendado, por ejemplo:
 
 ```text
 tenant_id + payment_id + invoice_reason
@@ -201,31 +251,33 @@ Reglas:
 
 ## 6. Plantilla fiscal
 
-Diego y el equipo deben acordar el JSON Schema de la primera factura real.
+La primera referencia productiva validada es conceptualmente:
 
-Debe contemplar como mínimo:
+```text
+factura-ar:3
+```
 
-- emisor: CUIT, razón social, domicilio y condición IVA;
-- receptor: documento, razón social, domicilio y condición IVA;
-- tipo, letra, punto de venta, número y fecha;
-- detalle de productos o servicios;
-- neto, IVA discriminado, exento, no gravado, tributos y total;
-- moneda y cotización;
-- CAE y vencimiento;
-- datos necesarios para construir el QR oficial;
-- comprobante o período asociado para notas de crédito/débito.
+La versión publicada es inmutable. Cualquier cambio de HTML o schema crea una versión nueva:
 
-La versión publicada es inmutable. Cualquier cambio crea una versión nueva.
+```text
+factura-ar:3 -> factura-ar:4
+```
 
-La plantilla técnica `integration-smoke:1.0.0` solo valida infraestructura y no debe usarse para facturas reales.
+El deploy se declara en:
+
+```text
+deploy/cadencia/pdf-templates/manifest.json
+```
+
+La credencial runtime de ARCA-MCP debe limitarse a lectura/render. Crear/publicar templates usa una credencial de gestión temporal del mismo owner, que no queda instalada como secret permanente.
 
 ## 7. Fases de trabajo
 
 ### Fase 1 — Contrato y plantilla
 
-- definir request y response definitivos;
-- agregar `idempotencyKey`;
-- definir schema fiscal y template HTML;
+- mantener el request fiscal y `idempotencyKey` estabilizados;
+- usar `templateKey/version` como identidad durable;
+- versionar schema fiscal y template HTML;
 - decidir dónde se almacena el PDF;
 - versionar ejemplos válidos e inválidos.
 
@@ -234,11 +286,11 @@ La plantilla técnica `integration-smoke:1.0.0` solo valida infraestructura y no
 ### Fase 2 — Homologación manual de Cadencia
 
 - configurar certificado y punto de venta de homologación;
-- publicar la plantilla fiscal `1.0.0`;
+- asegurar que `factura-ar:3` esté publicada y visible para la key runtime;
 - emitir una factura controlada;
 - verificar CAE, importes, QR y PDF;
 - repetir el request y comprobar que no se genere otra factura;
-- probar un rechazo fiscal y un fallo simulado de creadorpdf.
+- probar `404 unknown_template`, 403 y un 5xx del renderer sin perder el resultado fiscal.
 
 **Salida:** circuito manual completo aprobado en homologación.
 
@@ -247,11 +299,12 @@ La plantilla técnica `integration-smoke:1.0.0` solo valida infraestructura y no
 - guardar la API key de ARCA-MCP en el secret manager;
 - implementar el cliente MCP;
 - crear la orden fiscal durable;
+- persistir `templateKey`, `templateVersion` y snapshot de `templateData`;
 - almacenar el resultado fiscal y PDF;
 - agregar historial, descarga y reintento de render;
 - auditar usuario, tenant, origen y estados.
 
-**Salida:** Secretaría puede emitir manualmente para Cadencia.
+**Salida:** SecretarIA puede emitir manualmente para Cadencia sin conocer IDs físicos del renderer.
 
 ### Fase 4 — Mercado Pago y SIM
 
@@ -269,7 +322,7 @@ La plantilla técnica `integration-smoke:1.0.0` solo valida infraestructura y no
 - perfil fiscal por tenant;
 - certificados cifrados y referencias opacas;
 - tokens, caché y numeración aislados por CUIT/ambiente;
-- template/version por tenant o caso de uso;
+- template lógico/version por tenant o caso de uso;
 - onboarding obligatorio en homologación;
 - autorización y auditoría estrictas por tenant.
 
@@ -281,15 +334,24 @@ La plantilla técnica `integration-smoke:1.0.0` solo valida infraestructura y no
 - una key sin `arca:facturar` no puede emitir;
 - una key revocada deja de funcionar inmediatamente;
 - un request repetido produce una sola factura;
-- un timeout ambiguo se reconcilia antes de reintentar;
+- un timeout fiscal ambiguo se reconcilia antes de reintentar;
 - un fallo de creadorpdf no solicita otro CAE;
+- `404 unknown_template` se distingue como `PDF_TEMPLATE_NOT_FOUND`;
+- 403 se distingue como `PDF_PROVIDER_FORBIDDEN`;
+- 422 se distingue como `PDF_INVALID_REQUEST`;
+- 429 se distingue como `PDF_RATE_LIMITED`;
+- 5xx/network se distinguen como `PDF_UNAVAILABLE`;
+- timeout documental se distingue como `PDF_TIMEOUT`;
+- MIME no PDF se distingue como `PDF_INVALID_RESPONSE`;
 - `templateData.fiscal` es rechazado;
-- un template draft o de otro propietario no puede renderizarse;
+- un template draft no puede renderizarse como published;
+- más de un published para la misma key/version falla cerrado como ambiguo;
+- `tpl_*` legacy funciona sólo durante la transición;
+- stale cache + `unknown_template` invalida y re-resuelve una vez;
 - el PDF contiene los mismos importes y datos autorizados por ARCA;
-- el QR puede validarse con los datos oficiales;
 - caracteres acentuados y `ñ` se conservan;
 - el PDF Base64 se decodifica y comienza con `%PDF`;
-- secretos, certificados, payloads fiscales y PDFs no aparecen en logs;
+- secretos, bodies remotos, certificados, payloads fiscales y PDFs no aparecen en logs;
 - dos tenants nunca acceden a credenciales o comprobantes ajenos.
 
 ## 9. Seguridad y operación
@@ -297,30 +359,29 @@ La plantilla técnica `integration-smoke:1.0.0` solo valida infraestructura y no
 - una API key por consumidor y ambiente;
 - claves almacenadas solo en secret managers o archivos `0600`;
 - rotación mediante creación, migración y revocación;
-- ARCA-MCP es el único sistema que conoce la key de creadorpdf;
+- ARCA-MCP es el único sistema que conoce la key runtime de creadorpdf;
+- owner del template derivado exclusivamente de la credencial runtime;
 - creadorpdf no almacena PDFs;
 - certificados y claves privadas nunca viajan en requests;
 - backups antes de cada migración;
-- logs sin secretos ni cuerpos completos;
+- logs sin secretos, bodies remotos completos ni `templateData`;
 - homologación obligatoria antes de producción.
 
 ## 10. Decisiones pendientes
 
-1. ¿Dónde se implementará la idempotencia durable: SecretarIA, ARCA-MCP o ambos?
-2. ¿Dónde se almacenarán los PDFs definitivos?
-3. ¿Qué campos no fiscales puede personalizar cada tenant en su template?
-4. ¿Quién puede publicar una versión de template?
-5. ¿Cómo se cifrarán y rotarán los certificados multi-tenant?
-6. ¿Cuál es el tratamiento contable de señas y saldos?
-7. ¿Base64 seguirá siendo el contrato definitivo o se reemplazará por una referencia firmada?
+1. ¿Dónde se almacenarán los PDFs definitivos?
+2. ¿Qué campos no fiscales puede personalizar cada tenant en su template?
+3. ¿Quién puede aprobar/publicar una nueva versión lógica de template?
+4. ¿Cómo se cifrarán y rotarán los certificados multi-tenant?
+5. ¿Cuál es el tratamiento contable de señas y saldos?
+6. ¿Base64 seguirá siendo el contrato definitivo o se reemplazará por una referencia firmada?
 
 ## 11. Próxima reunión / acción recomendada
 
 Para la próxima sesión técnica:
 
-1. aprobar el contrato del MVP;
-2. diseñar el schema y la factura real;
-3. asignar dueño de la idempotencia;
+1. validar el contrato SecretarIA con `factura-ar:3`;
+2. ejecutar una emisión completa en homologación;
+3. probar fallos documentales estructurados sin reemisión fiscal;
 4. decidir almacenamiento del PDF;
-5. preparar un caso de homologación con importes y receptor controlados;
-6. ejecutar una emisión completa y documentar el resultado.
+5. preparar la integración funcional en SecretarIA usando sólo referencia lógica.
