@@ -67,11 +67,51 @@ public sealed class CreadorPdfTemplateResolver : IPdfTemplateResolver
         var apiKey = _configuration["Pdf:ApiKey"]!;
         using var request = new HttpRequestMessage(HttpMethod.Get, "/v1/templates/managed");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        using var deadline = CreadorPdfHttpDeadline.Start(_httpClient.Timeout, cancellationToken);
+        var effectiveToken = deadline.Token;
 
-        HttpResponseMessage response;
         try
         {
-            response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var response = await _httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                effectiveToken);
+
+            if (!response.IsSuccessStatusCode)
+                throw await CreadorPdfHttpErrors.FromResponseAsync(response, effectiveToken);
+
+            await using var stream = await response.Content.ReadAsStreamAsync(effectiveToken);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: effectiveToken);
+            var items = EnumerateItems(document.RootElement);
+            var candidates = items
+                .Where(item => string.Equals(GetString(item, "name"), template.Key, StringComparison.Ordinal)
+                               && string.Equals(GetString(item, "version"), template.Version, StringComparison.Ordinal))
+                .ToArray();
+
+            var published = candidates
+                .Where(item => string.Equals(GetString(item, "status"), "published", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+
+            if (published.Length == 0)
+            {
+                var kind = candidates.Length > 0
+                    ? PdfFailureKind.TemplateNotPublished
+                    : PdfFailureKind.TemplateNotFound;
+                throw new CreadorPdfException(kind, PdfFailureContract.ToSafeMessage(kind));
+            }
+
+            if (published.Length > 1)
+                throw new CreadorPdfException(
+                    PdfFailureKind.TemplateAmbiguous,
+                    PdfFailureContract.ToSafeMessage(PdfFailureKind.TemplateAmbiguous));
+
+            var id = GetString(published[0], "id");
+            if (string.IsNullOrWhiteSpace(id))
+                throw new CreadorPdfException(
+                    PdfFailureKind.InvalidResponse,
+                    PdfFailureContract.ToSafeMessage(PdfFailureKind.InvalidResponse));
+
+            return id;
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -88,54 +128,12 @@ public sealed class CreadorPdfTemplateResolver : IPdfTemplateResolver
                 exception.StatusCode.HasValue ? (int)exception.StatusCode.Value : null,
                 innerException: exception);
         }
-
-        using (response)
+        catch (JsonException exception)
         {
-            if (!response.IsSuccessStatusCode)
-                throw await CreadorPdfHttpErrors.FromResponseAsync(response, cancellationToken);
-
-            try
-            {
-                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-                using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-                var items = EnumerateItems(document.RootElement);
-                var candidates = items
-                    .Where(item => string.Equals(GetString(item, "name"), template.Key, StringComparison.Ordinal)
-                                   && string.Equals(GetString(item, "version"), template.Version, StringComparison.Ordinal))
-                    .ToArray();
-
-                var published = candidates
-                    .Where(item => string.Equals(GetString(item, "status"), "published", StringComparison.OrdinalIgnoreCase))
-                    .ToArray();
-
-                if (published.Length == 0)
-                {
-                    var kind = candidates.Length > 0
-                        ? PdfFailureKind.TemplateNotPublished
-                        : PdfFailureKind.TemplateNotFound;
-                    throw new CreadorPdfException(kind, PdfFailureContract.ToSafeMessage(kind));
-                }
-
-                if (published.Length > 1)
-                    throw new CreadorPdfException(
-                        PdfFailureKind.TemplateAmbiguous,
-                        PdfFailureContract.ToSafeMessage(PdfFailureKind.TemplateAmbiguous));
-
-                var id = GetString(published[0], "id");
-                if (string.IsNullOrWhiteSpace(id))
-                    throw new CreadorPdfException(
-                        PdfFailureKind.InvalidResponse,
-                        PdfFailureContract.ToSafeMessage(PdfFailureKind.InvalidResponse));
-
-                return id;
-            }
-            catch (JsonException exception)
-            {
-                throw new CreadorPdfException(
-                    PdfFailureKind.InvalidResponse,
-                    PdfFailureContract.ToSafeMessage(PdfFailureKind.InvalidResponse),
-                    innerException: exception);
-            }
+            throw new CreadorPdfException(
+                PdfFailureKind.InvalidResponse,
+                PdfFailureContract.ToSafeMessage(PdfFailureKind.InvalidResponse),
+                innerException: exception);
         }
     }
 
