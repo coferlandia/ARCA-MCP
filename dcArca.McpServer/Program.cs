@@ -47,10 +47,16 @@ builder.Services.AddSingleton<IFiscalSeriesCoordinator>(sp =>
 });
 builder.Services.AddSingleton<IRepresentedFiscalContextStore>(_ =>
     new FileSystemRepresentedFiscalContextStore(fiscalContextsDirectory));
+builder.Services.AddSingleton<IFiscalCredentialMaterializer, FiscalCredentialMaterializer>();
 builder.Services.AddSingleton<IFiscalContextRuntimeResolver, FiscalContextRuntimeResolver>();
+builder.Services.AddSingleton<IFiscalAssignmentAuthorizationValidator, FiscalAssignmentAuthorizationValidator>();
 builder.Services.AddSingleton<IPdfDocumentRenderer, PdfDocumentRenderer>();
 builder.Services.AddSingleton<IApiKeyStore>(_ => new FileSystemApiKeyStore(apiKeysDirectory));
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddHttpClient(nameof(FiscalAssignmentAuthorizationValidator), client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(20);
+});
 builder.Services.AddHttpClient<IPdfClient, PdfClient>(client =>
 {
     var baseUrl = builder.Configuration["Pdf:BaseUrl"];
