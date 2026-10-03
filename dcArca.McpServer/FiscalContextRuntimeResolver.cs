@@ -81,6 +81,24 @@ public interface IFiscalContextRuntimeResolver
         dcTipoComprobante tipoComprobante,
         CancellationToken cancellationToken = default);
 
+    Task<FiscalContextRuntime> ResolveForEmissionAsync(
+        ClaimsPrincipal principal,
+        string? requestedContextId,
+        string idempotencyKey,
+        dcFacturaRequest factura,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(factura);
+        if (!factura.TipoComprobante.HasValue)
+            throw new FiscalContextAccessException("TIPOC_INVALID", "TipoComprobante es obligatorio.");
+        return ResolveForEmissionAsync(
+            principal,
+            requestedContextId,
+            idempotencyKey,
+            factura.TipoComprobante.Value,
+            cancellationToken);
+    }
+
     Task<FiscalContextRuntime> ResolveForHistoricalOperationAsync(
         ClaimsPrincipal principal,
         EmissionIdempotencyRecord operation,
@@ -174,13 +192,7 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         if (string.IsNullOrWhiteSpace(idempotencyKey))
             throw new FiscalContextAccessException("IDEMPOTENCY_KEY_REQUIRED", "idempotencyKey es obligatoria para emitir.");
 
-        var recoveryBlock = await _recoveryGate.GetBlockAsync(cancellationToken);
-        if (recoveryBlock is not null)
-        {
-            throw new FiscalContextAccessException(
-                "RESTORE_RECONCILIATION_REQUIRED",
-                $"Las emisiones están bloqueadas por recuperación del restore {recoveryBlock.RestoreId}; reconciliar la ventana no cubierta y completar el recovery antes de autorizar nuevos comprobantes.");
-        }
+        await EnsureRecoveryOpenAsync(cancellationToken);
 
         var operationKeyHash = EmissionRequestFingerprint.OperationKeyHash(
             consumerId,
@@ -202,6 +214,77 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
                     "El contexto fiscal no tiene una asignación activa para nuevas emisiones.");
         }
 
+        return CreateRuntime(consumerId, context, assignment);
+    }
+
+    public async Task<FiscalContextRuntime> ResolveForEmissionAsync(
+        ClaimsPrincipal principal,
+        string? requestedContextId,
+        string idempotencyKey,
+        dcFacturaRequest factura,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(factura);
+        if (!factura.TipoComprobante.HasValue)
+            throw new FiscalContextAccessException("TIPOC_INVALID", "TipoComprobante es obligatorio.");
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
+            throw new FiscalContextAccessException("IDEMPOTENCY_KEY_REQUIRED", "idempotencyKey es obligatoria para emitir.");
+
+        var authorized = await AuthorizeAsync(
+            principal,
+            requestedContextId,
+            "facturar",
+            cancellationToken);
+        var consumerId = authorized.ConsumerId;
+        var context = authorized.Context;
+        if (context.OperationalState != FiscalContextOperationalState.Active)
+            throw new FiscalContextAccessException("FISCAL_CONTEXT_NOT_ACTIVE", "El contexto fiscal no admite nuevas emisiones.");
+
+        await EnsureRecoveryOpenAsync(cancellationToken);
+
+        var tipoComprobante = factura.TipoComprobante.Value;
+        var operationKeyHash = EmissionRequestFingerprint.OperationKeyHash(
+            consumerId,
+            context.ContextId,
+            idempotencyKey);
+        var existing = await _operations.GetAsync(operationKeyHash, cancellationToken);
+
+        EmissionIdempotencyRecord operation;
+        if (existing is not null)
+        {
+            EnsureOperationIdentity(existing, consumerId, context, (int)tipoComprobante);
+            operation = existing;
+        }
+        else
+        {
+            var activeAssignment = context.ActiveAssignment
+                ?? throw new FiscalContextAccessException(
+                    "ACTIVE_ASSIGNMENT_REQUIRED",
+                    "El contexto fiscal no tiene una asignación activa para nuevas emisiones.");
+            var proposedIdentity = new FiscalOperationIdentity(
+                consumerId,
+                context.ContextId,
+                context.Environment,
+                context.RepresentedCuit,
+                context.PointOfSale,
+                (int)tipoComprobante,
+                context.ContextRevision,
+                activeAssignment.AssignmentRevision);
+
+            operation = await _operations.GetOrCreateAsync(
+                operationKeyHash,
+                EmissionRequestFingerprint.RequestHash(factura),
+                EmissionRequestFingerprint.CanonicalizationVersion,
+                proposedIdentity,
+                StoredFiscalEvidence.FromRequest(factura),
+                cancellationToken);
+            EnsureOperationIdentity(operation, consumerId, context, (int)tipoComprobante);
+        }
+
+        // The durable operation is the linearization point. Another request may have won
+        // GetOrCreateAsync with a different assignment while this request was resolving the
+        // active context. Always materialize the assignment frozen in the winning record.
+        var assignment = ResolveHistoricalAssignment(context, operation);
         return CreateRuntime(consumerId, context, assignment);
     }
 
@@ -229,6 +312,17 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
             operation.Identity.TipoComprobante);
         var assignment = ResolveHistoricalAssignment(context, operation);
         return CreateRuntime(authorized.ConsumerId, context, assignment);
+    }
+
+    private async Task EnsureRecoveryOpenAsync(CancellationToken cancellationToken)
+    {
+        var recoveryBlock = await _recoveryGate.GetBlockAsync(cancellationToken);
+        if (recoveryBlock is not null)
+        {
+            throw new FiscalContextAccessException(
+                "RESTORE_RECONCILIATION_REQUIRED",
+                $"Las emisiones están bloqueadas por recuperación del restore {recoveryBlock.RestoreId}; reconciliar la ventana no cubierta y completar el recovery antes de autorizar nuevos comprobantes.");
+        }
     }
 
     private static void EnsureOperationIdentity(
