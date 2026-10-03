@@ -9,16 +9,29 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
     private readonly IdcWsfeClient _wsfe;
     private readonly dcArcaConfig _config;
     private readonly IEmissionIdempotencyStore _store;
+    private readonly IFiscalOperationIdentityProvider _identityProvider;
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Locks = new();
 
     public McpInvoiceSequencer(
         IdcWsfeClient wsfe,
         dcArcaConfig config,
-        IEmissionIdempotencyStore store)
+        IEmissionIdempotencyStore store,
+        IFiscalOperationIdentityProvider identityProvider)
     {
         _wsfe = wsfe;
         _config = config;
         _store = store;
+        _identityProvider = identityProvider;
+    }
+
+    // Compatibility constructor used by direct consumers/tests. The hosted server always
+    // registers an explicit fiscal context and uses the four-argument constructor.
+    public McpInvoiceSequencer(
+        IdcWsfeClient wsfe,
+        dcArcaConfig config,
+        IEmissionIdempotencyStore store)
+        : this(wsfe, config, store, SingleFiscalOperationIdentityProvider.ForTests(config))
+    {
     }
 
     public async Task<dcFacturaResponse> EmitAsync(
@@ -33,28 +46,37 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
             return Error("IDEMPOTENCY_KEY_REQUIRED", "idempotencyKey es obligatoria para emitir.");
 
         var tipo = factura.TipoComprobante.Value;
+        var identity = _identityProvider.For(tipo);
         var requestHash = EmissionRequestFingerprint.RequestHash(factura);
-        var keyHash = EmissionRequestFingerprint.KeyHash(idempotencyKey);
+        var keyHash = EmissionRequestFingerprint.OperationKeyHash(
+            identity.ConsumerId,
+            identity.ContextId,
+            idempotencyKey);
+        var evidence = StoredFiscalEvidence.FromRequest(factura);
 
         EmissionIdempotencyRecord record;
         try
         {
             record = await _store.GetOrCreateAsync(
-                keyHash, requestHash, tipo, _config.PuntoVenta, cancellationToken);
+                keyHash,
+                requestHash,
+                EmissionRequestFingerprint.CanonicalizationVersion,
+                identity,
+                evidence,
+                cancellationToken);
         }
         catch (EmissionIdempotencyConflictException)
         {
             return IdempotencyConflict();
         }
 
-        if (!MatchesFiscalIdentity(record, tipo))
+        if (!MatchesFiscalIdentity(record, identity))
             return IdempotencyConflict();
 
         var replay = ReplayTerminal(record);
         if (replay is not null) return replay;
 
-        var seriesKey = $"{_config.Cuit}:{_config.PuntoVenta}:{(int)tipo}";
-        var gate = Locks.GetOrAdd(seriesKey, _ => new SemaphoreSlim(1, 1));
+        var gate = Locks.GetOrAdd(identity.SeriesKey, _ => new SemaphoreSlim(1, 1));
 
         await gate.WaitAsync(cancellationToken);
         try
@@ -63,7 +85,8 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
                 ?? throw new InvalidDataException("El registro de idempotencia desapareció durante la emisión.");
 
             if (!string.Equals(record.RequestHash, requestHash, StringComparison.Ordinal)
-                || !MatchesFiscalIdentity(record, tipo))
+                || record.RequestCanonicalizationVersion != EmissionRequestFingerprint.CanonicalizationVersion
+                || !MatchesFiscalIdentity(record, identity))
             {
                 return IdempotencyConflict();
             }
@@ -188,8 +211,10 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
         await _store.SaveAsync(updated, cancellationToken);
     }
 
-    private bool MatchesFiscalIdentity(EmissionIdempotencyRecord record, dcTipoComprobante tipo)
-        => record.TipoComprobante == (int)tipo && record.PuntoVenta == _config.PuntoVenta;
+    private static bool MatchesFiscalIdentity(
+        EmissionIdempotencyRecord record,
+        FiscalOperationIdentity currentIdentity)
+        => record.Identity.MatchesImmutableIdentity(currentIdentity);
 
     private static dcFacturaResponse? ReplayTerminal(EmissionIdempotencyRecord record)
         => record.State is EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected
