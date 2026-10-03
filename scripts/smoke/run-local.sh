@@ -29,7 +29,8 @@ Authentication:
 
 Endpoint:
   --url takes precedence over ARCA_MCP_URL. If neither is set, defaults to
-  https://arca.cadencia.com.ar/.
+  https://arca.cadencia.com.ar/. Remote endpoints must use HTTPS; plain HTTP is
+  accepted only for localhost/127.0.0.1 development endpoints.
 EOF
 }
 
@@ -84,21 +85,15 @@ while (($#)); do
 done
 
 url="${url%/}/"
-export ARCA_MCP_URL="$url"
-
-if [[ -z "${ARCA_MCP_TOKEN:-}" ]]; then
-  if [[ -t 0 ]]; then
-    read -r -s -p "ARCA-MCP API key: " ARCA_MCP_TOKEN
-    echo
-  else
-    IFS= read -r ARCA_MCP_TOKEN
-  fi
-  if [[ -z "$ARCA_MCP_TOKEN" ]]; then
-    echo "ERROR: ARCA-MCP API key is required." >&2
+case "$url" in
+  https://*) ;;
+  http://localhost/*|http://localhost:*|http://127.0.0.1/*|http://127.0.0.1:*) ;;
+  *)
+    echo "ERROR: HTTPS is required for remote ARCA-MCP endpoints; HTTP is allowed only for localhost/127.0.0.1." >&2
     exit 2
-  fi
-  export ARCA_MCP_TOKEN
-fi
+    ;;
+esac
+export ARCA_MCP_URL="$url"
 
 if [[ "$has_config" == false ]]; then
   args=(--config "$DEFAULT_CONFIG" "${args[@]}")
@@ -123,6 +118,20 @@ if [[ -z "$config_path" || ! -f "$config_path" ]]; then
   echo "Create it with:" >&2
   echo "  cp scripts/smoke/fiscal_smoke.example.json scripts/smoke/fiscal_smoke.local.json" >&2
   exit 2
+fi
+
+if [[ -z "${ARCA_MCP_TOKEN:-}" ]]; then
+  if [[ -t 0 ]]; then
+    read -r -s -p "ARCA-MCP API key: " ARCA_MCP_TOKEN
+    echo
+  else
+    IFS= read -r ARCA_MCP_TOKEN
+  fi
+  if [[ -z "$ARCA_MCP_TOKEN" ]]; then
+    echo "ERROR: ARCA-MCP API key is required." >&2
+    exit 2
+  fi
+  export ARCA_MCP_TOKEN
 fi
 
 echo "ARCA-MCP endpoint: $ARCA_MCP_URL"
