@@ -28,6 +28,19 @@ class HomologationHarnessTests(unittest.TestCase):
         self.assertNotIn("12345678901234", serialized)
         self.assertEqual("opaque-operation", redacted["operationId"])
 
+    def test_redact_preserves_pdf_status_but_omits_blob(self):
+        value = {
+            "pdf": {
+                "status": "Failed",
+                "errorCode": "RENDERER_TIMEOUT",
+                "base64": "QUJDREVGRw==",
+            }
+        }
+        redacted = harness.redact(value)
+        self.assertEqual("Failed", redacted["pdf"]["status"])
+        self.assertEqual("RENDERER_TIMEOUT", redacted["pdf"]["errorCode"])
+        self.assertNotEqual("QUJDREVGRw==", redacted["pdf"]["base64"])
+
     def test_parse_transport_body_accepts_sse(self):
         body = 'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n\n'
         parsed = harness.parse_transport_body(body)
@@ -52,6 +65,30 @@ class HomologationHarnessTests(unittest.TestCase):
         })
         self.assertIn("20123456786", values)
         self.assertIn("cred-ref-test", values)
+
+    def test_dry_run_with_unverified_environment_is_incomplete_not_failed(self):
+        report = {
+            "steps": [{"name": "diagnostic", "ok": True}],
+            "checks": {"environmentVerified": False, "preflightValid": True},
+            "missingEvidence": ["Emisión real no ejecutada"],
+        }
+        self.assertEqual("INCOMPLETE", harness.evaluate_overall_status(report, emission_requested=False))
+
+    def test_emission_with_failed_renderer_expectation_fails_gate(self):
+        report = {
+            "steps": [{"name": "pdf", "ok": True}],
+            "checks": {
+                "environmentVerified": True,
+                "preflightValid": True,
+                "emissionSucceeded": True,
+                "replaySameNumber": True,
+                "replaySameCae": True,
+                "pdfFiscalPreserved": True,
+                "pdfExpectedStatusObserved": False,
+            },
+            "missingEvidence": ["PDF inesperado"],
+        }
+        self.assertEqual("FAILED", harness.evaluate_overall_status(report, emission_requested=True))
 
 
 if __name__ == "__main__":
