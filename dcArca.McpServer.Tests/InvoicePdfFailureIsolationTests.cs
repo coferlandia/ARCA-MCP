@@ -1,5 +1,8 @@
+using System.Net;
+using System.Text;
 using System.Text.Json;
 using dcArca.Core.Models;
+using Microsoft.Extensions.Configuration;
 using Xunit;
 
 namespace dcArca.McpServer.Tests;
@@ -44,6 +47,50 @@ public class InvoicePdfFailureIsolationTests
         Assert.Equal(errorCode, result.Pdf.ErrorCode);
         Assert.Equal(providerStatusCode, result.Pdf.ProviderStatusCode);
         Assert.Equal(providerErrorCode, result.Pdf.ProviderErrorCode);
+    }
+
+    [Fact]
+    public async Task AuthorizedFiscalResult_RemainsIntact_WhenProviderErrorBodyHasNonObjectRoot()
+    {
+        var fiscal = Authorized();
+        var issuer = new CountingIssuer(fiscal);
+        var httpClient = new HttpClient(new DelegateHandler((_, _) => Task.FromResult(
+            new HttpResponseMessage(HttpStatusCode.Forbidden)
+            {
+                Content = new StringContent("[]", Encoding.UTF8, "application/json")
+            })))
+        {
+            BaseAddress = new Uri("https://pdf.test"),
+            Timeout = TimeSpan.FromSeconds(5)
+        };
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Pdf:BaseUrl"] = "https://pdf.test",
+                ["Pdf:ApiKey"] = "test-key"
+            })
+            .Build();
+        var service = new InvoicePdfService(
+            issuer,
+            new PdfDocumentRenderer(new PdfClient(httpClient, configuration)),
+            Config());
+
+        var result = await service.EmitAsync(
+            Invoice(),
+            "idem-non-object-provider-body",
+            new PdfTemplateReference("tpl_test", "3"),
+            JsonSerializer.SerializeToElement(new { cliente = "Cliente" }));
+
+        Assert.Same(fiscal, result.Fiscal);
+        Assert.True(result.Fiscal.Success);
+        Assert.Equal(dcEmissionOutcome.Authorized, result.Fiscal.EmissionOutcome);
+        Assert.Equal("CAE123", result.Fiscal.Cae);
+        Assert.Equal(123, result.Fiscal.NumeroComprobante);
+        Assert.Equal(1, issuer.CallCount);
+        Assert.Equal(PdfRenderStatus.Failed, result.Pdf.Status);
+        Assert.Equal("PDF_PROVIDER_FORBIDDEN", result.Pdf.ErrorCode);
+        Assert.Equal(403, result.Pdf.ProviderStatusCode);
+        Assert.Null(result.Pdf.ProviderErrorCode);
     }
 
     private static dcArcaConfig Config() => new()
@@ -108,5 +155,14 @@ public class InvoicePdfFailureIsolationTests
             RenderCallCount++;
             return Task.FromResult(result);
         }
+    }
+
+    private sealed class DelegateHandler(
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> callback) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+            => callback(request, cancellationToken);
     }
 }
