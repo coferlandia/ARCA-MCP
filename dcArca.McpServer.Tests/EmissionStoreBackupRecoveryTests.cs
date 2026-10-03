@@ -23,6 +23,25 @@ public class EmissionStoreBackupRecoveryTests
     }
 
     [Fact]
+    public async Task Restore_RejectsRunningHostRecoveryLease()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemEmissionIdempotencyStore(temp.Store);
+        await SaveAuthorizedAsync(store, "consumer-a", "ctx-a", "terminal", 9);
+        await EmissionStoreBackupRecovery.CreateBackupAsync(temp.Store, temp.Backup);
+        var gate = new FileSystemEmissionRecoveryGate(temp.Recovery);
+        await using var runtimeLease = gate.AcquireRuntimeLease();
+
+        var exception = await Assert.ThrowsAsync<IOException>(() =>
+            EmissionStoreBackupRecovery.RestoreAsync(temp.Backup, temp.Store, gate));
+
+        Assert.Equal("RECOVERY_RUNTIME_ACTIVE", exception.Message);
+        Assert.Null(await gate.GetBlockAsync());
+        Assert.NotNull(await new FileSystemEmissionIdempotencyStore(temp.Store).GetAsync(
+            EmissionRequestFingerprint.OperationKeyHash("consumer-a", "ctx-a", "terminal")));
+    }
+
+    [Fact]
     public async Task Restore_OlderBackupBlocksNewEmissionUntilEvidenceCompletion()
     {
         using var temp = new TempDirectory();
