@@ -207,5 +207,5 @@ PY
   echo "TEMPLATE_VERSION=$template_version"
   echo "TEMPLATE_OWNER=$visible_owner"
   echo "TEMPLATE_STATUS=$visible_status"
-  echo "TEMPLATE_PROVIDER_ID=$visible_id  # diagnóstico בלבד; no persistir en SecretarIA"
+  echo "TEMPLATE_PROVIDER_ID=$visible_id  # diagnóstico solamente; no persistir en SecretarIA"
 done < <(manifest_entries)
