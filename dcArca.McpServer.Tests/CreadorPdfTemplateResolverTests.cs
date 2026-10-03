@@ -90,6 +90,29 @@ public class CreadorPdfTemplateResolverTests
     }
 
     [Fact]
+    public async Task BodyListadoDetenido_RespetaTimeoutEndToEnd()
+    {
+        var handler = new DelegateHandler((_, _) => Task.FromResult(TemplatesResponse(new BlockingReadStream())));
+        var resolver = CreateResolver(handler, TimeSpan.FromMilliseconds(200));
+
+        var exception = await Assert.ThrowsAsync<CreadorPdfException>(() =>
+            resolver.ResolveAsync(new PdfTemplateReference("factura-ar", "3")));
+
+        Assert.Equal(PdfFailureKind.Timeout, exception.FailureKind);
+    }
+
+    [Fact]
+    public async Task CancelacionExplicitaDuranteLecturaListado_SePropaga()
+    {
+        var handler = new DelegateHandler((_, _) => Task.FromResult(TemplatesResponse(new BlockingReadStream())));
+        var resolver = CreateResolver(handler, TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            resolver.ResolveAsync(new PdfTemplateReference("factura-ar", "3"), cts.Token));
+    }
+
+    [Fact]
     public async Task CacheHit_EvitaSegundoListing()
     {
         var (resolver, handler) = CreateResolver(_ => TemplatesResponse(
@@ -176,12 +199,12 @@ public class CreadorPdfTemplateResolverTests
         return (CreateResolver(handler), handler);
     }
 
-    private static CreadorPdfTemplateResolver CreateResolver(DelegateHandler handler)
+    private static CreadorPdfTemplateResolver CreateResolver(DelegateHandler handler, TimeSpan? timeout = null)
     {
         var httpClient = new HttpClient(handler)
         {
             BaseAddress = new Uri("https://pdf.test"),
-            Timeout = TimeSpan.FromSeconds(5)
+            Timeout = timeout ?? TimeSpan.FromSeconds(5)
         };
         return new CreadorPdfTemplateResolver(httpClient, Configuration());
     }
@@ -214,6 +237,12 @@ public class CreadorPdfTemplateResolverTests
             Content = new StringContent(JsonSerializer.Serialize(templates), Encoding.UTF8, "application/json")
         };
 
+    private static HttpResponseMessage TemplatesResponse(Stream stream)
+        => new(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(stream)
+        };
+
     private static HttpResponseMessage ErrorResponse(HttpStatusCode status, string code)
         => new(status)
         {
@@ -241,6 +270,32 @@ public class CreadorPdfTemplateResolverTests
         {
             CallCount++;
             return callback(request, cancellationToken);
+        }
+    }
+
+    private sealed class BlockingReadStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
         }
     }
 
