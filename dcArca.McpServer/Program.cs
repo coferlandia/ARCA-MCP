@@ -13,6 +13,16 @@ var builder = WebApplication.CreateBuilder(args);
 
 var apiKeysDirectory = builder.Configuration["ApiKeys:Directory"];
 var emissionIdempotencyDirectory = builder.Configuration["EmissionIdempotency:Directory"];
+if (builder.Environment.EnvironmentName == "Testing"
+    && string.IsNullOrWhiteSpace(emissionIdempotencyDirectory))
+{
+    // WebApplicationFactory can start several independent test hosts in parallel. Give each
+    // host its own durable filesystem topology unless a test explicitly supplies a store.
+    emissionIdempotencyDirectory = Path.Combine(
+        Path.GetTempPath(),
+        "dcarca-mcp-host-tests",
+        Guid.NewGuid().ToString("N"));
+}
 
 var arcaSettingsFile = builder.Environment.EnvironmentName == "Testing"
     ? $"appsettings.{builder.Environment.EnvironmentName}.json"
