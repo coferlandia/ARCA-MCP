@@ -1,3 +1,4 @@
+using System.Security.Cryptography.X509Certificates;
 using dcArca.Core.Services;
 
 namespace dcArca.McpServer;
@@ -18,7 +19,9 @@ public sealed record FiscalAssignmentValidationResult(
     string CredentialId,
     int PointOfSale,
     DateTimeOffset CheckedAt,
-    string? Evidence = null)
+    string? Evidence = null,
+    DateTimeOffset? CertificateNotBefore = null,
+    DateTimeOffset? CertificateNotAfter = null)
 {
     public bool Verified => Status == FiscalAssignmentValidationStatus.Verified;
 }
@@ -83,6 +86,59 @@ public sealed class FiscalAssignmentAuthorizationValidator : IFiscalAssignmentAu
                 DateTimeOffset.UtcNow);
         }
 
+        DateTimeOffset? certificateNotBefore;
+        DateTimeOffset? certificateNotAfter;
+        try
+        {
+            using var certificate = X509CertificateLoader.LoadPkcs12FromFile(
+                materialized.Config.CertificatePath,
+                materialized.Config.CertificatePassword);
+            certificateNotBefore = new DateTimeOffset(certificate.NotBefore.ToUniversalTime());
+            certificateNotAfter = new DateTimeOffset(certificate.NotAfter.ToUniversalTime());
+        }
+        catch
+        {
+            return new FiscalAssignmentValidationResult(
+                FiscalAssignmentValidationStatus.InvalidConfiguration,
+                "CERTIFICATE_UNREADABLE",
+                "La credencial configurada no pudo leerse como certificado PKCS#12.",
+                context.ContextId,
+                assignment.AssignmentRevision,
+                assignment.CredentialId,
+                context.PointOfSale,
+                DateTimeOffset.UtcNow);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (certificateNotAfter <= now)
+        {
+            return new FiscalAssignmentValidationResult(
+                FiscalAssignmentValidationStatus.NotVerified,
+                "CERTIFICATE_EXPIRED",
+                "El certificado configurado está vencido y no puede considerarse autorizado.",
+                context.ContextId,
+                assignment.AssignmentRevision,
+                assignment.CredentialId,
+                context.PointOfSale,
+                now,
+                CertificateNotBefore: certificateNotBefore,
+                CertificateNotAfter: certificateNotAfter);
+        }
+        if (certificateNotBefore > now)
+        {
+            return new FiscalAssignmentValidationResult(
+                FiscalAssignmentValidationStatus.NotVerified,
+                "CERTIFICATE_NOT_YET_VALID",
+                "El certificado configurado todavía no se encuentra dentro de su período de vigencia.",
+                context.ContextId,
+                assignment.AssignmentRevision,
+                assignment.CredentialId,
+                context.PointOfSale,
+                now,
+                CertificateNotBefore: certificateNotBefore,
+                CertificateNotAfter: certificateNotAfter);
+        }
+
         var client = _httpClientFactory.CreateClient(nameof(FiscalAssignmentAuthorizationValidator));
         var probe = await _probe.ProbeAsync(
             materialized.Config,
@@ -101,7 +157,9 @@ public sealed class FiscalAssignmentAuthorizationValidator : IFiscalAssignmentAu
             assignment.CredentialId,
             context.PointOfSale,
             probe.CheckedAt,
-            evidence);
+            evidence,
+            certificateNotBefore,
+            certificateNotAfter);
     }
 
     public async Task<FiscalAssignmentValidationResult> ValidateCandidateAsync(
