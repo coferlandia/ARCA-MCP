@@ -61,7 +61,8 @@ Configuración principal:
   "EmissionIdempotency": { "Directory": "/data/emission-idempotency" },
   "Pdf": {
     "BaseUrl": "http://creadorpdf:8080",
-    "ApiKey": "DESDE_SECRET_MANAGER"
+    "ApiKey": "DESDE_SECRET_MANAGER",
+    "TemplateResolutionCacheSeconds": 300
   }
 }
 ```
@@ -73,6 +74,7 @@ ApiKeys__Directory=/data
 EmissionIdempotency__Directory=/data/emission-idempotency
 Pdf__BaseUrl=http://creadorpdf:8080
 Pdf__ApiKey=...
+Pdf__TemplateResolutionCacheSeconds=300
 dcArcaConfig__Cuit=...
 dcArcaConfig__CertificatePath=/certs/certificado.pfx
 dcArcaConfig__CertificatePassword=...
@@ -126,15 +128,27 @@ Parámetros principales:
 ```text
 numeroComprobante
 tipoComprobante
-templateId
+templateId       # actualmente representa la templateKey lógica
 templateVersion
 templateData
 ```
 
+Por compatibilidad del schema, el parámetro sigue llamándose `templateId`, pero **nuevos callers deben enviar una referencia lógica estable**, por ejemplo:
+
+```text
+templateId = factura-ar
+templateVersion = 3
+```
+
+ARCA-MCP resuelve internamente esa referencia contra los templates `published` visibles para su credencial runtime. Los `tpl_*` físicos siguen aceptándose temporalmente como compatibilidad legacy y están deprecated para callers nuevos.
+
 El flujo es estrictamente:
 
 ```text
-FECompConsultar -> FiscalDocumentSnapshot -> creadorpdf
+FECompConsultar
+    -> FiscalDocumentSnapshot
+    -> resolver templateKey+version
+    -> creadorpdf
 ```
 
 Nunca ejecuta `FECAESolicitar` ni el sequencer de emisión. Sirve tanto para el render separado inmediatamente después de emitir como para reenvíos históricos.
@@ -183,6 +197,88 @@ significa que la factura ya existe. Un retry con la misma `idempotencyKey` recup
 #### `solicitar_cae` — bajo nivel
 
 Permite elegir manualmente el número fiscal. Se conserva para integraciones avanzadas que coordinan por su cuenta numeración e idempotencia. No es el flujo recomendado para callers generales ni retries automáticos.
+
+## Contrato documental
+
+`PdfRenderResult` conserva compatibilidad con:
+
+```text
+Status
+Base64
+ErrorCode
+Message
+```
+
+y puede agregar metadata diagnóstica opcional:
+
+```text
+Provider
+ProviderStatusCode
+ProviderErrorCode
+FailureKind
+```
+
+La metadata específica del provider sirve para diagnóstico, pero las decisiones del caller deben basarse en los códigos públicos estables de ARCA-MCP.
+
+### Códigos públicos de PDF
+
+```text
+PDF_INVALID_REQUEST
+PDF_PROVIDER_UNAUTHORIZED
+PDF_PROVIDER_FORBIDDEN
+PDF_TEMPLATE_NOT_FOUND
+PDF_TEMPLATE_NOT_PUBLISHED
+PDF_TEMPLATE_AMBIGUOUS
+PDF_RATE_LIMITED
+PDF_TIMEOUT
+PDF_UNAVAILABLE
+PDF_INVALID_RESPONSE
+PDF_RENDER_FAILED
+```
+
+Mapping relevante del provider actual:
+
+| Condición | Código público |
+| --- | --- |
+| HTTP 400 / 422 | `PDF_INVALID_REQUEST` |
+| HTTP 401 | `PDF_PROVIDER_UNAUTHORIZED` |
+| HTTP 403 | `PDF_PROVIDER_FORBIDDEN` |
+| HTTP 404 + `unknown_template` | `PDF_TEMPLATE_NOT_FOUND` |
+| HTTP 429 | `PDF_RATE_LIMITED` |
+| HTTP 408 o timeout local no causado por caller | `PDF_TIMEOUT` |
+| HTTP 5xx / DNS / refused / network | `PDF_UNAVAILABLE` |
+| 2xx con MIME no PDF | `PDF_INVALID_RESPONSE` |
+
+No se asume que cualquier 404 sea `template not found`; se utiliza el código estructurado del provider cuando existe.
+
+La cancelación explícita del caller se propaga y no se convierte a un error PDF.
+
+### Referencias de template y cache
+
+La referencia durable es:
+
+```text
+templateKey + templateVersion
+```
+
+La resolución se cachea en memoria por provider/key/version. Si un ID físico cacheado deja de existir y el provider responde `unknown_template`, ARCA-MCP invalida esa entrada, vuelve a resolver y reintenta **una sola vez el render**. No se repite ninguna operación fiscal.
+
+SecretarIA debería conservar para reproducción visual:
+
+```text
+templateKey
+templateVersion
+templateData snapshot
+```
+
+No debería persistir como contrato de negocio:
+
+```text
+tpl_*
+owner_id
+Pdf:BaseUrl
+Pdf:ApiKey
+```
 
 ## Idempotencia durable
 
@@ -259,6 +355,7 @@ No llaman a ARCA y no devuelven secretos ni CUIT.
 - No entregar secretos a frontend, LLM o usuario final.
 - Aplicar mínimo privilegio en scopes.
 - No registrar `idempotencyKey` en claro; usar su hash para correlación.
+- No registrar Authorization, API keys, body remoto completo, PDF Base64 ni `templateData` completo.
 - Preferir las tools idempotentes recomendadas sobre `solicitar_cae`.
 - Mantener certificados y secretos en mecanismos provistos por el host.
 
