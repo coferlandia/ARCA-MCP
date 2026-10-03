@@ -279,6 +279,16 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
                 await _seriesCoordinator.ReleaseAsync(identity, keyHash, cancellationToken);
             return result;
         }
+        catch (EmissionTerminalStateConflictException conflict)
+        {
+            var terminal = ReplayTerminal(conflict.Existing)
+                ?? throw new InvalidDataException("El store informó conflicto terminal sin un resultado fiscal terminal válido.");
+            await ReleaseReplayReservationIfOwnedAsync(
+                conflict.Existing.Identity,
+                conflict.Existing.KeyHash,
+                CancellationToken.None);
+            return terminal;
+        }
         catch (FiscalSeriesBlockedException)
         {
             return Error(
