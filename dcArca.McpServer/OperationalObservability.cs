@@ -32,6 +32,8 @@ public sealed class ObservableEmissionIdempotencyStore : IEmissionIdempotencySto
         _logger = logger;
     }
 
+    internal FileSystemEmissionIdempotencyStore Inner => _inner;
+
     public async Task EnsureContextAsync(FiscalContextDescriptor context, CancellationToken cancellationToken = default)
     {
         try
@@ -137,7 +139,9 @@ public sealed class ObservableFiscalSeriesCoordinator : IFiscalSeriesCoordinator
     }
 
     public Task InitializeAsync(IEmissionIdempotencyStore store, CancellationToken cancellationToken = default)
-        => _inner.InitializeAsync(store, cancellationToken);
+        => _inner.InitializeAsync(
+            store is ObservableEmissionIdempotencyStore observable ? observable.Inner : store,
+            cancellationToken);
 
     public Task<FiscalSeriesReservation?> GetActiveAsync(
         FiscalOperationIdentity identity,
