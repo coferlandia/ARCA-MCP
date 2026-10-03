@@ -89,8 +89,6 @@ public sealed record McpCredentialAssignmentDiagnostic(
     string? LastValidationCode,
     string? LastValidationMessage,
     DateTimeOffset? LastValidationCheckedAt,
-    DateTimeOffset? CertificateNotBefore,
-    DateTimeOffset? CertificateNotAfter,
     IReadOnlyList<string> RetirementBlockers);
 
 public sealed record McpFiscalDiagnosticResult(
