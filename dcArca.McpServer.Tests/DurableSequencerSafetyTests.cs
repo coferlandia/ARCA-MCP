@@ -99,6 +99,30 @@ public class DurableSequencerSafetyTests
     }
 
     [Fact]
+    public async Task TransportRecoveredSuccess_MustPassFiscalComparer()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemEmissionIdempotencyStore(temp.Path);
+        using var coordinator = new FileSystemFiscalSeriesCoordinator(temp.Path);
+        await coordinator.InitializeAsync(store);
+        var fake = new DurableFakeWsfeClient
+        {
+            ReturnRecoveredSuccessOnNextIssue = true,
+            ReturnMismatchedConsult = true
+        };
+        var sequencer = Sequencer(fake, store, coordinator);
+
+        var result = await sequencer.EmitAsync(Request(), "op-a");
+        var second = await sequencer.EmitAsync(Request(), "op-b");
+
+        Assert.False(result.Success);
+        Assert.Equal("RECONCILIATION_MISMATCH", result.Codigo);
+        Assert.Equal(dcEmissionOutcome.Uncertain, result.EmissionOutcome);
+        Assert.Equal("SERIES_RESERVATION_BLOCKED", second.Codigo);
+        Assert.Equal(1, fake.EmitCalls);
+    }
+
+    [Fact]
     public async Task NumberDriftBeforeSubmitting_BlocksWithoutEmission()
     {
         using var temp = new TempDirectory();
@@ -151,7 +175,6 @@ public class DurableSequencerSafetyTests
         ImporteTotal = 121m,
         ImporteNoGravado = 0m,
         ImporteExento = 0m,
-        ImporteTributos = 0m,
         AlicuotaIva = dcAlicuotaIva.Veintiuno,
         MonedaId = "PES",
         MonedaCotizacion = 1m,
@@ -165,6 +188,7 @@ public class DurableSequencerSafetyTests
 
         public Queue<long> LastNumberResponses { get; } = new();
         public bool ReturnUncertainOnNextIssue { get; set; }
+        public bool ReturnRecoveredSuccessOnNextIssue { get; set; }
         public bool ConsultAuthorized { get; set; }
         public bool ReturnMismatchedConsult { get; set; }
         public int EmitCalls { get; private set; }
@@ -192,6 +216,14 @@ public class DurableSequencerSafetyTests
                 });
             }
 
+            if (ReturnRecoveredSuccessOnNextIssue)
+            {
+                ReturnRecoveredSuccessOnNextIssue = false;
+                var recovered = BuildConsultResponse(factura, _lastNumber);
+                recovered.EmissionOutcome = dcEmissionOutcome.RecoveredSuccess;
+                return Task.FromResult(recovered);
+            }
+
             return Task.FromResult(new dcFacturaResponse
             {
                 Success = true,
@@ -208,7 +240,11 @@ public class DurableSequencerSafetyTests
             if (!ConsultAuthorized || _lastRequest is null)
                 return Task.FromResult(new dcFacturaResponse { Success = false, NumeroComprobante = numeroComprobante });
 
-            var request = _lastRequest;
+            return Task.FromResult(BuildConsultResponse(_lastRequest, numeroComprobante));
+        }
+
+        private dcFacturaResponse BuildConsultResponse(dcFacturaRequest request, long numeroComprobante)
+        {
             var response = new dcFacturaResponse
             {
                 Success = true,
@@ -244,7 +280,7 @@ public class DurableSequencerSafetyTests
                     Importe = request.ImporteIva
                 });
             }
-            return Task.FromResult(response);
+            return response;
         }
 
         public Task<dcFacturaResponse> SolicitarCaeAsync(dcFacturaRequest factura, CancellationToken cancellationToken = default)
