@@ -78,7 +78,6 @@ public class ConsultEvidenceFailClosedTests
     public void Snapshot_InvalidTaxLineAmount_FailsClosed()
     {
         var request = Request();
-        request.ImporteTributos = 1m;
         request.ImporteTotal = 122m;
         request.Tributos =
         [
@@ -137,7 +136,6 @@ public class ConsultEvidenceFailClosedTests
         ImporteTotal = 121m,
         ImporteNoGravado = 0m,
         ImporteExento = 0m,
-        ImporteTributos = 0m,
         AlicuotaIva = dcAlicuotaIva.Veintiuno,
         MonedaId = "PES",
         MonedaCotizacion = 1m,
