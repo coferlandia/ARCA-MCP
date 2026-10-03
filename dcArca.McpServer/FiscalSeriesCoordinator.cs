@@ -239,6 +239,45 @@ public sealed class FileSystemFiscalSeriesCoordinator : IFiscalSeriesCoordinator
             records[keyHash] = record;
         }
 
+        // Existing reservations are authoritative for the narrow crash window between
+        // ReserveAsync and persisting NumberAssigned. Repair that one transition explicitly.
+        foreach (var path in Directory.EnumerateFiles(_reservationsDirectory, "*.json", SearchOption.TopDirectoryOnly))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var reservation = await ReadReservationFileAsync(path, cancellationToken);
+            if (!records.TryGetValue(reservation.OwnerKeyHash, out var owner))
+                throw new InvalidDataException("SERIES_RESERVATION_OWNER_MISSING");
+
+            if (!string.Equals(owner.Identity.SeriesKey, reservation.SeriesKey, StringComparison.Ordinal))
+                throw new InvalidDataException("SERIES_RESERVATION_OPERATION_MISMATCH");
+
+            if (owner.State is EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected)
+            {
+                File.Delete(path);
+                continue;
+            }
+
+            if (owner.State == EmissionIdempotencyState.Created)
+            {
+                if (owner.NumeroComprobante.HasValue && owner.NumeroComprobante.Value != reservation.NumeroComprobante)
+                    throw new InvalidDataException("SERIES_RESERVATION_OPERATION_MISMATCH");
+
+                var repaired = owner with
+                {
+                    NumeroComprobante = reservation.NumeroComprobante,
+                    State = EmissionIdempotencyState.NumberAssigned,
+                    UpdatedAt = DateTimeOffset.UtcNow
+                };
+                await store.SaveAsync(repaired, cancellationToken);
+                records[owner.KeyHash] = repaired;
+                continue;
+            }
+
+            if (!IsReservationOwningState(owner)
+                || owner.NumeroComprobante != reservation.NumeroComprobante)
+                throw new InvalidDataException("SERIES_RESERVATION_OPERATION_MISMATCH");
+        }
+
         var pending = records.Values
             .Where(IsReservationOwningState)
             .ToArray();
@@ -253,27 +292,8 @@ public sealed class FileSystemFiscalSeriesCoordinator : IFiscalSeriesCoordinator
                 throw new InvalidDataException($"SERIES_MULTIPLE_PENDING_OWNERS:{group.Key}");
         }
 
-        foreach (var path in Directory.EnumerateFiles(_reservationsDirectory, "*.json", SearchOption.TopDirectoryOnly))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var reservation = await ReadReservationFileAsync(path, cancellationToken);
-            if (!records.TryGetValue(reservation.OwnerKeyHash, out var owner))
-                throw new InvalidDataException("SERIES_RESERVATION_OWNER_MISSING");
-
-            if (!string.Equals(owner.Identity.SeriesKey, reservation.SeriesKey, StringComparison.Ordinal)
-                || owner.NumeroComprobante != reservation.NumeroComprobante)
-                throw new InvalidDataException("SERIES_RESERVATION_OPERATION_MISMATCH");
-
-            if (owner.State is EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected)
-            {
-                File.Delete(path);
-                continue;
-            }
-
-            if (!IsReservationOwningState(owner))
-                throw new InvalidDataException("SERIES_RESERVATION_OWNER_STATE_INVALID");
-        }
-
+        // Rebuild missing reservation files from durable operation state after a crash that
+        // happened after NumberAssigned but before the reservation file was visible again.
         foreach (var operation in pending)
         {
             var existing = await ReadReservationAsync(operation.Identity.SeriesKey, cancellationToken);
