@@ -63,22 +63,24 @@ bash "$RUNNER" revoke --directory "$tmp/store" --id key_test >/dev/null
 grep -q -- 'revoke-key' "$tmp/capture/dotnet.args"
 grep -q -- 'key_test' "$tmp/capture/dotnet.args"
 
-# Explicit Docker backend must use the SDK image, mount the selected store at /data,
-# and point the CLI to /data rather than the host path.
+# Explicit Docker backend must execute the CLI packaged in the deployed MCP image,
+# mount the selected store at /data, and point the CLI to that container path.
 bash "$RUNNER" create \
   --backend docker \
+  --image custom-arca:ops \
   --directory "$tmp/store" \
   --name docker-smoke \
   --consumer cadencia \
   --context cadencia-arca-homologacion \
   --mode smoke >/dev/null
 
-grep -q -- 'mcr.microsoft.com/dotnet/sdk:10.0' "$tmp/capture/docker.args"
+grep -q -- 'custom-arca:ops' "$tmp/capture/docker.args"
 grep -q -- "$tmp/store:/data" "$tmp/capture/docker.args"
 grep -q -- 'ApiKeys__Directory=/data' "$tmp/capture/docker.args"
+grep -q -- '/tools/dcArca.Cli.dll' "$tmp/capture/docker.args"
 grep -q -- 'create-key' "$tmp/capture/docker.args"
 
-# A consumer-bound key must fail closed when no context/grant is supplied.
+# A consumer-bound smoke key must fail closed when no context is supplied.
 if bash "$RUNNER" create \
   --directory "$tmp/store" \
   --name invalid \
