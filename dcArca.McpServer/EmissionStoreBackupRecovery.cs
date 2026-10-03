@@ -102,14 +102,15 @@ public static class EmissionStoreBackupRecovery
         EnsureDirectoriesDoNotOverlap(backup, target);
         EnsureDirectoriesDoNotOverlap(target, recoveryGate.DirectoryPath);
 
+        // This lease lives outside the store being swapped. Current server versions acquire a
+        // shared runtime lease for their full lifetime, so restore cannot race a live host or a
+        // host starting while the store path is being replaced.
+        await using var maintenanceLease = recoveryGate.AcquireMaintenanceLease();
         var manifest = await ReadAndVerifyBackupAsync(backup, cancellationToken);
 
-        // Prove the supported topology has no live writer before any mutation. Release the
-        // proof before directory rename so Windows can move the directory as well.
+        FileStream? writerProof = null;
         if (Directory.Exists(target))
-        {
-            await using var writerProof = AcquireWriterStoppedProof(target);
-        }
+            writerProof = AcquireWriterStoppedProof(target);
 
         var parent = Path.GetDirectoryName(target)
             ?? throw new InvalidOperationException("No se pudo resolver el directorio padre del store destino.");
@@ -121,16 +122,28 @@ public static class EmissionStoreBackupRecovery
             ? Path.Combine(parent, targetName + ".pre-restore-" + restoreId)
             : null;
         if (Directory.Exists(staging) || (rollback is not null && Directory.Exists(rollback)))
+        {
+            writerProof?.Dispose();
             throw new IOException("El staging/rollback de restore ya existe.");
+        }
 
-        // The gate lives outside the restored store and is set before swap. Any unexpected
-        // restart after this point fails closed for emission until explicit reconciliation.
-        var block = await recoveryGate.MarkRestoreRequiredAsync(
-            restoreId,
-            manifest.BackupId,
-            manifest.CreatedAt,
-            "Restored emission store requires reconciliation of the uncovered window before new authorizations.",
-            cancellationToken);
+        // The gate lives outside the restored store and is set before staging/swap. Any
+        // unexpected restart after this point fails closed for emission until reconciliation.
+        EmissionRecoveryBlock block;
+        try
+        {
+            block = await recoveryGate.MarkRestoreRequiredAsync(
+                restoreId,
+                manifest.BackupId,
+                manifest.CreatedAt,
+                "Restored emission store requires reconciliation of the uncovered window before new authorizations.",
+                cancellationToken);
+        }
+        catch
+        {
+            writerProof?.Dispose();
+            throw;
+        }
 
         try
         {
@@ -146,6 +159,13 @@ public static class EmissionStoreBackupRecovery
 
             await VerifyFilesAsync(staging, manifest.Files, cancellationToken);
             await ValidateRestoredStoreAsync(staging, cancellationToken);
+
+            // Keep the original store writer lock for all expensive work. Release it only after
+            // staging has been fully verified, because Windows cannot rename a directory that
+            // contains our open handle. The recovery maintenance lease still prevents a current
+            // MCP host from starting in this narrow swap window.
+            writerProof?.Dispose();
+            writerProof = null;
 
             if (rollback is not null)
                 Directory.Move(target, rollback);
@@ -177,6 +197,10 @@ public static class EmissionStoreBackupRecovery
             // Keep the recovery gate blocked after any restore failure: the operator must
             // inspect the active/rollback directories before explicitly completing recovery.
             throw;
+        }
+        finally
+        {
+            writerProof?.Dispose();
         }
     }
 
