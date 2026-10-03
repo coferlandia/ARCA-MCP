@@ -20,8 +20,6 @@ if (builder.Environment.EnvironmentName == "Testing")
         Path.GetTempPath(),
         "dcarca-mcp-host-tests",
         Guid.NewGuid().ToString("N"));
-    // WebApplicationFactory can start several independent hosts in parallel. Unless a test
-    // explicitly supplies persistence, isolate all fiscal topology owned by that host.
     emissionIdempotencyDirectory ??= Path.Combine(testHostRoot, "emission-idempotency");
     fiscalContextsDirectory ??= Path.Combine(testHostRoot, "fiscal-contexts");
 }
@@ -38,11 +36,13 @@ builder.Services.AddSingleton(arcaConfig);
 builder.Services.AddSingleton(fiscalContextOptions);
 builder.Services.AddSingleton<IAfipLogger>(sp =>
     new AfipLoggerAdapter(sp.GetRequiredService<ILoggerFactory>().CreateLogger("dcArca")));
-builder.Services.AddSingleton<IEmissionIdempotencyStore>(_ =>
-    new FileSystemEmissionIdempotencyStore(emissionIdempotencyDirectory));
+builder.Services.AddSingleton(_ => new FileSystemEmissionIdempotencyStore(emissionIdempotencyDirectory));
+builder.Services.AddSingleton<IEmissionIdempotencyStore>(sp =>
+    sp.GetRequiredService<FileSystemEmissionIdempotencyStore>());
+builder.Services.AddSingleton<IEmissionOperationInspector, FileSystemEmissionOperationInspector>();
 builder.Services.AddSingleton<IFiscalSeriesCoordinator>(sp =>
 {
-    var store = (FileSystemEmissionIdempotencyStore)sp.GetRequiredService<IEmissionIdempotencyStore>();
+    var store = sp.GetRequiredService<FileSystemEmissionIdempotencyStore>();
     return new FileSystemFiscalSeriesCoordinator(store.DirectoryPath);
 });
 builder.Services.AddSingleton<IRepresentedFiscalContextStore>(_ =>
@@ -50,6 +50,7 @@ builder.Services.AddSingleton<IRepresentedFiscalContextStore>(_ =>
 builder.Services.AddSingleton<IFiscalCredentialMaterializer, FiscalCredentialMaterializer>();
 builder.Services.AddSingleton<IFiscalContextRuntimeResolver, FiscalContextRuntimeResolver>();
 builder.Services.AddSingleton<IFiscalAssignmentAuthorizationValidator, FiscalAssignmentAuthorizationValidator>();
+builder.Services.AddSingleton<McpOperationContractService>();
 builder.Services.AddSingleton<IPdfDocumentRenderer, PdfDocumentRenderer>();
 builder.Services.AddSingleton<IApiKeyStore>(_ => new FileSystemApiKeyStore(apiKeysDirectory));
 builder.Services.AddHttpContextAccessor();
@@ -111,8 +112,6 @@ await contextStore.InitializeLegacyAsync(new RepresentedFiscalContextRecord(
             "legacy-bootstrap")
     ]));
 
-// Acquire the supported V1 single-writer lease and rebuild/validate durable reservations
-// before the server becomes ready to accept fiscal work.
 var emissionStore = app.Services.GetRequiredService<IEmissionIdempotencyStore>();
 var seriesCoordinator = app.Services.GetRequiredService<IFiscalSeriesCoordinator>();
 await seriesCoordinator.InitializeAsync(emissionStore);
