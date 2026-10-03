@@ -6,6 +6,9 @@ using dcArca.McpServer;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.AspNetCore;
 
+if (await EmissionStoreMigrationCommand.TryRunAsync(args))
+    return;
+
 var builder = WebApplication.CreateBuilder(args);
 
 var apiKeysDirectory = builder.Configuration["ApiKeys:Directory"];
@@ -16,8 +19,12 @@ var arcaSettingsFile = builder.Environment.EnvironmentName == "Testing"
     : "appsettings.json";
 var arcaConfig = dcConfigurationHelper.LoadFromJson(
     Path.Combine(builder.Environment.ContentRootPath, arcaSettingsFile));
+var fiscalContextOptions = SingleFiscalContextOptions.FromConfiguration(
+    builder.Configuration.GetSection("FiscalContext"));
 
 builder.Services.AddSingleton(arcaConfig);
+builder.Services.AddSingleton(fiscalContextOptions);
+builder.Services.AddSingleton<IFiscalOperationIdentityProvider, SingleFiscalOperationIdentityProvider>();
 builder.Services.AddSingleton<IAfipLogger>(sp =>
     new AfipLoggerAdapter(sp.GetRequiredService<ILoggerFactory>().CreateLogger("dcArca")));
 builder.Services.AddSingleton<dcArcaAuthService>(sp => new dcArcaAuthService(
