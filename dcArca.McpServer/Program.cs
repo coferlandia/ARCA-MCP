@@ -20,6 +20,8 @@ if (builder.Environment.EnvironmentName == "Testing")
         Path.GetTempPath(),
         "dcarca-mcp-host-tests",
         Guid.NewGuid().ToString("N"));
+    // WebApplicationFactory can start several independent hosts in parallel. Unless a test
+    // explicitly supplies persistence, isolate all fiscal topology owned by that host.
     emissionIdempotencyDirectory ??= Path.Combine(testHostRoot, "emission-idempotency");
     fiscalContextsDirectory ??= Path.Combine(testHostRoot, "fiscal-contexts");
 }
@@ -112,6 +114,8 @@ await contextStore.InitializeLegacyAsync(new RepresentedFiscalContextRecord(
             "legacy-bootstrap")
     ]));
 
+// Acquire the supported V1 single-writer lease and rebuild/validate durable reservations
+// before the server becomes ready to accept fiscal work.
 var emissionStore = app.Services.GetRequiredService<IEmissionIdempotencyStore>();
 var seriesCoordinator = app.Services.GetRequiredService<IFiscalSeriesCoordinator>();
 await seriesCoordinator.InitializeAsync(emissionStore);
