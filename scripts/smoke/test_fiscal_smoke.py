@@ -81,12 +81,21 @@ class FiscalSmokeTests(unittest.TestCase):
             smoke.assert_execution_allowed("homologacion", execute=False, allow_production=False)
         smoke.assert_execution_allowed("homologacion", execute=True, allow_production=False)
 
+    def test_unknown_environment_fails_closed(self):
+        with self.assertRaisesRegex(ValueError, "Entorno fiscal no reconocido"):
+            smoke.assert_execution_allowed("misterioso", execute=True, allow_production=True)
+
     def test_receiver_can_be_overridden_per_letter(self):
         default = self.receptor()
         consumer = {"documentNumber": 0, "documentType": 99, "vatCondition": "ConsumidorFinal"}
         context = {"receiver": default, "receivers": {"B": consumer}}
         self.assertEqual(smoke.receiver_for(context, "A"), default)
         self.assertEqual(smoke.receiver_for(context, "B"), consumer)
+
+    def test_authorized_document_requires_compensation_even_if_smoke_status_failed(self):
+        result = {"status": "FAIL", "fiscalAuthorized": True, "number": 123}
+        self.assertTrue(smoke.must_compensate(result))
+        self.assertFalse(smoke.must_compensate({"status": "FAIL", "fiscalAuthorized": False}))
 
 
 if __name__ == "__main__":
