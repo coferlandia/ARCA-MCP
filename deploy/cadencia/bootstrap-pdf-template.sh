@@ -7,30 +7,18 @@ PDF_BASE_URL="${PDF_BASE_URL:-http://creadorpdf:8080}"
 MANIFEST_FILE="${PDF_TEMPLATE_MANIFEST:-$SCRIPT_DIR/pdf-templates/manifest.json}"
 TEMPLATE_API_KEY="${CREADORPDF_TEMPLATE_API_KEY:-}"
 
-for cmd in docker python3; do
-  command -v "$cmd" >/dev/null 2>&1 || {
-    echo "Falta dependencia requerida: $cmd" >&2
-    exit 1
-  }
-done
-
-[[ -f "$MANIFEST_FILE" ]] || { echo "No existe $MANIFEST_FILE" >&2; exit 1; }
-
-docker inspect "$ARCA_CONTAINER" >/dev/null 2>&1 || {
-  echo "No existe el contenedor $ARCA_CONTAINER" >&2
+command -v python3 >/dev/null 2>&1 || {
+  echo "Falta dependencia requerida: python3" >&2
   exit 1
 }
+
+[[ -f "$MANIFEST_FILE" ]] || { echo "No existe $MANIFEST_FILE" >&2; exit 1; }
 
 runtime_api_key_available() {
   docker exec "$ARCA_CONTAINER" sh -lc '
     key="$(printenv Pdf__ApiKey 2>/dev/null || true)"
     [ -n "$key" ]
   '
-}
-
-runtime_api_key_available || {
-  echo "Falta Pdf__ApiKey en el contenedor ARCA." >&2
-  exit 1
 }
 
 template_request() {
@@ -73,12 +61,15 @@ try:
     manifest = json.loads(path.read_text(encoding="utf-8"))
 except Exception as exc:
     raise SystemExit(f"Manifest inválido: {exc}")
+if not isinstance(manifest, dict):
+    raise SystemExit("Manifest inválido: la raíz debe ser un objeto")
 if manifest.get("version") != 1:
     raise SystemExit("Manifest inválido: version debe ser 1")
 items = manifest.get("templates")
 if not isinstance(items, list) or not items:
     raise SystemExit("Manifest inválido: templates debe ser una lista no vacía")
 seen = set()
+rows = []
 for index, item in enumerate(items):
     if not isinstance(item, dict):
         raise SystemExit(f"Manifest inválido: templates[{index}] debe ser objeto")
@@ -92,7 +83,8 @@ for index, item in enumerate(items):
     seen.add(logical)
     if any("\t" in value or "\n" in value for value in (key, version, template, schema)):
         raise SystemExit("Manifest inválido: no se permiten tabs/newlines en los campos")
-    print("\t".join((key, version, template, schema)))
+    rows.append("\t".join((key, version, template, schema)))
+print("\n".join(rows))
 PY
 }
 
@@ -114,15 +106,42 @@ for item in matches:
 ' "$key" "$version"
 }
 
+if ! manifest_data="$(manifest_entries)"; then
+  exit 1
+fi
+
 manifest_dir="$(cd "$(dirname "$MANIFEST_FILE")" && pwd)"
+
+# Validar todos los assets antes de cualquier acceso a Docker/provider para evitar
+# aplicar parcialmente un manifest cuya inconsistencia era detectable localmente.
+while IFS=$'\t' read -r template_key template_version template_rel schema_rel; do
+  [[ -n "$template_key" ]] || continue
+  template_file="$manifest_dir/$template_rel"
+  schema_file="$manifest_dir/$schema_rel"
+  [[ -f "$template_file" ]] || { echo "No existe $template_file" >&2; exit 1; }
+  [[ -f "$schema_file" ]] || { echo "No existe $schema_file" >&2; exit 1; }
+done <<< "$manifest_data"
+
+command -v docker >/dev/null 2>&1 || {
+  echo "Falta dependencia requerida: docker" >&2
+  exit 1
+}
+
+docker inspect "$ARCA_CONTAINER" >/dev/null 2>&1 || {
+  echo "No existe el contenedor $ARCA_CONTAINER" >&2
+  exit 1
+}
+
+runtime_api_key_available || {
+  echo "Falta Pdf__ApiKey en el contenedor ARCA." >&2
+  exit 1
+}
 
 while IFS=$'\t' read -r template_key template_version template_rel schema_rel; do
   [[ -n "$template_key" ]] || continue
 
   template_file="$manifest_dir/$template_rel"
   schema_file="$manifest_dir/$schema_rel"
-  [[ -f "$template_file" ]] || { echo "No existe $template_file" >&2; exit 1; }
-  [[ -f "$schema_file" ]] || { echo "No existe $schema_file" >&2; exit 1; }
 
   managed="$(list_runtime_templates)"
   match="$(printf '%s' "$managed" | find_template "$template_key" "$template_version")"
@@ -193,4 +212,4 @@ PY
   echo "TEMPLATE_OWNER=$visible_owner"
   echo "TEMPLATE_STATUS=$visible_status"
   echo "TEMPLATE_PROVIDER_ID=$visible_id  # diagnóstico solamente; no persistir en SecretarIA"
-done < <(manifest_entries)
+done <<< "$manifest_data"
