@@ -17,6 +17,13 @@ namespace dcArca.Core.Models;
 public class dcArcaConfig
 {
     /// <summary>
+    /// Identificador operativo del ambiente fiscal, por ejemplo homologacion o produccion.
+    /// Cuando la configuración se materializa desde un contexto representado, este valor
+    /// proviene del contexto inmutable y no del caller.
+    /// </summary>
+    public string Environment { get; set; } = string.Empty;
+
+    /// <summary>
     /// CUIT del emisor (empresa que factura)
     /// </summary>
     public string Cuit { get; set; } = string.Empty;
@@ -50,6 +57,4 @@ public class dcArcaConfig
     /// Punto de venta
     /// </summary>
     public int PuntoVenta { get; set; } = 1;
-
-
 }

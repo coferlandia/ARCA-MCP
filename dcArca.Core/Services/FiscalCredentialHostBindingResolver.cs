@@ -69,6 +69,7 @@ public sealed class FiscalCredentialHostBindingResolver
             $"{context.Environment}:{assignment.CredentialId}",
             new dcArcaConfig
             {
+                Environment = context.Environment,
                 Cuit = context.RepresentedCuit.ToString(),
                 PuntoVenta = context.PointOfSale,
                 CertificatePath = certificatePath,

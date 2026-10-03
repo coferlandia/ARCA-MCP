@@ -29,6 +29,10 @@ public class ExistingInvoicePdfServiceTests
         Assert.Equal(0, wsfe.EmitCallCount);
         Assert.Equal(1, renderer.RenderCallCount);
         Assert.Equal("CAE123", renderer.LastFiscal!.Cae);
+        Assert.Equal("produccion", renderer.LastFiscal.Environment);
+        Assert.Equal("20123456786", renderer.LastFiscal.EmisorCuit);
+        Assert.Equal(7, renderer.LastFiscal.PuntoVenta);
+        Assert.Equal("fe-comp-consultar-validated", renderer.LastFiscal.Provenance.FiscalData);
     }
 
     [Fact]
@@ -76,6 +80,53 @@ public class ExistingInvoicePdfServiceTests
     }
 
     [Fact]
+    public async Task ConsultaAutorizadaPeroFiscalmenteIncompleta_ConservaCaeYFallaSoloPdf()
+    {
+        var fiscal = Consulted();
+        fiscal.Iva.Clear();
+        var wsfe = new FakeWsfeClient { ConsultResult = fiscal };
+        var renderer = new FakeRenderer();
+        var service = new ExistingInvoicePdfService(wsfe, renderer, Config());
+
+        var result = await service.RenderAsync(
+            dcTipoComprobante.FacturaB,
+            123,
+            new PdfTemplateReference("tpl", "1.0.0"),
+            JsonSerializer.SerializeToElement(new { }));
+
+        Assert.True(result.Fiscal.Success);
+        Assert.Equal("CAE123", result.Fiscal.Cae);
+        Assert.Equal(PdfRenderStatus.Failed, result.Pdf.Status);
+        Assert.Equal("FISCAL_DOCUMENT_INCOMPLETE", result.Pdf.ErrorCode);
+        Assert.Equal(0, renderer.RenderCallCount);
+        Assert.Equal(1, wsfe.ConsultCallCount);
+        Assert.Equal(0, wsfe.EmitCallCount);
+    }
+
+    [Fact]
+    public async Task RegeneracionDeNotaSinAsociacionConsultable_ConservaAutorizacionYNoInventaPdf()
+    {
+        var fiscal = Consulted();
+        fiscal.TipoComprobante = dcTipoComprobante.NotaCreditoB;
+        var wsfe = new FakeWsfeClient { ConsultResult = fiscal };
+        var renderer = new FakeRenderer();
+        var service = new ExistingInvoicePdfService(wsfe, renderer, Config());
+
+        var result = await service.RenderAsync(
+            dcTipoComprobante.NotaCreditoB,
+            123,
+            new PdfTemplateReference("tpl", "1.0.0"),
+            JsonSerializer.SerializeToElement(new { }));
+
+        Assert.True(result.Fiscal.Success);
+        Assert.Equal("CAE123", result.Fiscal.Cae);
+        Assert.Equal(PdfRenderStatus.Failed, result.Pdf.Status);
+        Assert.Equal("FISCAL_DOCUMENT_ASSOCIATION_UNAVAILABLE", result.Pdf.ErrorCode);
+        Assert.Equal(0, renderer.RenderCallCount);
+        Assert.Equal(0, wsfe.EmitCallCount);
+    }
+
+    [Fact]
     public async Task PrecondicionLocalInvalida_NoConsultaArca()
     {
         var wsfe = new FakeWsfeClient { ConsultResult = Consulted() };
@@ -108,12 +159,19 @@ public class ExistingInvoicePdfServiceTests
             new PdfTemplateReference("tpl", "1.0.0"),
             JsonSerializer.SerializeToElement(new { }));
 
+        Assert.True(result.Fiscal.Success);
+        Assert.Equal("CAE123", result.Fiscal.Cae);
         Assert.Equal(PdfRenderStatus.Failed, result.Pdf.Status);
         Assert.Equal(1, wsfe.ConsultCallCount);
         Assert.Equal(0, wsfe.EmitCallCount);
     }
 
-    private static dcArcaConfig Config() => new() { Cuit = "20123456786", PuntoVenta = 7 };
+    private static dcArcaConfig Config() => new()
+    {
+        Environment = "produccion",
+        Cuit = "20123456786",
+        PuntoVenta = 7
+    };
 
     private static dcFacturaResponse Consulted() => new()
     {
@@ -129,6 +187,15 @@ public class ExistingInvoicePdfServiceTests
         ImporteNeto = 100m,
         ImporteIva = 21m,
         ImporteTotal = 121m,
+        Iva =
+        [
+            new dcFacturaResponse.IvaDetalle
+            {
+                Alicuota = dcAlicuotaIva.Veintiuno,
+                BaseImponible = 100m,
+                Importe = 21m
+            }
+        ],
         MonedaId = "PES",
         MonedaCotizacion = 1m,
         Cae = "CAE123",

@@ -4,11 +4,36 @@ using dcArca.Core.Services;
 
 namespace dcArca.McpServer;
 
-public sealed class ExistingInvoicePdfService(
-    IdcWsfeClient wsfe,
-    IPdfDocumentRenderer renderer,
-    dcArcaConfig config)
+public sealed class ExistingInvoicePdfService
 {
+    private readonly IdcWsfeClient _wsfe;
+    private readonly IPdfDocumentRenderer _renderer;
+    private readonly FiscalDocumentContext _fiscalContext;
+
+    public ExistingInvoicePdfService(
+        IdcWsfeClient wsfe,
+        IPdfDocumentRenderer renderer,
+        dcArcaConfig config)
+        : this(
+            wsfe,
+            renderer,
+            new FiscalDocumentContext(
+                string.IsNullOrWhiteSpace(config.Environment) ? "unspecified" : config.Environment,
+                config.Cuit,
+                config.PuntoVenta))
+    {
+    }
+
+    public ExistingInvoicePdfService(
+        IdcWsfeClient wsfe,
+        IPdfDocumentRenderer renderer,
+        FiscalDocumentContext fiscalContext)
+    {
+        _wsfe = wsfe;
+        _renderer = renderer;
+        _fiscalContext = fiscalContext;
+    }
+
     public async Task<InvoiceWithPdfResult> RenderAsync(
         dcTipoComprobante tipoComprobante,
         long numeroComprobante,
@@ -16,10 +41,10 @@ public sealed class ExistingInvoicePdfService(
         JsonElement templateData,
         CancellationToken cancellationToken = default)
     {
-        renderer.ValidateRequest(template, templateData);
-        renderer.ValidateConfiguration();
+        _renderer.ValidateRequest(template, templateData);
+        _renderer.ValidateConfiguration();
 
-        var fiscal = await wsfe.FECompConsultarAsync(numeroComprobante, tipoComprobante, cancellationToken);
+        var fiscal = await _wsfe.FECompConsultarAsync(numeroComprobante, tipoComprobante, cancellationToken);
         if (!fiscal.Success)
         {
             return new InvoiceWithPdfResult(
@@ -30,20 +55,22 @@ public sealed class ExistingInvoicePdfService(
         FiscalDocumentSnapshot snapshot;
         try
         {
-            snapshot = FiscalDocumentSnapshotFactory.FromConsult(fiscal, config);
+            snapshot = FiscalDocumentSnapshotFactory.FromConsult(fiscal, _fiscalContext);
         }
-        catch (InvalidOperationException ex) when (ex.Message == "FISCAL_DOCUMENT_NOT_AUTHORIZED")
+        catch (FiscalDocumentSnapshotException exception)
         {
             return new InvoiceWithPdfResult(
                 fiscal,
                 new PdfRenderResult(
-                    PdfRenderStatus.NotAttempted,
+                    exception.Code == "FISCAL_DOCUMENT_NOT_AUTHORIZED"
+                        ? PdfRenderStatus.NotAttempted
+                        : PdfRenderStatus.Failed,
                     null,
-                    "FISCAL_DOCUMENT_NOT_AUTHORIZED",
-                    "El comprobante consultado no tiene una autorización fiscal renderizable."));
+                    exception.Code,
+                    exception.SafeMessage));
         }
 
-        var pdf = await renderer.RenderAsync(snapshot, template, templateData, cancellationToken);
+        var pdf = await _renderer.RenderAsync(snapshot, template, templateData, cancellationToken);
         return new InvoiceWithPdfResult(fiscal, pdf);
     }
 }

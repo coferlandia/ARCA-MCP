@@ -56,7 +56,7 @@ public class InvoicePdfServiceTests
     }
 
     [Fact]
-    public async Task Autorizado_ConstruyeSnapshotYRendereiza()
+    public async Task Autorizado_ConstruyeSnapshotHistoricoYRendereiza()
     {
         var fiscal = Authorized();
         var issuer = new FakeIssuer(fiscal);
@@ -76,6 +76,28 @@ public class InvoicePdfServiceTests
         Assert.Equal(123, renderer.LastFiscal!.NumeroComprobante);
         Assert.Equal("CAE123", renderer.LastFiscal.Cae);
         Assert.Equal("20123456786", renderer.LastFiscal.EmisorCuit);
+        Assert.Equal("produccion", renderer.LastFiscal.Environment);
+        Assert.Equal(7, renderer.LastFiscal.PuntoVenta);
+        Assert.Equal("emission-request", renderer.LastFiscal.Provenance.FiscalData);
+    }
+
+    [Fact]
+    public async Task AutorizadoConPuntoVentaIncompatible_ConservaCaeYNoRenderiza()
+    {
+        var fiscal = Authorized();
+        fiscal.PuntoVenta = 99;
+        var renderer = new FakeRenderer();
+        var service = new InvoicePdfService(new FakeIssuer(fiscal), renderer, Config());
+
+        var result = await service.EmitAsync(
+            Invoice(), "idem-1", new PdfTemplateReference("tpl", "1.0.0"), JsonSerializer.SerializeToElement(new { }));
+
+        Assert.True(result.Fiscal.Success);
+        Assert.Equal("CAE123", result.Fiscal.Cae);
+        Assert.Equal(123, result.Fiscal.NumeroComprobante);
+        Assert.Equal(PdfRenderStatus.Failed, result.Pdf.Status);
+        Assert.Equal("FISCAL_CONTEXT_MISMATCH", result.Pdf.ErrorCode);
+        Assert.Equal(0, renderer.RenderCallCount);
     }
 
     [Fact]
@@ -98,7 +120,12 @@ public class InvoicePdfServiceTests
         Assert.Equal("PDF_UNAVAILABLE", result.Pdf.ErrorCode);
     }
 
-    private static dcArcaConfig Config() => new() { Cuit = "20123456786", PuntoVenta = 7 };
+    private static dcArcaConfig Config() => new()
+    {
+        Environment = "produccion",
+        Cuit = "20123456786",
+        PuntoVenta = 7
+    };
 
     private static dcFacturaRequest Invoice() => new()
     {
@@ -119,6 +146,7 @@ public class InvoicePdfServiceTests
         Success = true,
         EmissionOutcome = dcEmissionOutcome.Authorized,
         NumeroComprobante = 123,
+        PuntoVenta = 7,
         Cae = "CAE123",
         CaeVencimiento = "20261011",
         Resultado = "A"

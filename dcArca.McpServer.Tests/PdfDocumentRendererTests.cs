@@ -19,8 +19,51 @@ public class PdfDocumentRendererTests
         Assert.Equal(0, client.RenderCallCount);
     }
 
+    [Theory]
+    [InlineData("Fiscal")]
+    [InlineData("importeTotal")]
+    [InlineData("CAE")]
+    [InlineData("numeroComprobante")]
+    public void AliasFiscalRaiz_SeRechazaSinRender(string propertyName)
+    {
+        var client = new FakePdfClient();
+        var renderer = new PdfDocumentRenderer(client);
+        using var document = JsonDocument.Parse($"{{\"{propertyName}\":123}}");
+
+        Assert.Throws<ArgumentException>(() =>
+            renderer.ValidateRequest(new PdfTemplateReference("tpl", "1.0.0"), document.RootElement));
+        Assert.Equal(0, client.RenderCallCount);
+    }
+
     [Fact]
-    public async Task Render_InyectaSnapshotFiscalCanonico()
+    public void TemplateDataDemasiadoGrande_SeRechaza()
+    {
+        var client = new FakePdfClient();
+        var renderer = new PdfDocumentRenderer(client);
+        var data = JsonSerializer.SerializeToElement(new { descripcion = new string('x', PdfDocumentRenderer.MaxTemplateDataBytes) });
+
+        Assert.Throws<ArgumentException>(() =>
+            renderer.ValidateRequest(new PdfTemplateReference("tpl", "1.0.0"), data));
+        Assert.Equal(0, client.RenderCallCount);
+    }
+
+    [Fact]
+    public void TemplateDataDemasiadoProfundo_SeRechaza()
+    {
+        var client = new FakePdfClient();
+        var renderer = new PdfDocumentRenderer(client);
+        object nested = "value";
+        for (var i = 0; i < PdfDocumentRenderer.MaxTemplateDataDepth + 1; i++)
+            nested = new Dictionary<string, object?> { ["nivel"] = nested };
+        var data = JsonSerializer.SerializeToElement(nested);
+
+        Assert.Throws<ArgumentException>(() =>
+            renderer.ValidateRequest(new PdfTemplateReference("tpl", "1.0.0"), data));
+        Assert.Equal(0, client.RenderCallCount);
+    }
+
+    [Fact]
+    public async Task Render_InyectaSnapshotFiscalVersionado()
     {
         var client = new FakePdfClient();
         var renderer = new PdfDocumentRenderer(client);
@@ -29,17 +72,27 @@ public class PdfDocumentRendererTests
         var result = await renderer.RenderAsync(
             fiscal,
             new PdfTemplateReference("tpl", "1.0.0"),
-            JsonSerializer.SerializeToElement(new { cliente = "Ñandú" }));
+            JsonSerializer.SerializeToElement(new
+            {
+                cliente = "Ñandú",
+                items = new[] { new { descripcion = "Servicio", importe = 999999m } }
+            }));
 
         Assert.Equal(PdfRenderStatus.Rendered, result.Status);
         Assert.Equal(1, client.RenderCallCount);
         Assert.NotNull(client.LastData);
         var root = client.LastData!.Value;
         Assert.Equal("Ñandú", root.GetProperty("cliente").GetString());
+        Assert.True(root.TryGetProperty("items", out _));
         var fiscalJson = root.GetProperty("fiscal");
+        Assert.Equal("arca-fiscal-snapshot/2.0", fiscalJson.GetProperty("contractVersion").GetString());
+        Assert.Equal("produccion", fiscalJson.GetProperty("environment").GetString());
         Assert.Equal("CAE123", fiscalJson.GetProperty("cae").GetString());
         Assert.Equal(123, fiscalJson.GetProperty("numeroComprobante").GetInt64());
         Assert.Equal(121m, fiscalJson.GetProperty("importeTotal").GetDecimal());
+        Assert.NotEqual(
+            root.GetProperty("items")[0].GetProperty("importe").GetDecimal(),
+            fiscalJson.GetProperty("importeTotal").GetDecimal());
     }
 
     [Fact]
@@ -78,6 +131,9 @@ public class PdfDocumentRendererTests
 
     private static FiscalDocumentSnapshot Snapshot() => new()
     {
+        Environment = "produccion",
+        Provenance = new FiscalSnapshotProvenance("authorized-context", "test", "test"),
+        AvailableFields = ["importeTotal", "cae"],
         EmisorCuit = "20123456786",
         PuntoVenta = 7,
         TipoComprobante = 6,

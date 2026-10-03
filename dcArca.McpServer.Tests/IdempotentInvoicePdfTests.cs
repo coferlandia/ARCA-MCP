@@ -8,7 +8,7 @@ namespace dcArca.McpServer.Tests;
 public class IdempotentInvoicePdfTests
 {
     [Fact]
-    public async Task PdfFallaYRetry_MismaKey_NoVuelveAEmitir()
+    public async Task PdfFallaYRetry_MismaKey_NoVuelveAEmitirYConservaSnapshotFiscal()
     {
         var wsfe = new FakeWsfeClient();
         var store = new MemoryStore();
@@ -31,6 +31,22 @@ public class IdempotentInvoicePdfTests
         Assert.Equal(1, wsfe.EmitCallCount);
         Assert.Equal(2, renderer.RenderCallCount);
         Assert.Equal(first.Fiscal.NumeroComprobante, second.Fiscal.NumeroComprobante);
+        Assert.Equal(first.Fiscal.Cae, second.Fiscal.Cae);
+
+        Assert.Equal(2, renderer.Snapshots.Count);
+        var firstSnapshot = renderer.Snapshots[0];
+        var replaySnapshot = renderer.Snapshots[1];
+        Assert.Equal("produccion", firstSnapshot.Environment);
+        Assert.Equal(firstSnapshot.Environment, replaySnapshot.Environment);
+        Assert.Equal(firstSnapshot.EmisorCuit, replaySnapshot.EmisorCuit);
+        Assert.Equal(firstSnapshot.PuntoVenta, replaySnapshot.PuntoVenta);
+        Assert.Equal(firstSnapshot.NumeroComprobante, replaySnapshot.NumeroComprobante);
+        Assert.Equal(firstSnapshot.Cae, replaySnapshot.Cae);
+        Assert.Equal(firstSnapshot.MonedaId, replaySnapshot.MonedaId);
+        Assert.Equal(firstSnapshot.MonedaCotizacion, replaySnapshot.MonedaCotizacion);
+        Assert.Equal(firstSnapshot.ImporteNeto, replaySnapshot.ImporteNeto);
+        Assert.Equal(firstSnapshot.ImporteIva, replaySnapshot.ImporteIva);
+        Assert.Equal(firstSnapshot.ImporteTotal, replaySnapshot.ImporteTotal);
     }
 
     [Fact]
@@ -60,7 +76,12 @@ public class IdempotentInvoicePdfTests
         Assert.Equal(1, wsfe.EmitCallCount);
     }
 
-    private static dcArcaConfig Config() => new() { Cuit = "20123456786", PuntoVenta = 7 };
+    private static dcArcaConfig Config() => new()
+    {
+        Environment = "produccion",
+        Cuit = "20123456786",
+        PuntoVenta = 7
+    };
 
     private static dcFacturaRequest Request() => new()
     {
@@ -73,6 +94,8 @@ public class IdempotentInvoicePdfTests
         ImporteIva = 21m,
         ImporteTotal = 121m,
         AlicuotaIva = dcAlicuotaIva.Veintiuno,
+        MonedaId = "PES",
+        MonedaCotizacion = 1m,
         FechaComprobante = "20261001"
     };
 
@@ -92,6 +115,7 @@ public class IdempotentInvoicePdfTests
             {
                 Success = true,
                 NumeroComprobante = _last,
+                PuntoVenta = 7,
                 Cae = "CAE" + _last,
                 CaeVencimiento = "20261011",
                 Resultado = "A",
@@ -120,6 +144,7 @@ public class IdempotentInvoicePdfTests
     {
         private int _index;
         public int RenderCallCount { get; private set; }
+        public List<FiscalDocumentSnapshot> Snapshots { get; } = new();
 
         public void ValidateRequest(PdfTemplateReference template, JsonElement templateData) { }
         public void ValidateConfiguration() { }
@@ -131,6 +156,7 @@ public class IdempotentInvoicePdfTests
             CancellationToken cancellationToken = default)
         {
             RenderCallCount++;
+            Snapshots.Add(fiscal);
             var result = results[Math.Min(_index, results.Length - 1)];
             _index++;
             return Task.FromResult(result);
