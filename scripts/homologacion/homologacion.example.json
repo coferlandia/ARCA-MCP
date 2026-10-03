@@ -1,0 +1,52 @@
+{
+  "contextId": "REEMPLAZAR_CONTEXT_ID",
+  "expectedEnvironment": "homologacion",
+  "timeoutSeconds": 45,
+  "pointOfSale": 1,
+  "invoice": {
+    "tipoComprobante": "FacturaB",
+    "concepto": "Productos",
+    "cuitReceptor": 0,
+    "tipoDocReceptor": 80,
+    "condicionIvaReceptor": "ResponsableInscripto",
+    "importeNeto": 100.00,
+    "importeIva": 21.00,
+    "importeTotal": 121.00,
+    "importeNoGravado": 0.00,
+    "importeExento": 0.00,
+    "alicuotaIva": "Veintiuno",
+    "monedaId": "PES",
+    "monedaCotizacion": 1.00,
+    "fechaComprobante": "YYYYMMDD"
+  },
+  "pdf": {
+    "enabled": false,
+    "expectedStatus": "Failed",
+    "templateId": "REEMPLAZAR_TEMPLATE_ID",
+    "templateVersion": "REEMPLAZAR_VERSION",
+    "templateData": {}
+  },
+  "associatedNote": {
+    "enabled": false,
+    "invoice": {
+      "tipoComprobante": "NotaCreditoB",
+      "concepto": "Productos",
+      "cuitReceptor": 0,
+      "tipoDocReceptor": 80,
+      "condicionIvaReceptor": "ResponsableInscripto",
+      "importeNeto": 10.00,
+      "importeIva": 2.10,
+      "importeTotal": 12.10,
+      "importeNoGravado": 0.00,
+      "importeExento": 0.00,
+      "alicuotaIva": "Veintiuno",
+      "monedaId": "PES",
+      "monedaCotizacion": 1.00,
+      "fechaComprobante": "YYYYMMDD"
+    }
+  },
+  "controlledRejection": {
+    "enabled": false,
+    "invoice": {}
+  }
+}
