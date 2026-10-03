@@ -97,6 +97,29 @@ class FiscalSmokeTests(unittest.TestCase):
         self.assertTrue(smoke.must_compensate(result))
         self.assertFalse(smoke.must_compensate({"status": "FAIL", "fiscalAuthorized": False}))
 
+    def test_authorization_can_be_recovered_from_durable_operation(self):
+        operation = {
+            "found": True,
+            "state": "Authorized",
+            "fiscalResult": {
+                "success": True,
+                "cae": "12345678901234",
+                "numeroComprobante": 321,
+            },
+        }
+        recovered = smoke.authorization_from_operation(operation)
+        self.assertEqual(recovered, {"number": 321, "cae": "12345678901234"})
+        self.assertIsNone(smoke.authorization_from_operation({"state": "Uncertain"}))
+
+    def test_transport_errors_are_returned_as_failed_calls_not_raised(self):
+        class BrokenClient:
+            def tool(self, _name, _args):
+                raise TimeoutError("timeout")
+
+        result, ok = smoke._call(BrokenClient(), "x", {})
+        self.assertFalse(ok)
+        self.assertEqual(result["transportError"], "TimeoutError")
+
 
 if __name__ == "__main__":
     unittest.main()
