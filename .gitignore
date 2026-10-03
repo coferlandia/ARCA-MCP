@@ -51,6 +51,7 @@ Certificados/
 secrets.json
 *.secret
 scripts/homologacion/homologacion.env
+scripts/homologacion/homologacion.local.json
 .homologation-evidence/
 
 # Windows image file caches
