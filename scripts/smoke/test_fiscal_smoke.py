@@ -81,6 +81,13 @@ class FiscalSmokeTests(unittest.TestCase):
             smoke.assert_execution_allowed("homologacion", execute=False, allow_production=False)
         smoke.assert_execution_allowed("homologacion", execute=True, allow_production=False)
 
+    def test_receiver_can_be_overridden_per_letter(self):
+        default = self.receptor()
+        consumer = {"documentNumber": 0, "documentType": 99, "vatCondition": "ConsumidorFinal"}
+        context = {"receiver": default, "receivers": {"B": consumer}}
+        self.assertEqual(smoke.receiver_for(context, "A"), default)
+        self.assertEqual(smoke.receiver_for(context, "B"), consumer)
+
 
 if __name__ == "__main__":
     unittest.main()
