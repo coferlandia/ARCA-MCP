@@ -21,6 +21,35 @@ public class RepresentedFiscalContextStoreTests
     }
 
     [Fact]
+    public async Task Contexto_NoPuedePasarAActiveSinAssignmentActivo()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemRepresentedFiscalContextStore(temp.Path);
+        await store.AddContextAsync(Context("ctx-a"));
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.SetOperationalStateAsync("ctx-a", FiscalContextOperationalState.Active, "admin"));
+
+        Assert.Equal("ACTIVE_ASSIGNMENT_REQUIRED", exception.Message);
+        Assert.Equal(FiscalContextOperationalState.Disabled, (await store.GetAsync("ctx-a"))!.OperationalState);
+    }
+
+    [Fact]
+    public async Task ValidarActivarAssignment_YLuegoContexto_PermiteActive()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemRepresentedFiscalContextStore(temp.Path);
+        await store.AddContextAsync(Context("ctx-a"));
+        await store.AddCandidateAssignmentAsync("ctx-a", "v1", "cred-1", "admin");
+        await store.MarkAssignmentValidatedAsync("ctx-a", "v1", "evidence", "validator");
+        await store.ActivateAssignmentAsync("ctx-a", "v1", "admin");
+
+        await store.SetOperationalStateAsync("ctx-a", FiscalContextOperationalState.Active, "admin");
+
+        Assert.Equal(FiscalContextOperationalState.Active, (await store.GetAsync("ctx-a"))!.OperationalState);
+    }
+
+    [Fact]
     public async Task ValidarYActivar_NuevaRevision_DejaLaAnteriorHistorica()
     {
         using var temp = new TempDirectory();
