@@ -242,11 +242,8 @@ def _emit_document(*, client: McpClient, context_id: str, letter: str, label: st
             return result
         number = recovered["number"]
         cae = recovered["cae"]
-        fiscal_authorized = True
         result["recoveredAfterEmissionFailure"] = True
 
-    # From this point forward the fiscal side effect is confirmed. Any ancillary
-    # failure must preserve enough state for _run_letter to compensate it.
     result.update({"fiscalAuthorized": True, "number": number})
 
     replay, replay_ok = _call(client, "emitir_comprobante_avanzado", emission_args)
@@ -327,34 +324,26 @@ def _run_letter(*, client: McpClient, context: dict[str, Any], letter: str, date
             "fiscallyBalanced": True,
             "unbalanced": False,
             "netEffectArs": "0.00",
+            "haltRequired": False,
         }
 
     invoice_assoc = {"tipo": type_name(letter, "invoice"), "puntoVenta": point_of_sale,
                      "numero": invoice_result["number"]}
-
     debit_result: dict[str, Any] | None = None
     credit_debit_result: dict[str, Any] | None = None
-    # Only extend the functional smoke circuit when the invoice itself passed all
-    # checks. If an ancillary invoice check failed, prioritize compensation.
+    halt_required = False
+
+    # Only extend the functional circuit when the invoice itself passed all checks.
+    # If it failed after authorization, go directly to its compensating credit note.
     if invoice_result["status"] == "PASS":
         debit = build_invoice(letter, "debit", receptor, date, invoice_assoc)
         debit_result = _emit_document(client=client, context_id=context_id, letter=letter,
             label=f"nota-debito-{letter.lower()}", invoice=debit, pdf_cfg=pdf_cfg,
             output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-debit")
         docs.append(debit_result)
+        halt_required = bool(debit_result.get("manualReconciliationRequired"))
 
-        if debit_result.get("manualReconciliationRequired"):
-            return {
-                "letter": letter,
-                "status": "FAIL",
-                "documents": docs,
-                "fiscallyBalanced": False,
-                "unbalanced": True,
-                "netEffectArs": "UNKNOWN",
-                "haltRequired": True,
-            }
-
-        if must_compensate(debit_result):
+        if not halt_required and must_compensate(debit_result):
             debit_assoc = {"tipo": type_name(letter, "debit"), "puntoVenta": point_of_sale,
                            "numero": debit_result["number"]}
             credit_debit = build_invoice(letter, "credit", receptor, date, debit_assoc)
@@ -362,43 +351,25 @@ def _run_letter(*, client: McpClient, context: dict[str, Any], letter: str, date
                 label=f"nota-credito-{letter.lower()}-anula-nd", invoice=credit_debit, pdf_cfg=pdf_cfg,
                 output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-credit-debit")
             docs.append(credit_debit_result)
-            if credit_debit_result.get("manualReconciliationRequired"):
-                return {
-                    "letter": letter,
-                    "status": "FAIL",
-                    "documents": docs,
-                    "fiscallyBalanced": False,
-                    "unbalanced": True,
-                    "netEffectArs": "UNKNOWN",
-                    "haltRequired": True,
-                }
+            halt_required = bool(credit_debit_result.get("manualReconciliationRequired"))
 
-    # Once the invoice exists, always attempt its compensating credit note,
-    # regardless of replay/verification/PDF failures on the invoice itself.
+    # Known invoice authorization is always compensated before honoring a halt
+    # caused by an ambiguous debit/credit-debit result.
     credit_invoice = build_invoice(letter, "credit", receptor, date, invoice_assoc)
     credit_invoice_result = _emit_document(client=client, context_id=context_id, letter=letter,
         label=f"nota-credito-{letter.lower()}-anula-factura", invoice=credit_invoice, pdf_cfg=pdf_cfg,
         output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-credit-invoice")
     docs.append(credit_invoice_result)
-
-    if credit_invoice_result.get("manualReconciliationRequired"):
-        return {
-            "letter": letter,
-            "status": "FAIL",
-            "documents": docs,
-            "fiscallyBalanced": False,
-            "unbalanced": True,
-            "netEffectArs": "UNKNOWN",
-            "haltRequired": True,
-        }
+    halt_required = halt_required or bool(credit_invoice_result.get("manualReconciliationRequired"))
 
     invoice_compensated = must_compensate(credit_invoice_result)
     debit_needs_compensation = must_compensate(debit_result)
     debit_compensated = not debit_needs_compensation or must_compensate(credit_debit_result)
-    fiscally_balanced = invoice_compensated and debit_compensated
+    fiscally_balanced = invoice_compensated and debit_compensated and not halt_required
 
     full_pass = (
-        invoice_result["status"] == "PASS"
+        not halt_required
+        and invoice_result["status"] == "PASS"
         and debit_result is not None and debit_result["status"] == "PASS"
         and credit_debit_result is not None and credit_debit_result["status"] == "PASS"
         and credit_invoice_result["status"] == "PASS"
@@ -411,7 +382,7 @@ def _run_letter(*, client: McpClient, context: dict[str, Any], letter: str, date
         "fiscallyBalanced": fiscally_balanced,
         "unbalanced": not fiscally_balanced,
         "netEffectArs": "0.00" if fiscally_balanced else "UNKNOWN",
-        "haltRequired": False,
+        "haltRequired": halt_required,
     }
 
 
