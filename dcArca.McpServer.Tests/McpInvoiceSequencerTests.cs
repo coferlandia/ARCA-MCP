@@ -45,7 +45,7 @@ public class McpInvoiceSequencerTests
 
         var first = await sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "business-key");
         var changed = Request(dcTipoComprobante.FacturaB);
-        changed.ImporteTotal = 122m;
+        changed.FechaComprobante = "20261001";
 
         var second = await sequencer.EmitAsync(changed, "business-key");
 
@@ -139,7 +139,7 @@ public class McpInvoiceSequencerTests
         var stored = await store.GetAsync(keyHash);
 
         Assert.False(first.Success);
-        Assert.Equal(dcEmissionOutcome.None, first.EmissionOutcome);
+        Assert.Equal(dcEmissionOutcome.Uncertain, first.EmissionOutcome);
         Assert.NotNull(stored);
         Assert.Equal(EmissionIdempotencyState.Uncertain, stored!.State);
 
