@@ -51,15 +51,22 @@ builder.Services.AddSingleton(arcaConfig);
 builder.Services.AddSingleton(fiscalContextOptions);
 builder.Services.AddSingleton<IAfipLogger>(sp =>
     new AfipLoggerAdapter(sp.GetRequiredService<ILoggerFactory>().CreateLogger("dcArca")));
+
 builder.Services.AddSingleton(_ => new FileSystemEmissionIdempotencyStore(emissionIdempotencyDirectory));
+builder.Services.AddSingleton<ObservableEmissionIdempotencyStore>();
 builder.Services.AddSingleton<IEmissionIdempotencyStore>(sp =>
-    sp.GetRequiredService<FileSystemEmissionIdempotencyStore>());
+    sp.GetRequiredService<ObservableEmissionIdempotencyStore>());
 builder.Services.AddSingleton<IEmissionOperationInspector, FileSystemEmissionOperationInspector>();
-builder.Services.AddSingleton<IFiscalSeriesCoordinator>(sp =>
+
+builder.Services.AddSingleton(sp =>
 {
     var store = sp.GetRequiredService<FileSystemEmissionIdempotencyStore>();
     return new FileSystemFiscalSeriesCoordinator(store.DirectoryPath);
 });
+builder.Services.AddSingleton<ObservableFiscalSeriesCoordinator>();
+builder.Services.AddSingleton<IFiscalSeriesCoordinator>(sp =>
+    sp.GetRequiredService<ObservableFiscalSeriesCoordinator>());
+
 builder.Services.AddSingleton(_ => new FileSystemEmissionRecoveryGate(recoveryDirectory));
 builder.Services.AddSingleton<IEmissionRecoveryGate>(sp =>
     sp.GetRequiredService<FileSystemEmissionRecoveryGate>());
@@ -69,7 +76,12 @@ builder.Services.AddSingleton<IFiscalCredentialMaterializer, FiscalCredentialMat
 builder.Services.AddSingleton<IFiscalContextRuntimeResolver, FiscalContextRuntimeResolver>();
 builder.Services.AddSingleton<IFiscalAssignmentAuthorizationValidator, FiscalAssignmentAuthorizationValidator>();
 builder.Services.AddSingleton<McpOperationContractService>();
-builder.Services.AddSingleton<IPdfDocumentRenderer, PdfDocumentRenderer>();
+
+builder.Services.AddSingleton<PdfDocumentRenderer>();
+builder.Services.AddSingleton<ObservablePdfDocumentRenderer>();
+builder.Services.AddSingleton<IPdfDocumentRenderer>(sp =>
+    sp.GetRequiredService<ObservablePdfDocumentRenderer>());
+
 builder.Services.AddSingleton<IApiKeyStore>(_ => new FileSystemApiKeyStore(apiKeysDirectory));
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHttpClient(nameof(FiscalAssignmentAuthorizationValidator), client =>
@@ -135,11 +147,11 @@ await contextStore.InitializeLegacyAsync(new RepresentedFiscalContextRecord(
             "legacy-bootstrap")
     ]));
 
-// Acquire the supported V1 single-writer lease and rebuild/validate durable reservations
-// before the server becomes ready to accept fiscal work.
-var emissionStore = app.Services.GetRequiredService<IEmissionIdempotencyStore>();
-var seriesCoordinator = app.Services.GetRequiredService<IFiscalSeriesCoordinator>();
-await seriesCoordinator.InitializeAsync(emissionStore);
+// Initialize the concrete store/coordinator once. Runtime callers receive observable
+// decorators over these already-initialized singletons.
+var concreteEmissionStore = app.Services.GetRequiredService<FileSystemEmissionIdempotencyStore>();
+var concreteSeriesCoordinator = app.Services.GetRequiredService<FileSystemFiscalSeriesCoordinator>();
+await concreteSeriesCoordinator.InitializeAsync(concreteEmissionStore);
 
 app.UseAuthentication();
 app.UseAuthorization();
