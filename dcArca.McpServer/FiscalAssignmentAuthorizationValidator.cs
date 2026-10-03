@@ -109,13 +109,14 @@ public sealed class FiscalAssignmentAuthorizationValidator : IFiscalAssignmentAu
                 DateTimeOffset.UtcNow);
         }
 
+        var validity = $"Vigencia conocida: {certificateNotBefore:O} a {certificateNotAfter:O}.";
         var now = DateTimeOffset.UtcNow;
         if (certificateNotAfter <= now)
         {
             return new FiscalAssignmentValidationResult(
                 FiscalAssignmentValidationStatus.NotVerified,
                 "CERTIFICATE_EXPIRED",
-                "El certificado configurado está vencido y no puede considerarse autorizado.",
+                $"El certificado configurado está vencido y no puede considerarse autorizado. {validity}",
                 context.ContextId,
                 assignment.AssignmentRevision,
                 assignment.CredentialId,
@@ -129,7 +130,7 @@ public sealed class FiscalAssignmentAuthorizationValidator : IFiscalAssignmentAu
             return new FiscalAssignmentValidationResult(
                 FiscalAssignmentValidationStatus.NotVerified,
                 "CERTIFICATE_NOT_YET_VALID",
-                "El certificado configurado todavía no se encuentra dentro de su período de vigencia.",
+                $"El certificado configurado todavía no se encuentra dentro de su período de vigencia. {validity}",
                 context.ContextId,
                 assignment.AssignmentRevision,
                 assignment.CredentialId,
@@ -151,7 +152,7 @@ public sealed class FiscalAssignmentAuthorizationValidator : IFiscalAssignmentAu
         return new FiscalAssignmentValidationResult(
             probe.Verified ? FiscalAssignmentValidationStatus.Verified : FiscalAssignmentValidationStatus.NotVerified,
             probe.Verified ? "ASSIGNMENT_AUTHORIZATION_VERIFIED" : probe.Code,
-            probe.SafeMessage,
+            $"{probe.SafeMessage} {validity}",
             context.ContextId,
             assignment.AssignmentRevision,
             assignment.CredentialId,
