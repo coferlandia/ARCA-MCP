@@ -8,21 +8,21 @@ using Xunit;
 
 namespace dcArca.McpServer.Tests;
 
-public class McpContractScopeTests : IClassFixture<WebApplicationFactory<Program>>
+public class McpContractScopeTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
+    private readonly TestCertificatePlaceholder _certificate = new();
 
     public McpContractScopeTests(WebApplicationFactory<Program> factory)
     {
         var contentRoot = Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..", "dcArca.McpServer");
-        var certPath = Path.Combine(Directory.GetCurrentDirectory(), "test-cert-placeholder.pfx");
-        if (!File.Exists(certPath)) File.WriteAllBytes(certPath, Array.Empty<byte>());
 
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseContentRoot(contentRoot);
             builder.UseEnvironment("Testing");
+            _certificate.Apply(builder);
             builder.ConfigureTestServices(services =>
             {
                 services.AddAuthentication()
@@ -75,5 +75,11 @@ public class McpContractScopeTests : IClassFixture<WebApplicationFactory<Program
         request.Headers.Add(ScopeTestAuthHandler.ScopeHeader, scope);
         request.Headers.Add("Accept", "application/json, text/event-stream");
         return request;
+    }
+
+    public void Dispose()
+    {
+        _factory.Dispose();
+        _certificate.Dispose();
     }
 }
