@@ -266,6 +266,7 @@ public class McpInvoiceSequencerTests
         private long _lastNumber;
         private int _activeOperations;
         private int _maxConcurrentOperations;
+        private dcFacturaRequest? _lastRequest;
 
         internal FakeWsfeClient(int delayMs = 0) => _delayMs = delayMs;
 
@@ -294,6 +295,7 @@ public class McpInvoiceSequencerTests
         {
             if (_delayMs > 0) await Task.Delay(_delayMs, cancellationToken);
             var number = factura.NumeroComprobante!.Value;
+            _lastRequest = factura;
             Interlocked.Exchange(ref _lastNumber, Math.Max(Interlocked.Read(ref _lastNumber), number));
             lock (EmittedNumbers) EmittedNumbers.Add(number);
 
@@ -338,16 +340,45 @@ public class McpInvoiceSequencerTests
 
         public Task<dcFacturaResponse> FECompConsultarAsync(long numeroComprobante, dcTipoComprobante tipoComprobante, CancellationToken cancellationToken = default)
         {
-            if (ConsultedAuthorizedNumbers.Contains(numeroComprobante))
+            if (ConsultedAuthorizedNumbers.Contains(numeroComprobante) && _lastRequest is not null)
             {
-                return Task.FromResult(new dcFacturaResponse
+                var request = _lastRequest;
+                var response = new dcFacturaResponse
                 {
                     Success = true,
                     NumeroComprobante = numeroComprobante,
+                    PuntoVenta = 1,
+                    TipoComprobante = request.TipoComprobante,
+                    Concepto = request.Concepto,
+                    DocTipo = (dcTipoDocumento)request.TipoDocReceptor,
+                    DocNro = request.CuitReceptor,
+                    CondicionIvaReceptor = request.CondicionIvaReceptor,
+                    FechaComprobante = request.FechaComprobante ?? string.Empty,
+                    FechaServicioDesde = request.FechaServicioDesde ?? string.Empty,
+                    FechaServicioHasta = request.FechaServicioHasta ?? string.Empty,
+                    FechaVencimientoPago = request.FechaVencimiento ?? string.Empty,
+                    ImporteNeto = request.ImporteNeto,
+                    ImporteIva = request.ImporteIva,
+                    ImporteTotal = request.ImporteTotal,
+                    ImporteNoGravado = request.ImporteNoGravado,
+                    ImporteExento = request.ImporteExento,
+                    ImporteTributos = request.ImporteTributos,
+                    MonedaId = request.MonedaId,
+                    MonedaCotizacion = request.MonedaCotizacion,
                     Cae = "CAE" + numeroComprobante,
                     CaeVencimiento = "20261011",
                     Resultado = "A"
-                });
+                };
+                if (request.AlicuotaIva.HasValue && request.ImporteIva != 0m)
+                {
+                    response.Iva.Add(new dcFacturaResponse.IvaDetalle
+                    {
+                        Alicuota = request.AlicuotaIva,
+                        BaseImponible = request.ImporteNeto,
+                        Importe = request.ImporteIva
+                    });
+                }
+                return Task.FromResult(response);
             }
 
             return Task.FromResult(new dcFacturaResponse { Success = false, NumeroComprobante = numeroComprobante });

@@ -10,7 +10,7 @@ La idempotencia protege exclusivamente el side effect fiscal. No es un ledger co
 - `emitir_comprobante_avanzado`
 - `emitir_comprobante_con_pdf`
 
-`solicitar_cae` sigue siendo una operación de bajo nivel: el caller elige el número y debe coordinar por su cuenta numeración e idempotencia. El control de esa superficie respecto de series administradas se endurece en #17.
+La tool histórica `solicitar_cae` está deshabilitada en el servidor MCP con `LOW_LEVEL_EMISSION_DISABLED`: elegir un número desde el caller permitiría saltarse la reserva durable de la serie.
 
 ## Identidad de operación
 
@@ -44,19 +44,13 @@ El fingerprint excluye deliberadamente:
 
 Por lo tanto, repetir la misma emisión con otro template puede regenerar el documento sin producir otra factura.
 
-Si una operación existente se reutiliza con datos fiscales o identidad fiscal incompatibles, falla con:
-
-```text
-IDEMPOTENCY_KEY_REUSED
-```
-
-y no llama a ARCA.
+Si una operación existente se reutiliza con datos fiscales o identidad fiscal incompatibles, falla con `IDEMPOTENCY_KEY_REUSED` y no llama a ARCA.
 
 ## Evidencia fiscal comparable
 
-Las operaciones nuevas persisten una proyección fiscal normalizada y versionada separada del hash opaco del request. Incluye los campos necesarios para que #17 pueda comparar posteriormente un comprobante consultado con la intención original sin almacenar SOAP, templateData ni un ledger comercial completo.
+Las operaciones nuevas persisten una proyección fiscal normalizada y versionada separada del hash opaco del request. Esa evidencia se usa para comparar un comprobante consultado con la intención original antes de declarar `RecoveredSuccess`.
 
-Los registros migrados desde schema legacy se marcan explícitamente `LegacyUnavailable` porque no contienen esa evidencia estructurada. Esa ausencia nunca autoriza a declarar una reconciliación exitosa sólo por número o CAE.
+Los registros migrados desde schema legacy se marcan `LegacyUnavailable`. Esa ausencia nunca autoriza una reconciliación exitosa sólo por número o CAE.
 
 ## Persistencia
 
@@ -66,21 +60,18 @@ Configuración:
 EmissionIdempotency__Directory=/data/emission-idempotency
 ```
 
-El store usa un archivo JSON por operación namespaced, manifiestos de contexto y escritura atómica mediante archivo temporal + replace. Un lock de filesystem protege cada registro/manifiesto durante su actualización.
+El store contiene:
 
-No se persisten:
+- un JSON por operación namespaced;
+- manifiestos de contexto;
+- reservas durables por serie bajo `.series/reservations`;
+- un lease exclusivo de escritor bajo `.series/writer.lock`.
 
-- certificados o passwords;
-- token/sign WSAA;
-- API keys o idempotency keys en claro;
-- SOAP requests/responses completos;
-- `templateData`;
-- PDFs;
-- estado de entrega, Mercado Pago o eventos comerciales.
+No se persisten certificados, passwords, token/sign WSAA, API keys o idempotency keys en claro, SOAP completo, `templateData`, PDFs ni estado comercial externo.
 
-Un archivo corrupto, un schema desconocido o un contexto incompatible fallan cerrado. Nunca se interpretan como “key inexistente”.
+Corrupción, schema desconocido, contexto incompatible, múltiples owners pendientes o reserva incoherente fallan cerrado.
 
-La migración desde el schema legacy es explícita y está documentada en `EMISSION_STORE_MIGRATION.md`; no se infiere CUIT/ambiente/consumidor a partir del proceso que arranca.
+La migración legacy está documentada en `EMISSION_STORE_MIGRATION.md`.
 
 ## Estados
 
@@ -93,23 +84,29 @@ FiscalRejected
 Uncertain
 ```
 
-El número de comprobante se persiste en `NumberAssigned` antes de iniciar el side effect fiscal. Antes de llamar a `FECAESolicitar` se persiste `Submitting`.
+Antes de iniciar el side effect fiscal debe existir una reserva durable de serie y un número persistido. Inmediatamente antes de `FECAESolicitar` el servidor revalida `FECompUltimoAutorizado`; luego persiste `Submitting`.
 
-`Authorized` y `FiscalRejected` son terminales para esa operación y request fiscal.
+`Authorized` y `FiscalRejected` son terminales y liberan la reserva. `NumberAssigned`, `Submitting` y `Uncertain` conservan la autoridad sobre la serie.
 
 ## Replay
 
 ### Authorized
 
-La misma key + el mismo request + la misma identidad estable devuelve el resultado fiscal almacenado. No solicita otro CAE.
+La misma key + request + identidad devuelve el resultado fiscal almacenado. No solicita otro CAE.
 
 ### FiscalRejected
 
-La misma operación devuelve el rechazo almacenado. Para corregir los datos fiscales debe utilizarse una nueva operación/key.
+La misma operación devuelve el rechazo almacenado. Para corregir datos fiscales debe utilizarse una nueva operación/key.
+
+### NumberAssigned
+
+La operación conserva el mismo número. Antes del primer envío vuelve a validar que ARCA siga informando el número anterior. Si hay drift devuelve `SERIES_NUMBER_DRIFT` y mantiene la serie bloqueada.
 
 ### Submitting / Uncertain
 
-El comportamiento actual consulta exclusivamente el mismo tipo/número mediante `FECompConsultar` y evita un segundo `FECAESolicitar` con la misma operación. #17 endurece esa recuperación para exigir equivalencia fiscal completa y reserva durable de la serie antes de declarar `RecoveredSuccess`.
+Consulta exclusivamente el mismo tipo/número mediante `FECompConsultar`. Sólo equivalencia fiscal completa produce `RecoveredSuccess`; mismatch o evidencia insuficiente mantienen `Uncertain` y la reserva. Nunca se hace un segundo `FECAESolicitar` automático para esa ambigüedad.
+
+Otra key sobre la misma serie recibe `SERIES_RESERVATION_BLOCKED` mientras exista una operación pendiente.
 
 ## PDF y retries
 
@@ -123,18 +120,18 @@ key K
   -> PDF falla
 ```
 
-Un retry con `K` y el mismo request fiscal recupera #123 y vuelve a intentar únicamente el render. El template y los datos visuales no forman parte del fingerprint fiscal.
+Un retry con `K` recupera #123 y vuelve a intentar únicamente el render. El template y los datos visuales no forman parte del fingerprint fiscal.
 
-Para regenerar explícitamente un comprobante existente también puede usarse `generar_pdf_comprobante`, que sólo consulta ARCA y nunca emite.
+`generar_pdf_comprobante` consulta un comprobante existente y nunca emite.
 
-## Alcance de concurrencia
+## Concurrencia soportada
 
-La identidad canónica de serie es:
+La serie canónica es:
 
 ```text
 (ambiente, CUIT representado, punto de venta, tipo de comprobante)
 ```
 
-La implementación de #15 todavía conserva la serialización de numeración in-process. La reserva durable y la exclusión verificable de un segundo escritor son responsabilidad de #17 y son gate previo a habilitar multiemisor.
+ARCA-MCP V1 soporta un único proceso escritor por store filesystem. El lease se adquiere antes de readiness; un segundo proceso falla con `SERIES_WRITER_BUSY`.
 
-No se debe afirmar soporte de coordinación multi-host o múltiples réplicas escritoras sobre un mismo punto de venta.
+Dentro de ese proceso, series distintas pueden avanzar de forma independiente. Sistemas externos que usen el mismo punto de venta no participan del lease: la revalidación previa detecta drift, pero operativamente esos puntos de venta deben considerarse exclusivos del servicio.
