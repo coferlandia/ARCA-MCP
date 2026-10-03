@@ -75,6 +75,40 @@ public class EmissionRequestFingerprintTests
         Assert.Equal(hash, EmissionRequestFingerprint.KeyHash("tenant:payment:123"));
     }
 
+    [Fact]
+    public void OperationKeyHash_AislaConsumidorYContexto()
+    {
+        var key = "tenant:payment:123";
+        var baseline = EmissionRequestFingerprint.OperationKeyHash("consumer-a", "ctx-a", key);
+
+        Assert.Equal(64, baseline.Length);
+        Assert.NotEqual(baseline, EmissionRequestFingerprint.OperationKeyHash("consumer-b", "ctx-a", key));
+        Assert.NotEqual(baseline, EmissionRequestFingerprint.OperationKeyHash("consumer-a", "ctx-b", key));
+    }
+
+    [Fact]
+    public void OperationKeyHash_PuedeReconstruirseDesdeHashLegacy()
+    {
+        var key = "tenant:payment:123";
+        var legacy = EmissionRequestFingerprint.KeyHash(key);
+
+        Assert.Equal(
+            EmissionRequestFingerprint.OperationKeyHash("consumer-a", "ctx-a", key),
+            EmissionRequestFingerprint.OperationKeyHashFromLegacyKeyHash("consumer-a", "ctx-a", legacy));
+    }
+
+    [Fact]
+    public void ProyeccionFiscal_NormalizaIvaSimpleParaComparacionPosterior()
+    {
+        var projection = EmissionRequestFingerprint.Project(Request());
+
+        var iva = Assert.Single(projection.Iva);
+        Assert.Equal((int)dcAlicuotaIva.Veintiuno, iva.Alicuota);
+        Assert.Equal(100m, iva.BaseImponible);
+        Assert.Equal(21m, iva.Importe);
+        Assert.Equal(121m, projection.ImporteTotal);
+    }
+
     private static dcFacturaRequest Request() => new()
     {
         TipoComprobante = dcTipoComprobante.FacturaB,

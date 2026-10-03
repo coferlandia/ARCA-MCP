@@ -141,25 +141,50 @@ public class IdempotentInvoicePdfTests
     {
         private readonly object _sync = new();
         private readonly Dictionary<string, EmissionIdempotencyRecord> _records = new();
+        private readonly Dictionary<string, FiscalContextDescriptor> _contexts = new(StringComparer.Ordinal);
+
+        public Task EnsureContextAsync(FiscalContextDescriptor context, CancellationToken cancellationToken = default)
+        {
+            lock (_sync)
+            {
+                if (_contexts.TryGetValue(context.ContextId, out var existing) && existing != context)
+                    throw new InvalidDataException("FISCAL_CONTEXT_IDENTITY_MISMATCH");
+                _contexts[context.ContextId] = context;
+                return Task.CompletedTask;
+            }
+        }
 
         public Task<EmissionIdempotencyRecord> GetOrCreateAsync(
             string keyHash,
             string requestHash,
-            dcTipoComprobante tipoComprobante,
-            int puntoVenta,
+            int requestCanonicalizationVersion,
+            FiscalOperationIdentity identity,
+            StoredFiscalEvidence fiscalEvidence,
             CancellationToken cancellationToken = default)
         {
             lock (_sync)
             {
                 if (_records.TryGetValue(keyHash, out var existing))
                 {
-                    if (existing.RequestHash != requestHash) throw new EmissionIdempotencyConflictException();
+                    if (existing.RequestHash != requestHash
+                        || existing.RequestCanonicalizationVersion != requestCanonicalizationVersion
+                        || !existing.Identity.MatchesImmutableIdentity(identity))
+                        throw new EmissionIdempotencyConflictException();
                     return Task.FromResult(existing);
                 }
                 var now = DateTimeOffset.UtcNow;
                 var created = new EmissionIdempotencyRecord(
-                    keyHash, requestHash, (int)tipoComprobante, puntoVenta, null,
-                    EmissionIdempotencyState.Created, null, now, now);
+                    FileSystemEmissionIdempotencyStore.CurrentSchemaVersion,
+                    keyHash,
+                    requestHash,
+                    requestCanonicalizationVersion,
+                    identity,
+                    fiscalEvidence,
+                    null,
+                    EmissionIdempotencyState.Created,
+                    null,
+                    now,
+                    now);
                 _records[keyHash] = created;
                 return Task.FromResult(created);
             }

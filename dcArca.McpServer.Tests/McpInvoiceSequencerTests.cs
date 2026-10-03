@@ -56,20 +56,39 @@ public class McpInvoiceSequencerTests
     }
 
     [Fact]
-    public async Task MismaKey_OtroPuntoVenta_SeRechazaSinReusarResultadoAnterior()
+    public async Task MismaKey_OtroContextoFiscal_NoReusaResultadoAnterior()
     {
         var fake = new FakeWsfeClient();
         var store = new MemoryStore();
-        var firstSequencer = new McpInvoiceSequencer(fake, Config(1), store);
-        var secondSequencer = new McpInvoiceSequencer(fake, Config(2), store);
+        var firstSequencer = new McpInvoiceSequencer(fake, Config(1), store, Provider(Config(1), "consumer-a", "ctx-1"));
+        var secondSequencer = new McpInvoiceSequencer(fake, Config(2), store, Provider(Config(2), "consumer-a", "ctx-2"));
 
         var first = await firstSequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "same-business-key");
         var second = await secondSequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "same-business-key");
 
         Assert.True(first.Success);
-        Assert.False(second.Success);
-        Assert.Equal("IDEMPOTENCY_KEY_REUSED", second.Codigo);
-        Assert.Single(fake.EmittedNumbers);
+        Assert.True(second.Success);
+        Assert.Equal(2, fake.EmittedNumbers.Count);
+        Assert.NotEqual(
+            EmissionRequestFingerprint.OperationKeyHash("consumer-a", "ctx-1", "same-business-key"),
+            EmissionRequestFingerprint.OperationKeyHash("consumer-a", "ctx-2", "same-business-key"));
+    }
+
+    [Fact]
+    public async Task MismaKey_OtroConsumidor_NoAccedeALaOperacionAnterior()
+    {
+        var fake = new FakeWsfeClient();
+        var store = new MemoryStore();
+        var config = Config(1);
+        var firstSequencer = new McpInvoiceSequencer(fake, config, store, Provider(config, "consumer-a", "ctx-1"));
+        var secondSequencer = new McpInvoiceSequencer(fake, config, store, Provider(config, "consumer-b", "ctx-1"));
+
+        var first = await firstSequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "shared-text-key");
+        var second = await secondSequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "shared-text-key");
+
+        Assert.True(first.Success);
+        Assert.True(second.Success);
+        Assert.Equal(2, fake.EmittedNumbers.Count);
     }
 
     [Fact]
@@ -113,7 +132,10 @@ public class McpInvoiceSequencerTests
         var sequencer = new McpInvoiceSequencer(fake, Config(1), store);
 
         var first = await sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "technical-failure-key");
-        var keyHash = EmissionRequestFingerprint.KeyHash("technical-failure-key");
+        var keyHash = EmissionRequestFingerprint.OperationKeyHash(
+            "test-consumer",
+            "test-context",
+            "technical-failure-key");
         var stored = await store.GetAsync(keyHash);
 
         Assert.False(first.Success);
@@ -143,36 +165,68 @@ public class McpInvoiceSequencerTests
     private static dcArcaConfig Config(int puntoVenta) => new()
     {
         Cuit = "20123456786",
-        PuntoVenta = puntoVenta
+        PuntoVenta = puntoVenta,
+        WsfeUrl = "https://wswhomo.afip.gov.ar/wsfev1/service.asmx"
     };
+
+    private static IFiscalOperationIdentityProvider Provider(
+        dcArcaConfig config,
+        string consumerId,
+        string contextId)
+        => new SingleFiscalOperationIdentityProvider(
+            config,
+            new SingleFiscalContextOptions(
+                consumerId,
+                contextId,
+                "homologacion",
+                1,
+                "cred-v1"));
 
     private sealed class MemoryStore : IEmissionIdempotencyStore
     {
         private readonly object _sync = new();
         private readonly Dictionary<string, EmissionIdempotencyRecord> _records = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, FiscalContextDescriptor> _contexts = new(StringComparer.Ordinal);
+
+        public Task EnsureContextAsync(FiscalContextDescriptor context, CancellationToken cancellationToken = default)
+        {
+            lock (_sync)
+            {
+                if (_contexts.TryGetValue(context.ContextId, out var existing)
+                    && existing != context)
+                    throw new InvalidDataException("FISCAL_CONTEXT_IDENTITY_MISMATCH");
+                _contexts[context.ContextId] = context;
+                return Task.CompletedTask;
+            }
+        }
 
         public Task<EmissionIdempotencyRecord> GetOrCreateAsync(
             string keyHash,
             string requestHash,
-            dcTipoComprobante tipoComprobante,
-            int puntoVenta,
+            int requestCanonicalizationVersion,
+            FiscalOperationIdentity identity,
+            StoredFiscalEvidence fiscalEvidence,
             CancellationToken cancellationToken = default)
         {
             lock (_sync)
             {
                 if (_records.TryGetValue(keyHash, out var existing))
                 {
-                    if (!string.Equals(existing.RequestHash, requestHash, StringComparison.Ordinal))
+                    if (!string.Equals(existing.RequestHash, requestHash, StringComparison.Ordinal)
+                        || existing.RequestCanonicalizationVersion != requestCanonicalizationVersion
+                        || !existing.Identity.MatchesImmutableIdentity(identity))
                         throw new EmissionIdempotencyConflictException();
                     return Task.FromResult(existing);
                 }
 
                 var now = DateTimeOffset.UtcNow;
                 var created = new EmissionIdempotencyRecord(
+                    FileSystemEmissionIdempotencyStore.CurrentSchemaVersion,
                     keyHash,
                     requestHash,
-                    (int)tipoComprobante,
-                    puntoVenta,
+                    requestCanonicalizationVersion,
+                    identity,
+                    fiscalEvidence,
                     null,
                     EmissionIdempotencyState.Created,
                     null,
@@ -197,7 +251,8 @@ public class McpInvoiceSequencerTests
             lock (_sync)
             {
                 if (_records.TryGetValue(record.KeyHash, out var existing)
-                    && !string.Equals(existing.RequestHash, record.RequestHash, StringComparison.Ordinal))
+                    && (!string.Equals(existing.RequestHash, record.RequestHash, StringComparison.Ordinal)
+                        || !existing.Identity.MatchesImmutableIdentity(record.Identity)))
                     throw new EmissionIdempotencyConflictException();
                 _records[record.KeyHash] = record;
                 return Task.CompletedTask;
