@@ -35,6 +35,11 @@ jobs:
             exit 1
           fi
 
+      - name: Validate homologation harness
+        run: |
+          python3 -m py_compile scripts/homologacion/epic14_homologacion.py
+          python3 -m unittest scripts/homologacion/test_epic14_homologacion.py
+
       - name: Restore Core tests
         run: dotnet restore dcArca.Core.Tests/dcArca.Core.Tests.csproj
 
