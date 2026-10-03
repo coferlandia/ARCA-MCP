@@ -31,7 +31,8 @@ public sealed class FileSystemApiKeyStore : IApiKeyStore
     {
         if (string.IsNullOrWhiteSpace(consumerId))
             throw new ArgumentException("consumerId es obligatorio.", nameof(consumerId));
-        return CreateInternalAsync(name, scopes, consumerId.Trim(), NormalizeGrants(contextGrants), cancellationToken);
+        var normalizedGrants = NormalizeRequiredGrants(contextGrants);
+        return CreateInternalAsync(name, scopes, consumerId.Trim(), normalizedGrants, cancellationToken);
     }
 
     private async Task<(ApiKeyRecord Record, string RawKey)> CreateInternalAsync(
@@ -109,7 +110,8 @@ public sealed class FileSystemApiKeyStore : IApiKeyStore
     {
         if (string.IsNullOrWhiteSpace(consumerId))
             throw new ArgumentException("consumerId es obligatorio.", nameof(consumerId));
-        var normalized = NormalizeGrants(contextGrants);
+        var normalizedConsumer = consumerId.Trim();
+        var normalized = NormalizeRequiredGrants(contextGrants);
 
         var coordinator = new dcWsaaFileCacheCoordinator(_filePath);
         await using (await coordinator.AcquireAsync(cancellationToken))
@@ -117,9 +119,15 @@ public sealed class FileSystemApiKeyStore : IApiKeyStore
             var records = await ReadAllAsync(cancellationToken);
             var index = records.FindIndex(record => record.Id == id);
             if (index < 0) return false;
-            records[index] = records[index] with
+            var existing = records[index];
+            if (!string.IsNullOrWhiteSpace(existing.ConsumerId)
+                && !string.Equals(existing.ConsumerId, normalizedConsumer, StringComparison.Ordinal))
             {
-                ConsumerId = consumerId.Trim(),
+                throw new InvalidOperationException("CONSUMER_ID_IMMUTABLE");
+            }
+            records[index] = existing with
+            {
+                ConsumerId = normalizedConsumer,
                 ContextGrants = normalized
             };
             WriteAll(coordinator, records);
@@ -164,6 +172,14 @@ public sealed class FileSystemApiKeyStore : IApiKeyStore
         return normalized;
     }
 
+    private static ApiKeyContextGrant[] NormalizeRequiredGrants(IReadOnlyCollection<ApiKeyContextGrant> grants)
+    {
+        var normalized = NormalizeGrants(grants);
+        if (normalized.Length == 0)
+            throw new ArgumentException("Una API key con consumerId debe tener al menos un grant de contexto.", nameof(grants));
+        return normalized;
+    }
+
     private static ApiKeyContextGrant[] NormalizeGrants(IReadOnlyCollection<ApiKeyContextGrant> grants)
     {
         if (grants is null) throw new ArgumentNullException(nameof(grants));
@@ -184,19 +200,29 @@ public sealed class FileSystemApiKeyStore : IApiKeyStore
     }
 
     private static bool IsValidRecord(ApiKeyRecord? record)
-        => record is not null
-            && !string.IsNullOrWhiteSpace(record.Id)
-            && !string.IsNullOrWhiteSpace(record.Name)
-            && record.KeyHash is { Length: 64 }
-            && record.KeyHash.All(Uri.IsHexDigit)
-            && record.Scopes is { Length: > 0 }
-            && record.Scopes.All(scope => !string.IsNullOrWhiteSpace(scope))
-            && (record.ConsumerId is null || !string.IsNullOrWhiteSpace(record.ConsumerId))
-            && (record.ContextGrants is null || record.ContextGrants.All(grant =>
-                grant is not null
-                && !string.IsNullOrWhiteSpace(grant.ContextId)
-                && grant.Operations is { Length: > 0 }
-                && grant.Operations.All(operation => !string.IsNullOrWhiteSpace(operation))));
+    {
+        if (record is null
+            || string.IsNullOrWhiteSpace(record.Id)
+            || string.IsNullOrWhiteSpace(record.Name)
+            || record.KeyHash is not { Length: 64 }
+            || !record.KeyHash.All(Uri.IsHexDigit)
+            || record.Scopes is not { Length: > 0 }
+            || record.Scopes.Any(string.IsNullOrWhiteSpace))
+            return false;
+
+        var hasConsumer = !string.IsNullOrWhiteSpace(record.ConsumerId);
+        var grants = record.ContextGrants ?? Array.Empty<ApiKeyContextGrant>();
+        if (!hasConsumer)
+            return grants.Length == 0;
+        if (grants.Length == 0)
+            return false;
+
+        return grants.All(grant =>
+            grant is not null
+            && !string.IsNullOrWhiteSpace(grant.ContextId)
+            && grant.Operations is { Length: > 0 }
+            && grant.Operations.All(operation => !string.IsNullOrWhiteSpace(operation)));
+    }
 
     private void WriteAll(dcWsaaFileCacheCoordinator coordinator, List<ApiKeyRecord> records)
     {
