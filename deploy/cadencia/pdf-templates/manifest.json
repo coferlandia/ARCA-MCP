@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "key": "factura-ar",
+      "version": "3",
+      "template": "factura-ar-v3.html",
+      "schema": "factura-ar-v3.schema.json"
+    }
+  ]
+}
