@@ -1,7 +1,6 @@
 using System.Net;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.Configuration;
 using Xunit;
 
 namespace dcArca.McpServer.Tests;
@@ -59,13 +58,9 @@ public class McpHealthTests : IClassFixture<WebApplicationFactory<Program>>
 
         using var blockedFactory = _factory.WithWebHostBuilder(builder =>
         {
-            builder.ConfigureAppConfiguration((_, configuration) =>
-            {
-                configuration.AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["Recovery:Directory"] = temp.Path
-                });
-            });
+            // Program reads Recovery:Directory during top-level startup, before late
+            // ConfigureAppConfiguration callbacks can influence the captured value.
+            builder.UseSetting("Recovery:Directory", temp.Path);
         });
         var client = blockedFactory.CreateClient();
 
