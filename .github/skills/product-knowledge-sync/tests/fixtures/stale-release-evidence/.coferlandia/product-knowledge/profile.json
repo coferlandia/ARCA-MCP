@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "surfaces": [
+    {
+      "id": "commercial",
+      "kind": "external",
+      "release_policy": "review"
+    }
+  ]
+}

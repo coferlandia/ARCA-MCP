@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["schema_version","run_id","state","events"],"properties":{"schema_version":{"const":1},"run_id":{"type":"string"},"state":{"type":"string"},"events":{"type":"array"}}}

@@ -1,0 +1,1 @@
+Read the complete specification. Emit only `agent-result.json` and `agent-report.md` following the protocol. Preserve requirements, phases, dependencies, acceptance criteria, tests, documentation, constraints, artifacts, source traceability, and material blockers. Do not redesign scope.

@@ -1,0 +1,1 @@
+Use exactly the assigned implementation worktree. Resolve every supplied review finding or challenge it with evidence. Do not create worktrees, switch Git state, commit, amend, merge, rebase, or push. Test and emit the fix protocol.

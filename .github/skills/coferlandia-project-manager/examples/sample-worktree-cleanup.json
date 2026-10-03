@@ -1,0 +1,65 @@
+{
+  "status": "ok",
+  "generated_at": "2026-07-08T143000Z",
+  "projects_file": "/path/to/pm-home/.coferlandia/project-manager/projects.json",
+  "mode": "dry-run",
+  "summary": {
+    "total_worktrees": 4,
+    "main_worktrees": 2,
+    "linked_worktrees": 2,
+    "clean_suggesting_removal": 1,
+    "dirty_caution": 1
+  },
+  "worktrees": [
+    {
+      "project_slug": "my-app",
+      "path": "/path/to/repos/my-app",
+      "branch": "main",
+      "is_main": true,
+      "classification": "main"
+    },
+    {
+      "project_slug": "my-app",
+      "path": "/path/to/repos/my-app/.git/worktrees/feature-auth",
+      "branch": "feature/auth",
+      "is_main": false,
+      "classification": "clean-linked",
+      "dirty": false
+    },
+    {
+      "project_slug": "my-lib",
+      "path": "/path/to/repos/my-lib",
+      "branch": "main",
+      "is_main": true,
+      "classification": "main"
+    },
+    {
+      "project_slug": "my-lib",
+      "path": "/path/to/repos/my-lib/.git/worktrees/fix-bug-42",
+      "branch": "fix/bug-42",
+      "is_main": false,
+      "classification": "dirty-linked",
+      "dirty": true
+    }
+  ],
+  "clean_removable": [
+    {
+      "project_slug": "my-app",
+      "path": "/path/to/repos/my-app/.git/worktrees/feature-auth",
+      "branch": "feature/auth",
+      "is_main": false,
+      "classification": "clean-linked",
+      "dirty": false
+    }
+  ],
+  "dirty_caution": [
+    {
+      "project_slug": "my-lib",
+      "path": "/path/to/repos/my-lib/.git/worktrees/fix-bug-42",
+      "branch": "fix/bug-42",
+      "is_main": false,
+      "classification": "dirty-linked",
+      "dirty": true
+    }
+  ]
+}

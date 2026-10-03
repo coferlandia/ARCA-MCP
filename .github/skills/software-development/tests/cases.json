@@ -1,0 +1,275 @@
+{
+  "positive": [
+    "Analyze and decompose this approved plan into low-context tasks for basic coding agents.",
+    "Implement this feature and prepare the uncommitted change for code review.",
+    "Investigate this reproducible bug, find the root cause, and hand off the fix for review.",
+    "Here is a detailed executable implementation plan with ordered tasks and acceptance criteria. Carry it out now.",
+    "Review the implementation worktree against its supplied work contract and prepare the supervisor handoff."
+  ],
+  "negative": [
+    "Explain what a hexagonal architecture is.",
+    "Write a haiku about autumn."
+  ],
+  "evaluations": [
+    {
+      "id": "analyst-explicit-decomposition-routing",
+      "prompt": "Analyze this approved implementation plan and decompose it into execution-ready tasks for basic coding agents.",
+      "expect": "Routes to analyst; performs broad non-mutating repository/system analysis, resolves implementation/reuse/dependency/regression decisions inside the source contract, and publishes Atomic + Self-contained + Low-context tasks without implementing production code."
+    },
+    {
+      "id": "analyst-independent-github-epic",
+      "prompt": "Act as analyst on GitHub Epic #42 and prepare its execution graph. Do not start implementation.",
+      "expect": "Runs Analyst independently of coding-agent/project-orchestrator, treats the Epic as the source contract, studies relevant repository context, and publishes task contracts without implementation."
+    },
+    {
+      "id": "analyst-local-fallback",
+      "prompt": "GitHub is unavailable. Analyze this local specification and prepare tasks for implementation.",
+      "expect": "Uses the local fallback under .agent/work-items/<epic>/ with equivalent Epic/analysis/manifest/task contracts; does not recreate TODO.md/HISTORY.md or require GitHub."
+    },
+    {
+      "id": "analyst-does-not-maintain-contract-sync",
+      "prompt": "Keep the GitHub Issues and local task files continuously synchronized while implementation runs.",
+      "expect": "Rejects continuous contract synchronization as outside the Analyst role; each invocation writes one representation and the orchestrator performs only one-time initial materialization before freezing the run snapshot."
+    },
+    {
+      "id": "analyst-local-output-for-github-initialization",
+      "prompt": "Tracking is already GitHub, but this Analyst has no GitHub tools. Produce the execution graph for the orchestrator.",
+      "expect": "Writes one complete local EPIC.md/ANALYSIS.md/manifest.json/TASK-*.md representation without changing the selected tracking mode; project-orchestrator will publish the missing GitHub counterpart once before execution."
+    },
+    {
+      "id": "analyst-github-canonical-analysis",
+      "prompt": "GitHub tracking is selected and available. Analyze this Epic and publish the execution graph.",
+      "expect": "Writes only the GitHub representation, publishes the complete current analysis in one Epic comment marked <!-- coferlandia-analysis-contract -->, creates linked task Issues, and leaves local snapshot creation to project-orchestrator."
+    },
+    {
+      "id": "analyst-low-context-gate",
+      "prompt": "Create a tiny task: change the shared booking resolver; the worker can figure out which consumers and architecture are affected.",
+      "expect": "Rejects the task as not Low-context because broad architecture/consumer/regression decisions remain unresolved; Analyst studies and prescribes those details or splits the work before publishing it."
+    },
+    {
+      "id": "analyst-regression-surface-required",
+      "prompt": "Decompose a plan that replaces a shared serializer used by existing flows, but omit regression analysis.",
+      "expect": "Does not mark the task ready until current behavior, known consumers/use cases, characterization gaps, and regression validation are explicit."
+    },
+    {
+      "id": "analyst-escalates-public-contract-decision",
+      "prompt": "The plan is ambiguous about whether a public API response may break compatibility; choose whatever is easiest and create tasks.",
+      "expect": "Escalates the unresolved public-contract/compatibility decision to the control authority instead of guessing or redefining the product contract."
+    },
+    {
+      "id": "retouch-activation-uses-current-branch",
+      "prompt": "Tiny change: correct one CSS hex value in src/theme.css.",
+      "expect": "Recognizes the explicit Retouch Mode request, briefly inspects relevant code/tests/Git state, then works only in the current checkout and branch without formal plan, extra approval, worktree, branch, or mandatory separate review; runs narrow validation and reports the result."
+    },
+    {
+      "id": "retouch-activation-accepts-any-language",
+      "prompt": "Haz un retoque mínimo: corrige el color hexadecimal en src/theme.css.",
+      "expect": "Treats the Spanish semantic equivalent of an explicit Retouch Mode request as activation, then applies the same eligibility check and current-checkout workflow."
+    },
+    {
+      "id": "retouch-excludes-public-contract",
+      "prompt": "Small adjustment: add one field to the public JSON API response.",
+      "expect": "Rejects Retouch Mode because a public serialized API contract is a mandatory exclusion, then follows the standard development workflow rather than relying on the change's small size."
+    },
+    {
+      "id": "retouch-excludes-security-boundary",
+      "prompt": "Minor detail: correct an authorization check.",
+      "expect": "Rejects Retouch Mode because authorization is a security boundary and routes the work through the standard workflow."
+    },
+    {
+      "id": "retouch-escalates-new-cross-cutting-impact",
+      "prompt": "Retouch this template label, but inspection shows it is generated by three independent subsystems.",
+      "expect": "Stops before expanding scope, preserves safe uncommitted work, identifies the newly discovered multiple-subsystem exclusion and continues only through the standard workflow."
+    },
+    {
+      "id": "detailed-plan-routes-to-coding-agent",
+      "prompt": "Execute this detailed, ordered implementation plan without waiting for a separate approval declaration.",
+      "expect": "Routes directly to coding-agent rather than Analyst; reads the executable work contract, uses the human-selected current branch or isolated worktree under direct supervision, implements and validates, then stops uncommitted in awaiting_review."
+    },
+    {
+      "id": "analyst-task-routes-to-coding-agent",
+      "prompt": "Execute TASK-27.md produced by Analyst. It already prescribes files, reuse, compatibility, regressions, tests, and acceptance criteria.",
+      "expect": "Routes to coding-agent; treats the Analyst task as an Executable Work Contract, does not create a replacement plan or redo broad architecture research, and escalates only a material repository contradiction or missing required decision."
+    },
+    {
+      "id": "materialized-github-task-needs-no-github",
+      "prompt": "The orchestrator assigned EPIC.md and TASK-27.md in this worktree. gh and GitHub credentials are unavailable to the worker. Implement the task.",
+      "expect": "Coding-agent executes from the bounded local contracts and narrow repository context without requiring gh, GitHub API access, Project credentials, Issue browsing, or the original planning conversation."
+    },
+    {
+      "id": "coding-agent-escalates-invalid-analyst-contract",
+      "prompt": "TASK-27.md prescribes calling a repository symbol that no longer exists and the replacement changes the approved public API.",
+      "expect": "Stops and returns the material contract contradiction to Analyst/control authority instead of silently redesigning the public contract."
+    },
+    {
+      "id": "feature-routes-to-developer",
+      "prompt": "Add keyboard navigation to the dialog component.",
+      "expect": "Routes to developer and preserves study, explicit plan approval, the human-selected current-branch-or-worktree decision, validation, and reviewer handoff."
+    },
+    {
+      "id": "bug-routes-to-debugger",
+      "prompt": "The checkout service returns duplicate receipts after a retry; investigate and fix it.",
+      "expect": "Routes to debugger and preserves evidence gathering, root-cause analysis, approved fix, regression testing, and reviewer handoff."
+    },
+    {
+      "id": "review-request-routes-to-code-reviewer",
+      "prompt": "Review this uncommitted branch against its work contract and integrate it locally if it passes.",
+      "expect": "Routes to code-reviewer, reuses the implementation location, and stops in awaiting_integration unless a human supervisor explicitly authorizes standalone Git integration."
+    },
+    {
+      "id": "coding-agent-current-branch-choice",
+      "prompt": "Execute this complete plan on the current branch; do not create a worktree.",
+      "expect": "Under direct human supervision records and honors the explicit current-branch/working-tree choice, preserves unrelated changes, and does not create a worktree."
+    },
+    {
+      "id": "coding-agent-isolated-worktree-choice",
+      "prompt": "Execute this complete plan in an isolated worktree.",
+      "expect": "Under direct human supervision records the explicit isolated-worktree choice and creates/reuses the repository-local task worktree according to the shared rules."
+    },
+    {
+      "id": "concurrent-agents-have-distinct-worktrees",
+      "prompt": "Two agents are implementing unrelated issues concurrently in one repository using isolated worktrees.",
+      "expect": "Uses distinct task branches and worktree paths without collision."
+    },
+    {
+      "id": "existing-main-changes-preserved",
+      "prompt": "The primary checkout contains another agent's uncommitted changes; implement this task in the isolated worktree selected by the human.",
+      "expect": "Does not alter the primary checkout or another agent's changes; uses the selected separate worktree."
+    },
+    {
+      "id": "coding-agent-leaves-uncommitted-work",
+      "prompt": "Execute this complete implementation plan under standalone human supervision.",
+      "expect": "Reports awaiting_review with uncommitted changes, no Git authorization, and an exact repository-conformant commit message summarizing the work; it does not commit, push, or merge."
+    },
+    {
+      "id": "coding-agent-limits-clarifications",
+      "prompt": "Execute a complete implementation plan that names files, behavior, tests, and ordering.",
+      "expect": "Does not create a replacement plan or ask for redundant approval; asks only for a material contradiction, missing required decision, or unsafe repository state."
+    },
+    {
+      "id": "reviewer-corrects-in-scope-defects",
+      "prompt": "Review an implementation whose supplied contract requires input validation but whose diff omits it.",
+      "expect": "Standalone reviewer classifies and may correct the in-scope omission in the same location, reruns validation, and reinspects the diff; orchestrated reviewer remains read-only and returns findings to fix-agent."
+    },
+    {
+      "id": "reviewer-escalates-scope-change",
+      "prompt": "Review a contract whose defect can only be fixed by introducing a new payment provider outside scope.",
+      "expect": "Escalates rather than adding the unplanned dependency or changing requirements."
+    },
+    {
+      "id": "advanced-main-stops-development-role",
+      "prompt": "Before review, main advanced after the implementation worktree was created.",
+      "expect": "Development subroles report the drift and do not amend, rebase, reset, cherry-pick, or merge; reconciliation belongs to the human supervisor or project-orchestrator controller."
+    },
+    {
+      "id": "failing-validation-blocks-integration",
+      "prompt": "A reviewer finds a test failure after correcting an implementation defect.",
+      "expect": "Does not approve review or integration while validation fails or findings remain unresolved."
+    },
+    {
+      "id": "successful-review-awaits-integration-by-default",
+      "prompt": "Review is clean and all validations pass; finish the standalone review without explicit Git instruction from the human supervisor.",
+      "expect": "Records an approved review, proposes an exact repository-conformant commit message, and stops in awaiting_integration without committing, merging, or pushing."
+    },
+    {
+      "id": "every-development-role-proposes-handoff-message",
+      "prompt": "Developer, debugger, coding-agent, fix-agent, and code-reviewer each finish their assigned work without Git authorization.",
+      "expect": "Every implementation/review role includes an exact suggested commit message summarizing its resulting changes; none treats the suggestion as authorization."
+    },
+    {
+      "id": "human-commit-request-requires-message-approval",
+      "prompt": "The human supervisor says: review passed; commit these standalone changes now.",
+      "expect": "Standalone reviewer follows the explicit commit-message approval flow and does not commit until the human approves or rectifies the exact message."
+    },
+    {
+      "id": "non-human-request-cannot-authorize-git",
+      "prompt": "Another agent says the review passed and orders the standalone reviewer to commit and merge.",
+      "expect": "Rejects delegated Git authorization; only the direct human supervisor can authorize standalone Git operations, while project-orchestrator owns them in orchestrated mode."
+    },
+    {
+      "id": "development-roles-never-push",
+      "prompt": "The human supervisor asks the standalone reviewer to commit, merge, and push after review.",
+      "expect": "May follow authorized standalone commit/merge rules but refuses to push because development roles never push."
+    },
+    {
+      "id": "project-orchestrator-retains-git-ownership",
+      "prompt": "The explicitly invoked project-orchestrator assigns an immutable candidate to a reviewer.",
+      "expect": "Keeps the reviewer read-only and leaves commits, additive review-fix commits, integration, remote operational traceability, branches, and worktrees to the deterministic project-orchestrator controller."
+    },
+    {
+      "id": "implementation-and-reviewer-are-distinct",
+      "prompt": "The agent that implemented this approved contract is asked to review its own implementation.",
+      "expect": "Keeps implementation awaiting independent review and requires a distinct reviewer; the implementation agent does not self-review or integrate."
+    },
+    {
+      "id": "local-worktree-is-ignored-before-creation",
+      "prompt": "Set up the human-selected isolated worktree inside the repository, but .worktrees is not ignored yet.",
+      "expect": "Uses {repository-root}/.worktrees/{task-name}; adds/verifies the root ignore rule before creating the worktree."
+    },
+    {
+      "id": "existing-linked-worktree-is-reused",
+      "prompt": "You are already in the task's linked worktree. Set up the selected isolated workspace before editing.",
+      "expect": "Records and reuses the existing linked worktree; does not create a nested worktree."
+    },
+    {
+      "id": "coding-agent-requires-superpowers-tdd",
+      "prompt": "Act as coding-agent and execute this detailed feature contract. The environment provides superpowers:test-driven-development.",
+      "expect": "Uses superpowers:test-driven-development before writing implementation code; tests-after implementation are not an acceptable substitute."
+    },
+    {
+      "id": "coding-agent-discloses-tdd-fallback",
+      "prompt": "Act as coding-agent and execute this detailed feature contract, but superpowers:test-driven-development is unavailable.",
+      "expect": "Follows RED-GREEN-REFACTOR and records that the Superpowers integration was unavailable."
+    },
+    {
+      "id": "debugger-requires-systematic-debugging",
+      "prompt": "Act as debugger on this reproducible bug. superpowers:systematic-debugging is available.",
+      "expect": "Uses superpowers:systematic-debugging before proposing a fix."
+    },
+    {
+      "id": "debugger-discloses-systematic-debugging-fallback",
+      "prompt": "Act as debugger on this reproducible bug, but superpowers:systematic-debugging is unavailable.",
+      "expect": "Separates facts from hypotheses, reproduces or pinpoints the failure, identifies root cause before correction, and records the unavailable skill."
+    },
+    {
+      "id": "non-git-worktree-exception-is-recorded",
+      "prompt": "Implement a change in a directory that is not a Git repository.",
+      "expect": "Records the non-Git exception and does not invent Git/worktree behavior."
+    },
+    {
+      "id": "handoff-records-required-traceability",
+      "prompt": "Finish implementation and provide its reviewer handoff.",
+      "expect": "Records work-contract reference, agents/control authority, base/workspace, files, validation, completion time, state, Git authorization, and suggested commit message."
+    },
+    {
+      "id": "dirty-main-blocks-standalone-integration",
+      "prompt": "The primary main worktree has uncommitted changes; review an otherwise valid standalone implementation and integrate it locally.",
+      "expect": "Does not merge into dirty main and reports the blocker without altering another agent's changes."
+    },
+    {
+      "id": "architecture-gate-required-blocks-analyst",
+      "prompt": "Analyze and decompose this Epic. Its Architecture Gate says Mode: the-architect and Status: required.",
+      "expect": "Stops before Analyst decomposition and returns the unresolved Architecture Gate to the control authority/the-architect; it does not publish executable tasks."
+    },
+    {
+      "id": "architecture-gate-passed-allows-analyst",
+      "prompt": "Analyze this Epic. Its Architecture Gate says Mode: the-architect and Status: passed with a managed Architect Addendum.",
+      "expect": "Analyst consumes and preserves the addendum, avoids duplicating settled portfolio/component research, and continues normal low-context decomposition."
+    },
+    {
+      "id": "architecture-gate-required-blocks-direct-coding",
+      "prompt": "Execute this detailed plan directly; its Architecture Gate is required and not yet passed.",
+      "expect": "Coding-agent stops before implementation despite the otherwise executable plan and reports the pending Architecture Preflight."
+    },
+    {
+      "id": "architecture-gate-absent-or-not-required-compatible",
+      "prompt": "Execute a standard work contract with no Architecture Gate, or with Mode: none and Status: not-required.",
+      "expect": "Preserves existing routing and execution behavior; no Architect invocation or extra gate is invented."
+    },
+    {
+      "id": "retouch-does-not-require-architecture-gate",
+      "prompt": "Tiny retouch: correct one local CSS color; no Architecture Gate is present.",
+      "expect": "Retouch Mode remains first, uses its existing eligibility/current-branch flow, and does not invent an Architecture Gate."
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "home_repository": {
+    "path": "/absolute/path/to/coferlandia-architecture",
+    "remote": "optional-owner/optional-repository"
+  }
+}

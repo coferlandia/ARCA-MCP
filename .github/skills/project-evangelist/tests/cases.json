@@ -1,0 +1,15 @@
+{
+  "positive": [
+    "Document this repository so a new developer can understand the stack, architecture, modules, and main flows.",
+    "Create a developer onboarding documentation structure with a technical overview and repository map.",
+    "Reorganize the project documentation from a first technical overview into deeper architecture and development guides.",
+    "Explain how this application is built and where a contributor should start."
+  ],
+  "negative": [
+    "Run project-documentation-archivist and update README, AGENTS, DECISIONS, and RUNBOOK from current evidence.",
+    "Migrate TODO.md and HISTORY.md into GitHub Issues.",
+    "Configure MkDocs Material and publish the documentation through GitHub Pages.",
+    "Implement a new webhook endpoint in the backend.",
+    "Rewrite this one paragraph to sound clearer."
+  ]
+}

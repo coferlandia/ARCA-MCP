@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["protocol_version","run_id","phase_id","attempt_id","role","worktree_path"],"properties":{"protocol_version":{"const":"1.0"},"role":{"enum":["coding-agent","completion-verifier","code-reviewer","fix-agent"]},"worktree_path":{"type":"string"}}}

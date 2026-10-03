@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "obsidian": {
+    "vault_root": "",
+    "pm_projects_folder": "Projects",
+    "pm_tasks_folder": "Projects/issues",
+    "default_view": "portfolio"
+  },
+  "git": {
+    "default_branch": "main",
+    "user_name": "",
+    "user_email": "",
+    "remote_provider": "github",
+    "remote_owner": "",
+    "use_gh_cli_if_available": true,
+    "allow_remote_repo_creation": false
+  },
+  "superpowers": {
+    "required": true,
+    "harness": "auto",
+    "skills_root": "auto",
+    "required_skills": [
+      "brainstorming",
+      "writing-plans"
+    ],
+    "optional_skills": [
+      "preserving-productive-tensions",
+      "writing-skills"
+    ]
+  },
+  "archivist": {
+    "required": true,
+    "initialize_missing": "ask",
+    "weekly_maintenance_enabled": true,
+    "maintenance_interval_days": 7
+  },
+  "scripts": {
+    "output_format": "json",
+    "write_logs": true,
+    "backup_before_apply": true
+  },
+  "agent_runtime": {
+    "detection": "auto",
+    "fallback_profile": "manual-supervised",
+    "current_runtime": "auto"
+  }
+}

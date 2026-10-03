@@ -1,0 +1,14 @@
+{
+  "positive": [
+    "usa coferlandia-ci-adapter para preparar este repo",
+    "crea la definición CI específica para que funcionen el prompt CI y el skill local-ci",
+    "actualiza .coferlandia/ci/profile.json porque cambió el workflow final",
+    "adaptá este repositorio al protocolo genérico de CI de Coferlandia"
+  ],
+  "negative": [
+    "corre el CI local",
+    "revisa el workflow que falló",
+    "mergea este PR",
+    "crea un skill de deployment"
+  ]
+}

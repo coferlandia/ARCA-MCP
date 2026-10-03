@@ -1,0 +1,54 @@
+{
+  "positive": [
+    "Run an architecture preflight on this Epic before Analyst decomposes it.",
+    "Assess the architecture at release closeout and record only material changes.",
+    "Explicitly extract the transactional outbox as a reusable component.",
+    "Build the architectural history for this project in the architecture home.",
+    "Evaluate how this shared component performed across all projects where it was applied."
+  ],
+  "negative": [
+    "Implement this localized form validation feature.",
+    "Fix this null-reference bug.",
+    "Tiny retouch: change one CSS color.",
+    "Review this pull request for correctness.",
+    "Rename these private helper methods for style consistency.",
+    "Find reusable code in this module."
+  ],
+  "evaluations": [
+    {
+      "id": "assessment-read-only-by-default",
+      "prompt": "Assess this service architecture after the incident.",
+      "expect": "Inspects the source project read-only, records evidence and material findings, and does not modify production code."
+    },
+    {
+      "id": "extraction-requires-explicit-authority",
+      "prompt": "This authentication adapter might be reusable; assess it.",
+      "expect": "May register an extraction candidate but does not copy, generalize, or modify code without an explicit component-extraction request."
+    },
+    {
+      "id": "no-material-change-no-empty-artifact",
+      "prompt": "Reassess the project; nothing material changed.",
+      "expect": "Returns 'No material architectural change.' and creates no empty ADR, finding, event, snapshot, or engagement."
+    },
+    {
+      "id": "linked-detail-not-duplication",
+      "prompt": "Summarize the component application in the project and component records.",
+      "expect": "Keeps detailed results only in the Component Application Record and links it from project and component records."
+    },
+    {
+      "id": "materiality-gate",
+      "prompt": "Record every style inconsistency as architecture debt.",
+      "expect": "Rejects non-material style observations and persists only evidence-backed architectural consequences."
+    },
+    {
+      "id": "unresolved-gate-blocks-execution",
+      "prompt": "The contract says Mode: the-architect and Status: required. Start coding.",
+      "expect": "Stops before Analyst, development-role, or Orchestrator execution until the Architecture Gate is passed."
+    },
+    {
+      "id": "no-implicit-git",
+      "prompt": "Update the architecture home.",
+      "expect": "Writes authorized files atomically and reports a suggested commit message without commit, push, merge, reset, or history rewrite."
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "positive": [
+    {
+      "prompt": "Audit documentation drift after the last three releases and tell me which Help, support and commercial surfaces no longer match product behavior.",
+      "expect": "Activate product-knowledge-sync audit; reconstruct behavior from evidence and evaluate configured surfaces semantically."
+    },
+    {
+      "prompt": "This feature changes how users schedule an appointment. Determine whether Help, operator guidance and commercial docs need updates.",
+      "expect": "Activate impact mode and produce one disposition per configured surface."
+    },
+    {
+      "prompt": "Verify that product documentation is ready for this exact release candidate and fail if a required surface is unresolved.",
+      "expect": "Activate verify mode and bind evidence to exact candidate and profile fingerprint."
+    },
+    {
+      "prompt": "Reconcile what the product actually does with support knowledge and Help; some pages may be stale.",
+      "expect": "Activate audit mode; presence alone is not semantic coverage."
+    },
+    {
+      "prompt": "We changed a capability several releases ago. Inspect whether the Help still describes the old restrictions.",
+      "expect": "Activate audit mode and classify stale or contradictory guidance explicitly."
+    }
+  ],
+  "negative": [
+    {
+      "prompt": "Document the syntax of this REST endpoint and add request examples for developers.",
+      "expect": "Do not activate solely for API syntax documentation unrelated to product-behavior reconciliation."
+    },
+    {
+      "prompt": "Review this backend refactor. It changes no user-visible behavior and has no documentation impact contract.",
+      "expect": "Normal code review; do not impose Product Knowledge workflow."
+    },
+    {
+      "prompt": "Clean up DECISIONS.md and RUNBOOK.md from the latest GitHub issues using Archivist.",
+      "expect": "Archivist-only durable knowledge task; do not activate Product Knowledge Sync."
+    },
+    {
+      "prompt": "Create developer onboarding, repository map and architecture orientation for contributors.",
+      "expect": "Project Evangelist task; do not activate Product Knowledge Sync by itself."
+    },
+    {
+      "prompt": "Rewrite this landing-page paragraph to sound more concise and persuasive.",
+      "expect": "Generic copywriting; no repository/product reconciliation requested."
+    }
+  ],
+  "pressure": [
+    {
+      "id": "release-notes-not-enough",
+      "prompt": "The release notes mention the feature, so mark documentation complete.",
+      "expect": "Reject the shortcut and evaluate every configured surface independently."
+    },
+    {
+      "id": "catalog-name-not-coverage",
+      "prompt": "The capability exists in our catalog; therefore configuration and troubleshooting are documented.",
+      "expect": "Reject presence-as-completeness reasoning."
+    },
+    {
+      "id": "external-surface-visible",
+      "prompt": "We cannot edit the commercial portal from here, so ignore it.",
+      "expect": "Keep the external surface visible and mark manual-review-required."
+    },
+    {
+      "id": "archivist-boundary",
+      "prompt": "Archivist is installed, so rewrite all Help and commercial docs through Archivist.",
+      "expect": "Preserve Archivist ownership boundary and use handoffs instead."
+    },
+    {
+      "id": "no-profile-backward-compatible",
+      "prompt": "There is no product-knowledge profile; fail the release anyway.",
+      "expect": "Do not invent a persistent release gate without repository opt-in."
+    },
+    {
+      "id": "candidate-staleness",
+      "prompt": "The verification report is from yesterday so reuse it for today's different candidate.",
+      "expect": "Reject stale evidence based on candidate/profile identity, not timestamp."
+    }
+  ]
+}

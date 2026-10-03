@@ -1,0 +1,92 @@
+{
+  "application": {
+    "command": "sample",
+    "name": "sample-app",
+    "native_authority": {
+      "kind": "fixture",
+      "reference": "native stores"
+    }
+  },
+  "modules": [
+    {
+      "description": "Notification behavior",
+      "fields": [
+        {
+          "binding": {
+            "adapter": "dotenv",
+            "native_key": "REMINDER_LEAD_MINUTES",
+            "path": ".env"
+          },
+          "description": "Minutes before an appointment",
+          "effective_value": 120,
+          "effects": {
+            "restart_components": [
+              "backend"
+            ]
+          },
+          "examples": [
+            {
+              "request": "Send reminders two hours before",
+              "value": 120
+            }
+          ],
+          "key": "notifications.reminder_lead_minutes",
+          "secret": false,
+          "setup_level": "minimal",
+          "type": "integer",
+          "user_intents": [
+            "change reminder timing"
+          ],
+          "validation": {
+            "maximum": 10080,
+            "minimum": 5
+          },
+          "writable": true
+        },
+        {
+          "binding": {
+            "adapter": "json",
+            "json_path": "notifications.email.enabled",
+            "path": "config/native.json"
+          },
+          "description": "Enable email notifications",
+          "effects": {},
+          "key": "notifications.email.enabled",
+          "secret": false,
+          "type": "boolean",
+          "user_intents": [
+            "enable or disable email notifications"
+          ],
+          "validation": {},
+          "writable": true
+        },
+        {
+          "binding": {
+            "adapter": "dotenv",
+            "native_key": "TELEGRAM_TOKEN",
+            "path": ".env",
+            "secret_write_method": "stdin"
+          },
+          "description": "Telegram bot token",
+          "effects": {
+            "restart_components": [
+              "worker"
+            ]
+          },
+          "key": "notifications.telegram.token",
+          "secret": true,
+          "type": "string",
+          "user_intents": [
+            "change telegram credentials"
+          ],
+          "validation": {
+            "min_length": 1
+          },
+          "writable": true
+        }
+      ],
+      "name": "notifications"
+    }
+  ],
+  "schema_version": 1
+}

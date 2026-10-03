@@ -1,0 +1,1 @@
+A detached read-only review worktree and exact candidate SHA are assigned. Inspect only that snapshot against its base and phase manifest. Do not modify files, switch Git state, commit, or fix. Decide approved, changes-required, blocked, or invalid-result with evidence.

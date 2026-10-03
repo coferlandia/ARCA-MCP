@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "last_scan_at": null,
+  "projects_file": "",
+  "projects_detected": 0,
+  "maintenance": {
+    "last_run_at": null,
+    "next_due_at": null
+  },
+  "runtime": {
+    "config_path": "",
+    "execution_mode": "supervised_agentic"
+  }
+}

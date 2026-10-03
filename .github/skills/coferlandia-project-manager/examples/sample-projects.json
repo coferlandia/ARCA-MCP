@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "projects": [
+    {
+      "slug": "example-project",
+      "path": "/path/to/repos/example-project",
+      "added_at": "2026-07-13T12:00:00Z",
+      "status": "active"
+    },
+    {
+      "slug": "example-lib",
+      "path": "/path/to/repos/example-lib",
+      "added_at": "2026-07-13T12:00:00Z",
+      "status": "active"
+    },
+    {
+      "slug": "stale-project",
+      "path": "/path/to/repos/stale-project",
+      "added_at": "2026-06-01T10:00:00Z",
+      "status": "archived"
+    }
+  ]
+}

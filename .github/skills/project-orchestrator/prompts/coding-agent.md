@@ -1,0 +1,1 @@
+An isolated implementation worktree and branch are assigned. Use exactly them; do not create worktrees, switch Git state, commit, amend, merge, rebase, or push. Complete the assigned phase, test it, update required documentation, and emit protocol evidence.

@@ -1,0 +1,41 @@
+{
+  "config": {
+    "status": "ok",
+    "path": "skills/ops/coferlandia-project-manager/examples/config.sample.json"
+  },
+  "effective_vault_root": "/path/to/pm-home/obsidian",
+  "environment": {
+    "status": "ok",
+    "bash": true,
+    "git": true,
+    "python": true
+  },
+  "superpowers": {
+    "status": "ok",
+    "roots": [
+      "/path/to/.codex/skills",
+      "/path/to/.agents/skills"
+    ]
+  },
+  "superpowers_skills": {
+    "status": "ok",
+    "required_available": [
+      "brainstorming"
+    ],
+    "required_missing": [],
+    "optional_available": [],
+    "optional_missing": [
+      "preserving-productive-tensions"
+    ]
+  },
+  "git_capabilities": {
+    "status": "ok",
+    "git_installed": true,
+    "worktree": true,
+    "identity": {
+      "configured": true
+    },
+    "gh_cli": false
+  },
+  "next_approved_action": "review_phase_1_scope"
+}

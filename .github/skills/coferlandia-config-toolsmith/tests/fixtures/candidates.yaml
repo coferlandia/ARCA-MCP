@@ -1,0 +1,37 @@
+{
+  "candidates": [
+    {
+      "criticality": "low",
+      "evidence": [
+        {
+          "native_key": "SMS_ENABLED",
+          "path": ".env.example"
+        }
+      ],
+      "id": "CFG-CAND-001",
+      "omitted_reason": "Awaiting explicit approval",
+      "proposed_field": {
+        "binding": {
+          "adapter": "dotenv",
+          "native_key": "SMS_ENABLED",
+          "path": ".env"
+        },
+        "description": "Enable SMS notifications",
+        "effects": {},
+        "key": "notifications.sms.enabled",
+        "secret": false,
+        "type": "boolean",
+        "user_intents": [
+          "enable sms"
+        ],
+        "validation": {},
+        "writable": true
+      },
+      "proposed_module": "notifications",
+      "source_fingerprint": "sha256:test-source",
+      "status": "pending",
+      "unresolved": []
+    }
+  ],
+  "schema_version": 1
+}

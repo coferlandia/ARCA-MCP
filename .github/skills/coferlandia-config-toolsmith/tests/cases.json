@@ -1,0 +1,13 @@
+{
+  "positive": [
+    "Run coferlandia-config-toolsmith on this repository and prepare its existing configuration for agent operation.",
+    "Apply the Config Toolsmith process to the current project; do not create a new configuration store.",
+    "Use coferlandia-config-toolsmith to generate the config contract, CLI facade, and agent documentation."
+  ],
+  "negative": [
+    "Change the reminder setting to two hours.",
+    "Show me where this app stores its database URL.",
+    "The configuration is fragmented; suggest improvements.",
+    "Use coferlandia-config-devops to guide me through changing the model."
+  ]
+}

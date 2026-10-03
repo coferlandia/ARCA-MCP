@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "surfaces": [
+    {
+      "id": "end-user-help",
+      "kind": "repository",
+      "paths": ["docs/help/**"],
+      "release_policy": "required"
+    }
+  ],
+  "evidence": {
+    "github": "optional",
+    "archivist": "auto"
+  },
+  "verification": {
+    "require_impact_for_user_facing_changes": true,
+    "block_on_required_surface": true
+  }
+}

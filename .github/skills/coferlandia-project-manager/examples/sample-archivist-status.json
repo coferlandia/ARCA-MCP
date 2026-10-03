@@ -1,0 +1,14 @@
+{
+  "status": "ok",
+  "projects_detected": 1,
+  "projects": [
+    {
+      "project_slug": "example-project",
+      "repo_path": "/repos/example-project",
+      "archivist_initialized": true,
+      "missing_artifacts": [],
+      "github_native": true,
+      "legacy_operational_artifacts": []
+    }
+  ]
+}

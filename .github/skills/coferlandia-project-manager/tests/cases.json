@@ -1,0 +1,10 @@
+{
+  "positive": [
+    "Set up a project manager skill that discovers repos, validates environment tools, and prepares Obsidian PM integration.",
+    "Create onboarding and diagnostic scripts for a local project portfolio manager."
+  ],
+  "negative": [
+    "Fix a bug in the repo scanner implementation.",
+    "Summarize the README for this repository."
+  ]
+}

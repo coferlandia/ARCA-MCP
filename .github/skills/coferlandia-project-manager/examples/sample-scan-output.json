@@ -1,0 +1,19 @@
+{
+  "projects": [
+    {
+      "project_slug": "example-project",
+      "repo_path": "/repos/example-project",
+      "git": {
+        "has_git": true,
+        "current_branch": "main",
+        "default_branch_candidate": "main",
+        "remote_origin_url": "git@github.com:example/example-project.git",
+        "last_commit_sha": "abc123",
+        "dirty": false,
+        "untracked": false,
+        "detached_head": false,
+        "has_worktrees": false
+      }
+    }
+  ]
+}

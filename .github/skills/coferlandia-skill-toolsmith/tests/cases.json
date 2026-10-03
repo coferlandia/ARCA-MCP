@@ -1,0 +1,13 @@
+{
+  "positive": [
+    "Run coferlandia-skill-toolsmith on the project-documentation-archivist skill: analyze it, build the unified CLI, rewire it, and validate behavioral equivalence.",
+    "Apply the Skill Toolsmith process to the coferlandia-project-manager skill to consolidate its scattered scripts behind one Python CLI.",
+    "Use coferlandia-skill-toolsmith on the sample-target-skill fixture to decide whether any of its deterministic behavior should move into a CLI, and stop early if nothing is justified."
+  ],
+  "negative": [
+    "This skill has a lot of repeated shell commands and wastes tokens — clean it up and make it more efficient.",
+    "Analyze this skill and tell me how it could be improved or refactored.",
+    "Build a generic repository-wide CLI for running common git and test commands across the whole project.",
+    "Optimize the documentation-archivist skill's scripts for me."
+  ]
+}

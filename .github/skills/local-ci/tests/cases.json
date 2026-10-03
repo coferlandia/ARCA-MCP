@@ -1,0 +1,16 @@
+{
+  "positive": [
+    "aplica local ci a #123",
+    "califica localmente el candidato READY_FOR_CI de este PR",
+    "usa el skill Local CI con el perfil Coferlandia del repo",
+    "ejecuta chat coder + local ci sobre #55",
+    "continua la Qualification de este READY_FOR_CI desde este agente local"
+  ],
+  "negative": [
+    "corre pytest",
+    "revisa por qué falló GitHub Actions",
+    "aplica gh ci a #123",
+    "mergea el PR 123",
+    "aplica chat coder a #123 y termina en READY_FOR_CI"
+  ]
+}

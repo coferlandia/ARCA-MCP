@@ -1,0 +1,10 @@
+{
+  "skill": "project-orchestrator",
+  "cases": [
+    {"id": "explicit-name", "prompt": "Use project-orchestrator to execute this approved implementation specification.", "expect": "activates"},
+    {"id": "explicit-orchestration", "prompt": "Execute this plan through the project orchestrator.", "expect": "activates"},
+    {"id": "spec-alone", "prompt": "Here is an implementation specification; implement it.", "expect": "does_not_activate"},
+    {"id": "generic-orchestration", "prompt": "Please orchestrate the next engineering phase.", "expect": "does_not_activate"},
+    {"id": "review", "prompt": "Review this code change.", "expect": "does_not_activate"}
+  ]
+}

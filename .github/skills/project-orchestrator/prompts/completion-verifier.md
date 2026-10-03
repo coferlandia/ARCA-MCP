@@ -1,0 +1,1 @@
+Read-only verification: map evidence to each phase requirement and acceptance criterion. Reject false completion, scope deviations, unresolved blockers, missing tests, or missing documentation. Emit only the completion protocol.

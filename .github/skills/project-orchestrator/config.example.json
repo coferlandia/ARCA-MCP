@@ -1,0 +1,61 @@
+{
+  "version": 2,
+  "git": {
+    "base_branch": "main",
+    "branch_prefix": "orchestrator",
+    "worktree_root": "../.worktrees",
+    "require_clean_base_worktree": true,
+    "remove_review_worktree_after_review": true,
+    "remove_implementation_worktree_after_integration": true,
+    "delete_epic_branch_after_integration": true
+  },
+  "integration": {
+    "github": {
+      "required_gates": [
+        {
+          "id": "primary-ci",
+          "kind": "workflow",
+          "workflow": ".github/workflows/ci.yml",
+          "allowed_conclusions": ["success"],
+          "events": ["pull_request", "merge_group"]
+        },
+        {
+          "id": "quality-gate",
+          "kind": "check_run",
+          "name": "Quality Gate",
+          "app": "github-actions",
+          "allowed_conclusions": ["success"]
+        }
+      ],
+      "wait_seconds": 30,
+      "max_wait_cycles": null
+    }
+  },
+  "roles": {
+    "orchestrator": {"primary": {"client": "codex", "model": "gpt-5.4-mini", "reasoning": "medium"}, "fallbacks": [{"client": "opencode", "model": "opencode/big-pickle", "variant": "high"}]},
+    "coding_agent": {"primary": {"client": "codex", "model": "gpt-5.4-mini", "reasoning": "medium"}, "fallbacks": [{"client": "opencode", "model": "opencode/big-pickle", "variant": "high"}]},
+    "completion_verifier": {"primary": {"client": "codex", "model": "gpt-5.4-mini", "reasoning": "medium"}, "fallbacks": [{"client": "opencode", "model": "opencode/big-pickle", "variant": "high"}]},
+    "code_reviewer": {"primary": {"client": "codex", "model": "gpt-5.6-luna", "reasoning": "medium"}, "fallbacks": [{"client": "opencode", "model": "opencode/big-pickle", "variant": "high"}]},
+    "fix_agent": {"primary": {"client": "codex", "model": "gpt-5.4-mini", "reasoning": "medium"}, "fallbacks": [{"client": "opencode", "model": "opencode/big-pickle", "variant": "high"}]}
+  },
+  "providers": {
+    "codex": {"command": "codex", "enabled": true},
+    "opencode": {"command": "opencode", "enabled": true, "server": {"enabled": false, "url": "http://localhost:4096"}}
+  },
+  "retry": {"provider_wait_seconds": 300, "transient_attempts_per_provider": 2, "max_provider_wait_cycles": null, "persist_before_wait": true, "retry_jitter_seconds": 0},
+  "timeouts": {"specification_analysis_seconds": 1800, "coding_seconds": 14400, "completion_verification_seconds": 1800, "review_seconds": 3600, "fix_seconds": 7200, "test_seconds": 3600, "process_termination_grace_seconds": 30},
+  "loops": {"max_no_progress_cycles": 3, "max_malformed_result_cycles": 3, "max_review_fix_cycles": null},
+  "protocol": {"version": "1.0", "retain_full_event_streams": true, "retain_stdout": true, "retain_stderr": true, "redact_secrets": true},
+  "validation": {"commands": []},
+  "github_project": {
+    "owner": "your-github-owner",
+    "number": 1,
+    "status_mapping": {
+      "pending": "Todo",
+      "in_progress": "In Progress",
+      "review": "Review",
+      "blocked": "Blocked",
+      "done": "Done"
+    }
+  }
+}

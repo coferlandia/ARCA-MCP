@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "mode": "impact",
+  "subject": {
+    "type": "range",
+    "reference": "synthetic-old-release"
+  },
+  "candidate": "old-candidate",
+  "profile_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+  "user_facing": true,
+  "rationale": "Synthetic stale verification fixture.",
+  "behaviors": [
+    {
+      "id": "synthetic-change",
+      "summary": "Synthetic product behavior changed.",
+      "evidence": ["synthetic-release"]
+    }
+  ],
+  "surfaces": [
+    {
+      "id": "commercial",
+      "disposition": "manual-review-required",
+      "references": [],
+      "reason": "External owner review remains pending."
+    }
+  ],
+  "handoffs": []
+}

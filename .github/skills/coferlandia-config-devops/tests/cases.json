@@ -1,0 +1,13 @@
+{
+  "positive": [
+    "Use coferlandia-config-devops to change the reminder timing through the generated config CLI.",
+    "Apply Config Operator in Guide Mode and tell me the exact batched commands to rotate this setting; you cannot access production.",
+    "With coferlandia-config-devops, inspect the active model setting and apply the requested value if the dry-run is safe."
+  ],
+  "negative": [
+    "Build a configuration CLI for this repository.",
+    "Discover every environment variable and standardize the project configuration.",
+    "Run coferlandia-config-toolsmith on this application.",
+    "Edit the .env file directly and restart Docker."
+  ]
+}
