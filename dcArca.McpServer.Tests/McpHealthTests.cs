@@ -5,25 +5,21 @@ using Xunit;
 
 namespace dcArca.McpServer.Tests;
 
-public class McpHealthTests : IClassFixture<WebApplicationFactory<Program>>
+public class McpHealthTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
+    private readonly TestCertificatePlaceholder _certificate = new();
 
     public McpHealthTests(WebApplicationFactory<Program> factory)
     {
         var contentRoot = Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..", "dcArca.McpServer");
 
-        var certPath = Path.Combine(Directory.GetCurrentDirectory(), "test-cert-placeholder.pfx");
-        if (!File.Exists(certPath))
-        {
-            File.WriteAllBytes(certPath, Array.Empty<byte>());
-        }
-
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseContentRoot(contentRoot);
             builder.UseEnvironment("Testing");
+            _certificate.Apply(builder);
         });
     }
 
@@ -58,8 +54,6 @@ public class McpHealthTests : IClassFixture<WebApplicationFactory<Program>>
 
         using var blockedFactory = _factory.WithWebHostBuilder(builder =>
         {
-            // Program reads Recovery:Directory during top-level startup, before late
-            // ConfigureAppConfiguration callbacks can influence the captured value.
             builder.UseSetting("Recovery:Directory", temp.Path);
         });
         var client = blockedFactory.CreateClient();
@@ -76,6 +70,12 @@ public class McpHealthTests : IClassFixture<WebApplicationFactory<Program>>
         Assert.DoesNotContain("pfx", readyBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("token", readyBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("password", readyBody, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void Dispose()
+    {
+        _factory.Dispose();
+        _certificate.Dispose();
     }
 
     private sealed class TempDirectory : IDisposable

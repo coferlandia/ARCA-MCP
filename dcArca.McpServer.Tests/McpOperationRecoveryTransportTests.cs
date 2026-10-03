@@ -41,23 +41,23 @@ public sealed class OperationContractTransportAuthHandler : AuthenticationHandle
     }
 }
 
-public class McpOperationRecoveryTransportTests : IClassFixture<WebApplicationFactory<Program>>
+public class McpOperationRecoveryTransportTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
     private readonly LostResponseWsfeClient _wsfe = new();
+    private readonly TestCertificatePlaceholder _certificate = new();
 
     public McpOperationRecoveryTransportTests(WebApplicationFactory<Program> factory)
     {
         var contentRoot = Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..", "dcArca.McpServer");
-        var certPath = Path.Combine(Directory.GetCurrentDirectory(), "test-cert-placeholder.pfx");
-        if (!File.Exists(certPath)) File.WriteAllBytes(certPath, Array.Empty<byte>());
 
         var resolver = new TransportRuntimeResolver(_wsfe);
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseContentRoot(contentRoot);
             builder.UseEnvironment("Testing");
+            _certificate.Apply(builder);
             builder.ConfigureTestServices(services =>
             {
                 services.RemoveAll<IFiscalContextRuntimeResolver>();
@@ -346,5 +346,11 @@ public class McpOperationRecoveryTransportTests : IClassFixture<WebApplicationFa
     {
         public Task<dcPadronPersonaResult> GetPersonaAsync(long cuit, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("No esperado en este flujo.");
+    }
+
+    public void Dispose()
+    {
+        _factory.Dispose();
+        _certificate.Dispose();
     }
 }

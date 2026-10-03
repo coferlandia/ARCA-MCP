@@ -18,7 +18,7 @@ namespace dcArca.Core;
 public static class dcConfigurationHelper
 {
     /// <summary>
-    /// Carga la configuración de ARCA desde el archivo appsettings.json
+    /// Carga la configuración de ARCA desde el archivo appsettings.json.
     /// </summary>
     public static dcArcaConfig LoadFromJson(string configPath = "appsettings.json")
     {
@@ -30,6 +30,18 @@ public static class dcConfigurationHelper
             .SetBasePath(basePath)
             .AddJsonFile(fileName, optional: false, reloadOnChange: true)
             .Build();
+
+        return LoadFromConfiguration(configuration);
+    }
+
+    /// <summary>
+    /// Carga y valida la configuración de ARCA desde una configuración ya compuesta.
+    /// Permite respetar la precedencia normal de ASP.NET Core (JSON, ambiente,
+    /// variables de entorno, argumentos y settings explícitos del host).
+    /// </summary>
+    public static dcArcaConfig LoadFromConfiguration(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
 
         var config = new dcArcaConfig();
         configuration.GetSection("dcArcaConfig").Bind(config);
