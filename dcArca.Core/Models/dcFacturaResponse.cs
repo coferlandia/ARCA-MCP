@@ -7,6 +7,8 @@
  * http://www.apache.org/licenses/LICENSE-2.0
  */
 
+using System.Text.Json.Serialization;
+
 namespace dcArca.Core.Models;
 
 /// <summary>
@@ -58,27 +60,32 @@ public class dcFacturaResponse
     /// Identificador opaco y estable de la operación durable cuando la respuesta proviene del MCP.
     /// Nunca contiene la idempotency key original.
     /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? OperationId { get; set; }
 
     /// <summary>
     /// Versión del contrato de operación expuesto por la capa MCP.
     /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? OperationContractVersion { get; set; }
 
     /// <summary>
     /// Contexto fiscal administrativo asociado a la operación durable.
     /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? OperationContextId { get; set; }
 
     /// <summary>
     /// Estado durable de la operación (Created, NumberAssigned, Submitting, Authorized, FiscalRejected, Uncertain).
     /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? OperationState { get; set; }
 
     /// <summary>
     /// Acciones explícitas permitidas/recomendadas por el contrato. Evita un retryable ambiguo.
     /// </summary>
-    public string[] AllowedNextActions { get; set; } = Array.Empty<string>();
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? AllowedNextActions { get; set; }
 
     /// <summary>
     /// Concepto informado (1=Productos, 2=Servicios, 3=Ambos)
