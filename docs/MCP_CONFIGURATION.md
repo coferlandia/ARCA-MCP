@@ -5,9 +5,11 @@
 El servidor expone dos señales livianas que no llaman a ARCA:
 
 - `GET /health/live`: confirma que el proceso HTTP está levantado.
-- `GET /health/ready`: confirma que el proceso completó el arranque con la configuración esencial válida.
+- `GET /health/ready`: confirma que el proceso completó el arranque y puede aceptar **nuevas emisiones**.
 
-Las respuestas sólo contienen `status`; no incluyen CUIT, certificado, rutas, token/sign ni passwords.
+`/health/ready` devuelve `503 RESTORE_RECONCILIATION_REQUIRED` cuando se restauró un backup y todavía debe reconciliarse la ventana no cubierta. En ese estado siguen disponibles, con autorización, las operaciones de consulta/diagnóstico/reconciliación; la emisión falla cerrado.
+
+Las respuestas de health no incluyen CUIT, certificado, rutas, token/sign ni passwords.
 
 ## Persistencia requerida
 
@@ -15,7 +17,19 @@ Se requiere almacenamiento persistente para:
 
 - `ApiKeys:Directory` / `ApiKeys__Directory`;
 - `EmissionIdempotency:Directory` / `EmissionIdempotency__Directory`;
-- `FiscalContexts:Directory` / `FiscalContexts__Directory`.
+- `FiscalContexts:Directory` / `FiscalContexts__Directory`;
+- `Recovery:Directory` / `Recovery__Directory`.
+
+Topología Docker recomendada:
+
+```text
+/data                  API keys en la topología legacy actual
+/data/emission-idempotency
+/data/fiscal-contexts
+/data/recovery
+```
+
+`Recovery__Directory` debe estar fuera de `EmissionIdempotency__Directory`: un restore del store de emisiones no debe sobrescribir el gate que obliga a reconciliar la ventana perdida.
 
 El store de contextos contiene sólo identidades fiscales, referencias opacas de credencial, grants/estados administrativos y evidencia no secreta de validación. Los certificados y passwords no se copian al store.
 
@@ -85,8 +99,10 @@ El cache WSAA se namespacia por ambiente + `credentialId` + servicio para impedi
 
 `Pdf:BaseUrl` / `Pdf__BaseUrl` y `Pdf:ApiKey` / `Pdf__ApiKey` se requieren cuando se use creadorpdf. `Pdf:ApiKey` debe provenir del secret manager y nunca debe exponerse a SecretarIA.
 
-## Migración del store de emisiones
+## Store, migración y restore
 
-Antes de arrancar una versión que usa el schema versionado del store sobre datos legacy, ejecutar `docs/EMISSION_STORE_MIGRATION.md`. El servidor falla cerrado ante registros legacy no migrados, versiones desconocidas, reservas incompatibles o contextos incoherentes.
+Antes de arrancar sobre datos legacy, ejecutar `docs/EMISSION_STORE_MIGRATION.md`. El servidor falla cerrado ante registros legacy no migrados, versiones desconocidas, reservas incompatibles o contextos incoherentes.
+
+Para backup/restore operativo usar `docs/OPERATIONS_RECOVERY.md`. Un backup anterior a emisiones posteriores **no** puede volver a habilitar nuevas autorizaciones automáticamente: el restore soportado crea un recovery gate persistente y exige evidencia explícita para completarlo.
 
 La administración de contextos, grants y migración de certificado está documentada en `docs/MCP_FISCAL_CONTEXTS.md`.
