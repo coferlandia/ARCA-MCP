@@ -99,7 +99,7 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
         var replay = ReplayTerminal(record);
         if (replay is not null)
         {
-            await _seriesCoordinator.ReleaseAsync(identity, keyHash, cancellationToken);
+            await ReleaseReplayReservationIfOwnedAsync(identity, keyHash, cancellationToken);
             return replay;
         }
 
@@ -121,7 +121,7 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
             replay = ReplayTerminal(record);
             if (replay is not null)
             {
-                await _seriesCoordinator.ReleaseAsync(identity, keyHash, cancellationToken);
+                await ReleaseReplayReservationIfOwnedAsync(identity, keyHash, cancellationToken);
                 return replay;
             }
 
@@ -348,6 +348,16 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
             UpdatedAt = DateTimeOffset.UtcNow
         };
         await _store.SaveAsync(updated, cancellationToken);
+    }
+
+    private async Task ReleaseReplayReservationIfOwnedAsync(
+        FiscalOperationIdentity identity,
+        string keyHash,
+        CancellationToken cancellationToken)
+    {
+        var active = await _seriesCoordinator.GetActiveAsync(identity, cancellationToken);
+        if (active is not null && string.Equals(active.OwnerKeyHash, keyHash, StringComparison.Ordinal))
+            await _seriesCoordinator.ReleaseAsync(identity, keyHash, cancellationToken);
     }
 
     private static dcFacturaResponse BeforeSubmissionFailure(dcFacturaResponse response, long numero = 0)
