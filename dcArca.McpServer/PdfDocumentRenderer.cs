@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace dcArca.McpServer;
 
@@ -14,7 +15,9 @@ public interface IPdfDocumentRenderer
         CancellationToken cancellationToken = default);
 }
 
-public sealed class PdfDocumentRenderer(IPdfClient pdfClient) : IPdfDocumentRenderer
+public sealed class PdfDocumentRenderer(
+    IPdfClient pdfClient,
+    ILogger<PdfDocumentRenderer>? logger = null) : IPdfDocumentRenderer
 {
     public const int MaxTemplateDataBytes = 128 * 1024;
     public const int MaxTemplateDataDepth = 16;
@@ -59,8 +62,8 @@ public sealed class PdfDocumentRenderer(IPdfClient pdfClient) : IPdfDocumentRend
     {
         if (template is null)
             throw new ArgumentNullException(nameof(template));
-        if (string.IsNullOrWhiteSpace(template.Id))
-            throw new ArgumentException("templateId es obligatorio.", nameof(template));
+        if (string.IsNullOrWhiteSpace(template.Key))
+            throw new ArgumentException("templateId/templateKey es obligatorio.", nameof(template));
         if (string.IsNullOrWhiteSpace(template.Version))
             throw new ArgumentException("templateVersion es obligatorio.", nameof(template));
         if (templateData.ValueKind != JsonValueKind.Object)
@@ -108,17 +111,53 @@ public sealed class PdfDocumentRenderer(IPdfClient pdfClient) : IPdfDocumentRend
             var pdf = await pdfClient.RenderAsync(template, element, cancellationToken);
             return new PdfRenderResult(PdfRenderStatus.Rendered, Convert.ToBase64String(pdf), null, null);
         }
+        catch (CreadorPdfException exception)
+        {
+            logger?.LogWarning(
+                "PDF provider failure: provider={PdfProvider} failure_kind={PdfFailureKind} provider_status_code={PdfProviderStatusCode} provider_error_code={PdfProviderErrorCode} template_reference={PdfTemplateReference} template_version={PdfTemplateVersion}",
+                exception.Provider,
+                exception.FailureKind,
+                exception.ProviderStatusCode,
+                exception.ProviderErrorCode,
+                template.Key,
+                template.Version);
+
+            return new PdfRenderResult(
+                PdfRenderStatus.Failed,
+                null,
+                PdfFailureContract.ToPublicCode(exception.FailureKind),
+                PdfFailureContract.ToSafeMessage(exception.FailureKind),
+                exception.Provider,
+                exception.ProviderStatusCode,
+                exception.ProviderErrorCode,
+                exception.FailureKind);
+        }
         catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return new PdfRenderResult(PdfRenderStatus.Failed, null, "PDF_UNAVAILABLE", "El renderer de PDF excedió el tiempo de espera.");
+            return new PdfRenderResult(
+                PdfRenderStatus.Failed,
+                null,
+                PdfFailureContract.ToPublicCode(PdfFailureKind.Timeout),
+                PdfFailureContract.ToSafeMessage(PdfFailureKind.Timeout),
+                FailureKind: PdfFailureKind.Timeout);
         }
         catch (HttpRequestException)
         {
-            return new PdfRenderResult(PdfRenderStatus.Failed, null, "PDF_UNAVAILABLE", "No fue posible comunicarse con el renderer de PDF.");
+            return new PdfRenderResult(
+                PdfRenderStatus.Failed,
+                null,
+                PdfFailureContract.ToPublicCode(PdfFailureKind.Unavailable),
+                PdfFailureContract.ToSafeMessage(PdfFailureKind.Unavailable),
+                FailureKind: PdfFailureKind.Unavailable);
         }
         catch (InvalidDataException)
         {
-            return new PdfRenderResult(PdfRenderStatus.Failed, null, "PDF_INVALID_RESPONSE", "El renderer de PDF devolvió una respuesta inválida.");
+            return new PdfRenderResult(
+                PdfRenderStatus.Failed,
+                null,
+                PdfFailureContract.ToPublicCode(PdfFailureKind.InvalidResponse),
+                PdfFailureContract.ToSafeMessage(PdfFailureKind.InvalidResponse),
+                FailureKind: PdfFailureKind.InvalidResponse);
         }
     }
 
