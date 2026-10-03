@@ -29,7 +29,7 @@ Encontrar “un comprobante con CAE” en el mismo tipo/número no alcanza para 
 - detalle de IVA normalizado;
 - detalle de tributos normalizado.
 
-Los decimales admiten diferencias de escala y una tolerancia de un centavo; el orden de IVA/tributos no altera la equivalencia.
+Los decimales pueden tener distinta escala, pero deben representar exactamente el mismo valor; una diferencia de un centavo es un mismatch. El orden de IVA/tributos no altera la equivalencia.
 
 ## Tres resultados del comparador
 
