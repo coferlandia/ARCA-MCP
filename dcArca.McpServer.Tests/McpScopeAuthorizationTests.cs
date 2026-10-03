@@ -40,31 +40,26 @@ public class ScopeTestAuthHandler : AuthenticationHandler<AuthenticationSchemeOp
     }
 }
 
-public class McpScopeAuthorizationTests : IClassFixture<WebApplicationFactory<Program>>
+public class McpScopeAuthorizationTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
+    private readonly TestCertificatePlaceholder _certificate = new();
 
     public McpScopeAuthorizationTests(WebApplicationFactory<Program> factory)
     {
         var contentRoot = Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..", "dcArca.McpServer");
 
-        var certPath = Path.Combine(Directory.GetCurrentDirectory(), "test-cert-placeholder.pfx");
-        if (!File.Exists(certPath))
-        {
-            File.WriteAllBytes(certPath, Array.Empty<byte>());
-        }
-
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseContentRoot(contentRoot);
             builder.UseEnvironment("Testing");
+            _certificate.Apply(builder);
             builder.ConfigureTestServices(services =>
             {
                 services.AddAuthentication()
                     .AddScheme<AuthenticationSchemeOptions, ScopeTestAuthHandler>(ScopeTestAuthHandler.SchemeName, null);
 
-                // PostConfigure reemplaza el esquema ApiKey por el esquema de prueba.
                 services.PostConfigure<AuthenticationOptions>(options =>
                 {
                     options.DefaultScheme = ScopeTestAuthHandler.SchemeName;
@@ -96,7 +91,6 @@ public class McpScopeAuthorizationTests : IClassFixture<WebApplicationFactory<Pr
 
         Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
         Assert.DoesNotContain("\"name\":\"solicitar_cae\"", body);
-        // Los tools de lectura requieren explícitamente arca:consultar.
         Assert.Contains("\"name\":\"consultar_padron\"", body);
         Assert.Contains("\"name\":\"consultar_comprobante\"", body);
         Assert.Contains("\"name\":\"consultar_ultimo_comprobante\"", body);
@@ -159,9 +153,6 @@ public class McpScopeAuthorizationTests : IClassFixture<WebApplicationFactory<Pr
         }));
         var body = await response.Content.ReadAsStringAsync();
 
-        // AddAuthorizationFilters() intercepta la llamada antes de ejecutar el tool y devuelve
-        // un error JSON-RPC explícito (HTTP 200, la falla vive en el envelope JSON-RPC) cuando
-        // el [Authorize(Policy = "ArcaFacturar")] del método no se cumple.
         Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
         Assert.Contains("Access forbidden", body, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("-32600", body);
@@ -198,5 +189,11 @@ public class McpScopeAuthorizationTests : IClassFixture<WebApplicationFactory<Pr
 
         Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
         Assert.DoesNotContain("Unknown tool", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void Dispose()
+    {
+        _factory.Dispose();
+        _certificate.Dispose();
     }
 }

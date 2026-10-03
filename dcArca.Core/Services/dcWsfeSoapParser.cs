@@ -210,6 +210,7 @@ public sealed class dcWsfeSoapParser
         if (resultGetNode != null)
         {
             result.Success = true;
+            result.ConsultEvidence = dcWsfeConsultEvidenceReader.Read(resultGetNode, nsmgr);
             result.Concepto = TryGetEnum<dcConcepto>(resultGetNode, nsmgr, "ar:Concepto");
             result.DocTipo = TryGetEnum<dcTipoDocumento>(resultGetNode, nsmgr, "ar:DocTipo");
             result.DocNro = TryGetLong(resultGetNode, nsmgr, "ar:DocNro");

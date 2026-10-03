@@ -94,7 +94,7 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
         }
 
         if (!MatchesFiscalIdentity(record, identity))
-            return IdempotencyConflict();
+            return CredentialAssignmentMismatch();
 
         var replay = ReplayTerminal(record);
         if (replay is not null)
@@ -112,11 +112,13 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
                 ?? throw new InvalidDataException("El registro de idempotencia desapareció durante la emisión.");
 
             if (!string.Equals(record.RequestHash, requestHash, StringComparison.Ordinal)
-                || record.RequestCanonicalizationVersion != EmissionRequestFingerprint.CanonicalizationVersion
-                || !MatchesFiscalIdentity(record, identity))
+                || record.RequestCanonicalizationVersion != EmissionRequestFingerprint.CanonicalizationVersion)
             {
                 return IdempotencyConflict();
             }
+
+            if (!MatchesFiscalIdentity(record, identity))
+                return CredentialAssignmentMismatch();
 
             replay = ReplayTerminal(record);
             if (replay is not null)
@@ -277,6 +279,16 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
                 await _seriesCoordinator.ReleaseAsync(identity, keyHash, cancellationToken);
             return result;
         }
+        catch (EmissionTerminalStateConflictException conflict)
+        {
+            var terminal = ReplayTerminal(conflict.Existing)
+                ?? throw new InvalidDataException("El store informó conflicto terminal sin un resultado fiscal terminal válido.");
+            await ReleaseReplayReservationIfOwnedAsync(
+                conflict.Existing.Identity,
+                conflict.Existing.KeyHash,
+                CancellationToken.None);
+            return terminal;
+        }
         catch (FiscalSeriesBlockedException)
         {
             return Error(
@@ -371,7 +383,11 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
     private static bool MatchesFiscalIdentity(
         EmissionIdempotencyRecord record,
         FiscalOperationIdentity currentIdentity)
-        => record.Identity.MatchesImmutableIdentity(currentIdentity);
+        => record.Identity.MatchesImmutableIdentity(currentIdentity)
+            && string.Equals(
+                record.Identity.CredentialAssignmentRevision,
+                currentIdentity.CredentialAssignmentRevision,
+                StringComparison.Ordinal);
 
     private static dcFacturaResponse? ReplayTerminal(EmissionIdempotencyRecord record)
         => record.State is EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected
@@ -383,6 +399,12 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
             "IDEMPOTENCY_KEY_REUSED",
             "La idempotencyKey ya fue utilizada con una solicitud o identidad fiscal diferente.",
             dcEmissionOutcome.InvalidRequest);
+
+    private static dcFacturaResponse CredentialAssignmentMismatch()
+        => Error(
+            "CREDENTIAL_ASSIGNMENT_MISMATCH",
+            "La operación durable quedó fijada a otra revisión de credencial; se requiere resolver esa revisión antes de continuar.",
+            dcEmissionOutcome.FailedBeforeSubmission);
 
     private static dcFacturaResponse Error(
         string code,

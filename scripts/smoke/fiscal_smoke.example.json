@@ -1,0 +1,37 @@
+{
+  "timeoutSeconds": 45,
+  "contexts": [
+    {
+      "contextId": "REEMPLAZAR_CONTEXT_ID",
+      "pointOfSale": 1,
+      "letters": ["A", "B", "C"],
+      "receiver": {
+        "documentNumber": 0,
+        "documentType": 99,
+        "vatCondition": "ConsumidorFinal"
+      },
+      "receivers": {
+        "A": {
+          "documentNumber": "REEMPLAZAR_CUIT_RECEPTOR_RI",
+          "documentType": 80,
+          "vatCondition": "ResponsableInscripto"
+        },
+        "B": {
+          "documentNumber": 0,
+          "documentType": 99,
+          "vatCondition": "ConsumidorFinal"
+        },
+        "C": {
+          "documentNumber": 0,
+          "documentType": 99,
+          "vatCondition": "ConsumidorFinal"
+        }
+      },
+      "pdf": {
+        "templateId": "REEMPLAZAR_TEMPLATE_ID",
+        "templateVersion": "REEMPLAZAR_TEMPLATE_VERSION",
+        "templateData": {}
+      }
+    }
+  ]
+}

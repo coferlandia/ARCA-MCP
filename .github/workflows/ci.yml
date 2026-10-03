@@ -35,6 +35,29 @@ jobs:
             exit 1
           fi
 
+      - name: Validate homologation harness
+        run: |
+          python3 -m py_compile scripts/homologacion/epic14_homologacion.py
+          python3 -m unittest scripts/homologacion/test_epic14_homologacion.py
+
+      - name: Validate fiscal smoke harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/smoke/fiscal_smoke.sh
+          python3 -m py_compile scripts/smoke/fiscal_smoke.py
+          python3 -m unittest scripts/smoke/test_fiscal_smoke.py
+          bash -n scripts/smoke/test_run_local.sh
+          bash scripts/smoke/test_run_local.sh
+
+      - name: Validate API key management
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/api-keys/manage-key.sh
+          bash -n scripts/api-keys/test_manage_key.sh
+          bash scripts/api-keys/test_manage_key.sh
+
       - name: Validate PDF template deploy assets
         shell: bash
         run: |
@@ -72,6 +95,61 @@ jobs:
 
       - name: Build CLI
         run: dotnet build dcArca.Cli/dcArca.Cli.csproj --configuration Release
+
+      - name: Validate Docker Compose
+        env:
+          CERTIFICATE_PATH: /tmp/dummy-certificate.pfx
+          PDF_API_KEY: ci-placeholder
+          APPSETTINGS_PATH: ./dcArca.McpServer/appsettings.Testing.json
+        run: docker compose config -q
+
+      - name: Build MCP container
+        run: docker build -t dcarca-mcpserver:ci -f dcArca.McpServer/Dockerfile .
+
+      - name: Validate packaged admin CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -e ApiKeys__Directory=/tmp/api-keys \
+            --entrypoint dotnet \
+            dcarca-mcpserver:ci \
+            /tools/dcArca.Cli.dll list-keys | grep -q '^\[\]$'
+
+      - name: Smoke MCP container and restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_cert="$RUNNER_TEMP/test-cert-placeholder.pfx"
+          : > "$test_cert"
+
+          docker run -d --name dcarca-mcp-ci \
+            -e ASPNETCORE_ENVIRONMENT=Testing \
+            -v "$PWD/dcArca.McpServer/appsettings.Testing.json:/app/appsettings.Testing.json:ro" \
+            -v "$test_cert:/app/test-cert-placeholder.pfx:ro" \
+            -p 18080:8080 \
+            dcarca-mcpserver:ci
+          cleanup() {
+            docker logs dcarca-mcp-ci || true
+            docker rm -f dcarca-mcp-ci >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          wait_ready() {
+            for i in {1..30}; do
+              if curl --fail --silent http://127.0.0.1:18080/health/live >/dev/null \
+                && curl --fail --silent http://127.0.0.1:18080/health/ready >/dev/null; then
+                return 0
+              fi
+              sleep 1
+            done
+            echo "MCP container did not become ready" >&2
+            return 1
+          }
+
+          wait_ready
+          docker restart dcarca-mcp-ci >/dev/null
+          wait_ready
 
       - name: Audit Core packages
         run: dotnet list dcArca.Core/dcArca.Core.csproj package --vulnerable --include-transitive

@@ -266,6 +266,7 @@ public static class FiscalDocumentSnapshotFactory
             throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta no devolvió concepto o identificación suficiente del receptor.");
         if (string.IsNullOrWhiteSpace(response.FechaComprobante))
             throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta no devolvió la fecha del comprobante.");
+        ValidateConsultEvidence(response);
         if (string.IsNullOrWhiteSpace(response.MonedaId) || response.MonedaCotizacion <= 0m)
             throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta no devolvió moneda y cotización fiscal utilizables.");
         if (string.IsNullOrWhiteSpace(response.CaeVencimiento))
@@ -334,6 +335,42 @@ public static class FiscalDocumentSnapshotFactory
             || context.PuntoVenta <= 0)
         {
             throw Error("FISCAL_CONTEXT_INVALID", "El contexto fiscal histórico no tiene ambiente, CUIT emisor y punto de venta válidos.");
+        }
+    }
+
+    private static void ValidateConsultEvidence(dcFacturaResponse response)
+    {
+        var evidence = response.ConsultEvidence
+            ?? throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta no conserva evidencia de presencia y validez de los importes fiscales.");
+
+        if (evidence.ImporteTotal != dcFiscalEvidenceStatus.Valid
+            || evidence.ImporteNeto != dcFiscalEvidenceStatus.Valid
+            || evidence.ImporteIva != dcFiscalEvidenceStatus.Valid
+            || evidence.ImporteNoGravado != dcFiscalEvidenceStatus.Valid
+            || evidence.ImporteExento != dcFiscalEvidenceStatus.Valid
+            || evidence.ImporteTributos != dcFiscalEvidenceStatus.Valid
+            || evidence.MonedaCotizacion != dcFiscalEvidenceStatus.Valid)
+        {
+            throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta contiene importes fiscales ausentes o no parseables.");
+        }
+
+        if (response.Iva.Count != evidence.Iva.Count
+            || evidence.Iva.Any(x =>
+                x.Alicuota != dcFiscalEvidenceStatus.Valid
+                || x.BaseImponible != dcFiscalEvidenceStatus.Valid
+                || x.Importe != dcFiscalEvidenceStatus.Valid))
+        {
+            throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta contiene líneas de IVA sin evidencia completa y válida.");
+        }
+
+        if (response.Tributos.Count != evidence.Tributos.Count
+            || evidence.Tributos.Any(x =>
+                x.Id != dcFiscalEvidenceStatus.Valid
+                || x.BaseImponible != dcFiscalEvidenceStatus.Valid
+                || x.Alicuota != dcFiscalEvidenceStatus.Valid
+                || x.Importe != dcFiscalEvidenceStatus.Valid))
+        {
+            throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta contiene líneas de tributos sin evidencia completa y válida.");
         }
     }
 

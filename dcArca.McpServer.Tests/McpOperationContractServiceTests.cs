@@ -63,27 +63,7 @@ public class McpOperationContractServiceTests
         var request = ValidRequest();
         var identity = Identity();
         var operationId = EmissionRequestFingerprint.OperationKeyHash("consumer-a", "ctx-a", "payment-1");
-        var created = await store.GetOrCreateAsync(
-            operationId,
-            EmissionRequestFingerprint.RequestHash(request),
-            EmissionRequestFingerprint.CanonicalizationVersion,
-            identity,
-            StoredFiscalEvidence.FromRequest(request));
-        var uncertain = created with
-        {
-            NumeroComprobante = 123,
-            State = EmissionIdempotencyState.Uncertain,
-            FiscalResult = StoredFiscalResult.FromResponse(new dcFacturaResponse
-            {
-                Success = false,
-                NumeroComprobante = 123,
-                Codigo = "TRANSPORT_UNCERTAIN",
-                Mensaje = "Resultado desconocido.",
-                EmissionOutcome = dcEmissionOutcome.Uncertain
-            }),
-            UpdatedAt = DateTimeOffset.UtcNow
-        };
-        await store.SaveAsync(uncertain);
+        var uncertain = await CreateUncertainAsync(store, request, identity, operationId, 123);
 
         var wsfe = new FakeWsfeClient { ConsultResponse = AuthorizedResponse(request, 123) };
         var resolver = new FakeRuntimeResolver(Context(), wsfe);
@@ -106,17 +86,108 @@ public class McpOperationContractServiceTests
         Assert.NotNull(persisted);
         Assert.Equal(EmissionIdempotencyState.Authorized, persisted!.State);
         Assert.Equal(dcEmissionOutcome.RecoveredSuccess, persisted.FiscalResult?.EmissionOutcome);
+        Assert.Equal(EmissionIdempotencyState.Uncertain, uncertain.State);
+    }
+
+    [Fact]
+    public async Task ReconciliacionAtrasada_NoDegradaAuthorizedConcurrente()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemEmissionIdempotencyStore(temp.Path);
+        var request = ValidRequest();
+        var identity = Identity();
+        var operationId = EmissionRequestFingerprint.OperationKeyHash("consumer-a", "ctx-a", "payment-race");
+        var uncertain = await CreateUncertainAsync(store, request, identity, operationId, 123);
+        using var coordinator = new InMemoryFiscalSeriesCoordinator();
+        await coordinator.ReserveAsync(identity, operationId, 123);
+
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var mismatched = AuthorizedResponse(request, 123);
+        mismatched.DocNro = 30999999991;
+        var wsfe = new FakeWsfeClient
+        {
+            ConsultResponse = mismatched,
+            ConsultEntered = entered,
+            ReleaseConsult = release
+        };
+        var resolver = new FakeRuntimeResolver(Context(), wsfe);
+        var service = Service(store, resolver, coordinator);
+
+        var staleReconciliation = service.ReconcileAsync(
+            Principal(),
+            "ctx-a",
+            operationId,
+            idempotencyKey: null);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var authorizedResponse = AuthorizedResponse(request, 123);
+        var authorized = uncertain with
+        {
+            State = EmissionIdempotencyState.Authorized,
+            FiscalResult = StoredFiscalResult.FromResponse(authorizedResponse),
+            UpdatedAt = DateTimeOffset.UtcNow.AddSeconds(1)
+        };
+        await store.SaveAsync(authorized);
+        await coordinator.ReleaseAsync(identity, operationId);
+        release.TrySetResult();
+
+        var result = await staleReconciliation;
+
+        Assert.Equal(EmissionIdempotencyState.Authorized.ToString(), result.State);
+        Assert.Equal(dcEmissionOutcome.Authorized, result.EmissionOutcome);
+        Assert.Equal("12345678901234", result.PersistedFiscalResult?.Cae);
+        Assert.Equal(1, wsfe.ConsultCalls);
+        Assert.Equal(0, wsfe.EmitCalls);
+
+        var persisted = await store.GetAsync(operationId);
+        Assert.NotNull(persisted);
+        Assert.Equal(EmissionIdempotencyState.Authorized, persisted!.State);
+        Assert.Equal("12345678901234", persisted.FiscalResult?.Cae);
+        Assert.Null(await coordinator.GetActiveAsync(identity));
+    }
+
+    private static async Task<EmissionIdempotencyRecord> CreateUncertainAsync(
+        FileSystemEmissionIdempotencyStore store,
+        dcFacturaRequest request,
+        FiscalOperationIdentity identity,
+        string operationId,
+        long number)
+    {
+        var created = await store.GetOrCreateAsync(
+            operationId,
+            EmissionRequestFingerprint.RequestHash(request),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            identity,
+            StoredFiscalEvidence.FromRequest(request));
+        var uncertain = created with
+        {
+            NumeroComprobante = number,
+            State = EmissionIdempotencyState.Uncertain,
+            FiscalResult = StoredFiscalResult.FromResponse(new dcFacturaResponse
+            {
+                Success = false,
+                NumeroComprobante = number,
+                Codigo = "TRANSPORT_UNCERTAIN",
+                Mensaje = "Resultado desconocido.",
+                EmissionOutcome = dcEmissionOutcome.Uncertain
+            }),
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        await store.SaveAsync(uncertain);
+        return uncertain;
     }
 
     private static McpOperationContractService Service(
         FileSystemEmissionIdempotencyStore store,
-        IFiscalContextRuntimeResolver resolver)
+        IFiscalContextRuntimeResolver resolver,
+        IFiscalSeriesCoordinator? coordinator = null)
         => new(
             store,
             new FileSystemEmissionOperationInspector(store),
             resolver,
             new FakeAssignmentValidator(),
-            new InMemoryFiscalSeriesCoordinator());
+            coordinator ?? new InMemoryFiscalSeriesCoordinator());
 
     private static ClaimsPrincipal Principal(bool includeEmit = false)
     {
@@ -296,11 +367,16 @@ public class McpOperationContractServiceTests
         public int ConsultCalls { get; private set; }
         public int EmitCalls { get; private set; }
         public dcFacturaResponse ConsultResponse { get; init; } = new() { Success = false };
+        public TaskCompletionSource? ConsultEntered { get; init; }
+        public TaskCompletionSource? ReleaseConsult { get; init; }
 
-        public Task<dcFacturaResponse> FECompConsultarAsync(long numeroComprobante, dcTipoComprobante tipoComprobante, CancellationToken cancellationToken = default)
+        public async Task<dcFacturaResponse> FECompConsultarAsync(long numeroComprobante, dcTipoComprobante tipoComprobante, CancellationToken cancellationToken = default)
         {
             ConsultCalls++;
-            return Task.FromResult(ConsultResponse);
+            ConsultEntered?.TrySetResult();
+            if (ReleaseConsult is not null)
+                await ReleaseConsult.Task.WaitAsync(cancellationToken);
+            return ConsultResponse.Success ? ConsultEvidenceTestData.MarkValid(ConsultResponse) : ConsultResponse;
         }
 
         public Task<dcFacturaResponse> FECAESolicitarAsync(dcFacturaRequest factura, CancellationToken cancellationToken = default)

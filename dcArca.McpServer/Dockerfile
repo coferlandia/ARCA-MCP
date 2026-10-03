@@ -2,10 +2,14 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY dcArca.Core/dcArca.Core.csproj dcArca.Core/
 COPY dcArca.McpServer/dcArca.McpServer.csproj dcArca.McpServer/
-RUN dotnet restore dcArca.McpServer/dcArca.McpServer.csproj
+COPY dcArca.Cli/dcArca.Cli.csproj dcArca.Cli/
+RUN dotnet restore dcArca.McpServer/dcArca.McpServer.csproj \
+    && dotnet restore dcArca.Cli/dcArca.Cli.csproj
 COPY dcArca.Core/ dcArca.Core/
 COPY dcArca.McpServer/ dcArca.McpServer/
-RUN dotnet publish dcArca.McpServer/dcArca.McpServer.csproj -c Release -o /app --no-restore
+COPY dcArca.Cli/ dcArca.Cli/
+RUN dotnet publish dcArca.McpServer/dcArca.McpServer.csproj -c Release -o /app --no-restore \
+    && dotnet publish dcArca.Cli/dcArca.Cli.csproj -c Release -o /tools --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 RUN apt-get update \
@@ -13,6 +17,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app .
+COPY --from=build /tools /tools
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

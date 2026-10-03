@@ -41,23 +41,23 @@ public sealed class OperationContractTransportAuthHandler : AuthenticationHandle
     }
 }
 
-public class McpOperationRecoveryTransportTests : IClassFixture<WebApplicationFactory<Program>>
+public class McpOperationRecoveryTransportTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
     private readonly LostResponseWsfeClient _wsfe = new();
+    private readonly TestCertificatePlaceholder _certificate = new();
 
     public McpOperationRecoveryTransportTests(WebApplicationFactory<Program> factory)
     {
         var contentRoot = Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..", "dcArca.McpServer");
-        var certPath = Path.Combine(Directory.GetCurrentDirectory(), "test-cert-placeholder.pfx");
-        if (!File.Exists(certPath)) File.WriteAllBytes(certPath, Array.Empty<byte>());
 
         var resolver = new TransportRuntimeResolver(_wsfe);
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseContentRoot(contentRoot);
             builder.UseEnvironment("Testing");
+            _certificate.Apply(builder);
             builder.ConfigureTestServices(services =>
             {
                 services.RemoveAll<IFiscalContextRuntimeResolver>();
@@ -283,7 +283,7 @@ public class McpOperationRecoveryTransportTests : IClassFixture<WebApplicationFa
         {
             ConsultCalls++;
             var request = _submitted ?? throw new InvalidOperationException("No existe envío previo.");
-            return Task.FromResult(new dcFacturaResponse
+            var response = new dcFacturaResponse
             {
                 Success = true,
                 Cae = "12345678901234",
@@ -329,7 +329,9 @@ public class McpOperationRecoveryTransportTests : IClassFixture<WebApplicationFa
                     Alicuota = x.Alicuota,
                     Importe = x.Importe
                 }).ToList()
-            });
+            };
+            response.ConsultEvidence = ConsultEvidenceTestData.ValidFor(response);
+            return Task.FromResult(response);
         }
 
         public Task<List<dcCondicionIvaOption>> GetCondicionesIVAReceptorAsync(
@@ -344,5 +346,11 @@ public class McpOperationRecoveryTransportTests : IClassFixture<WebApplicationFa
     {
         public Task<dcPadronPersonaResult> GetPersonaAsync(long cuit, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("No esperado en este flujo.");
+    }
+
+    public void Dispose()
+    {
+        _factory.Dispose();
+        _certificate.Dispose();
     }
 }
