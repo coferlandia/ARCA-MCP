@@ -46,7 +46,10 @@ public class dcApiKeyStoreTests
             Assert.NotEqual(first.RawKey, second.RawKey);
             Assert.NotEqual(first.Record.KeyHash, second.Record.KeyHash);
             Assert.Equal(first.Record.ConsumerId, second.Record.ConsumerId);
-            Assert.Equal(first.Record.Grants, second.Record.Grants);
+            var firstGrant = Assert.Single(first.Record.Grants);
+            var secondGrant = Assert.Single(second.Record.Grants);
+            Assert.Equal(firstGrant.ContextId, secondGrant.ContextId);
+            Assert.Equal(firstGrant.Operations, secondGrant.Operations);
             Assert.DoesNotContain(first.RawKey, await File.ReadAllTextAsync(Path.Combine(directory, "api_keys.json")));
             Assert.DoesNotContain(second.RawKey, await File.ReadAllTextAsync(Path.Combine(directory, "api_keys.json")));
         }
@@ -99,6 +102,46 @@ public class dcApiKeyStoreTests
             Assert.Equal("consumer-1", updated.ConsumerId);
             Assert.Equal("ctx-a", Assert.Single(updated.Grants).ContextId);
             Assert.NotNull(await store.ValidateAsync(legacy.RawKey));
+        }
+        finally { Cleanup(directory); }
+    }
+
+    [Fact]
+    public async Task ConsumerId_UnaVezAsignado_NoPuedeRebindearse()
+    {
+        var directory = TempDirectory();
+        try
+        {
+            var store = new FileSystemApiKeyStore(directory);
+            var created = await store.CreateForConsumerAsync(
+                "modern",
+                "consumer-a",
+                ["arca:consultar"],
+                [new ApiKeyContextGrant("ctx-a", ["consultar"])]);
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.SetConsumerAndGrantsAsync(
+                    created.Record.Id,
+                    "consumer-b",
+                    [new ApiKeyContextGrant("ctx-b", ["consultar"])]));
+
+            Assert.Equal("CONSUMER_ID_IMMUTABLE", exception.Message);
+            var reloaded = Assert.Single(await store.ListAsync());
+            Assert.Equal("consumer-a", reloaded.ConsumerId);
+            Assert.Equal("ctx-a", Assert.Single(reloaded.Grants).ContextId);
+        }
+        finally { Cleanup(directory); }
+    }
+
+    [Fact]
+    public async Task KeyModerna_SinGrants_EsRechazada()
+    {
+        var directory = TempDirectory();
+        try
+        {
+            var store = new FileSystemApiKeyStore(directory);
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                store.CreateForConsumerAsync("modern", "consumer-a", ["arca:consultar"], []));
         }
         finally { Cleanup(directory); }
     }
