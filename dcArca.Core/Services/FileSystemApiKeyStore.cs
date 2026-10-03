@@ -18,25 +18,43 @@ public sealed class FileSystemApiKeyStore : IApiKeyStore
         _filePath = Path.Combine(resolvedDirectory, "api_keys.json");
     }
 
-    public async Task<(ApiKeyRecord Record, string RawKey)> CreateAsync(
+    public Task<(ApiKeyRecord Record, string RawKey)> CreateAsync(
         string name, IReadOnlyCollection<string> scopes, CancellationToken cancellationToken = default)
+        => CreateInternalAsync(name, scopes, consumerId: null, contextGrants: null, cancellationToken);
+
+    public Task<(ApiKeyRecord Record, string RawKey)> CreateForConsumerAsync(
+        string name,
+        string consumerId,
+        IReadOnlyCollection<string> scopes,
+        IReadOnlyCollection<ApiKeyContextGrant> contextGrants,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(consumerId))
+            throw new ArgumentException("consumerId es obligatorio.", nameof(consumerId));
+        return CreateInternalAsync(name, scopes, consumerId.Trim(), NormalizeGrants(contextGrants), cancellationToken);
+    }
+
+    private async Task<(ApiKeyRecord Record, string RawKey)> CreateInternalAsync(
+        string name,
+        IReadOnlyCollection<string> scopes,
+        string? consumerId,
+        ApiKeyContextGrant[]? contextGrants,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("El nombre de la API key no puede estar vacío.", nameof(name));
 
-        var normalizedScopes = scopes
-            .Where(scope => !string.IsNullOrWhiteSpace(scope))
-            .Select(scope => scope.Trim())
-            .Distinct(StringComparer.Ordinal)
-            .Order(StringComparer.Ordinal)
-            .ToArray();
-        if (normalizedScopes.Length == 0)
-            throw new ArgumentException("La API key debe tener al menos un scope.", nameof(scopes));
-
+        var normalizedScopes = NormalizeScopes(scopes);
         var rawKey = "sk-arca-" + Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
         var record = new ApiKeyRecord(
-            "key_" + Guid.NewGuid().ToString("N"), name.Trim(), Hash(rawKey), normalizedScopes,
-            true, DateTimeOffset.UtcNow);
+            "key_" + Guid.NewGuid().ToString("N"),
+            name.Trim(),
+            Hash(rawKey),
+            normalizedScopes,
+            true,
+            DateTimeOffset.UtcNow,
+            ConsumerId: consumerId,
+            ContextGrants: contextGrants);
 
         var coordinator = new dcWsaaFileCacheCoordinator(_filePath);
         await using (await coordinator.AcquireAsync(cancellationToken))
@@ -56,9 +74,10 @@ public sealed class FileSystemApiKeyStore : IApiKeyStore
         await using (await coordinator.AcquireAsync(cancellationToken))
         {
             var records = await ReadAllAsync(cancellationToken);
+            var candidateHash = Hash(rawKey);
             var index = records.FindIndex(record => record.Active &&
                 CryptographicOperations.FixedTimeEquals(
-                    Convert.FromHexString(record.KeyHash), Convert.FromHexString(Hash(rawKey))));
+                    Convert.FromHexString(record.KeyHash), Convert.FromHexString(candidateHash)));
             if (index < 0) return null;
 
             var used = records[index] with { LastUsedAt = DateTimeOffset.UtcNow };
@@ -77,6 +96,32 @@ public sealed class FileSystemApiKeyStore : IApiKeyStore
             var index = records.FindIndex(record => record.Id == id && record.Active);
             if (index < 0) return false;
             records[index] = records[index] with { Active = false, RevokedAt = DateTimeOffset.UtcNow };
+            WriteAll(coordinator, records);
+            return true;
+        }
+    }
+
+    public async Task<bool> SetConsumerAndGrantsAsync(
+        string id,
+        string consumerId,
+        IReadOnlyCollection<ApiKeyContextGrant> contextGrants,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(consumerId))
+            throw new ArgumentException("consumerId es obligatorio.", nameof(consumerId));
+        var normalized = NormalizeGrants(contextGrants);
+
+        var coordinator = new dcWsaaFileCacheCoordinator(_filePath);
+        await using (await coordinator.AcquireAsync(cancellationToken))
+        {
+            var records = await ReadAllAsync(cancellationToken);
+            var index = records.FindIndex(record => record.Id == id);
+            if (index < 0) return false;
+            records[index] = records[index] with
+            {
+                ConsumerId = consumerId.Trim(),
+                ContextGrants = normalized
+            };
             WriteAll(coordinator, records);
             return true;
         }
@@ -106,6 +151,38 @@ public sealed class FileSystemApiKeyStore : IApiKeyStore
         return records;
     }
 
+    private static string[] NormalizeScopes(IReadOnlyCollection<string> scopes)
+    {
+        var normalized = scopes
+            .Where(scope => !string.IsNullOrWhiteSpace(scope))
+            .Select(scope => scope.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        if (normalized.Length == 0)
+            throw new ArgumentException("La API key debe tener al menos un scope.", nameof(scopes));
+        return normalized;
+    }
+
+    private static ApiKeyContextGrant[] NormalizeGrants(IReadOnlyCollection<ApiKeyContextGrant> grants)
+    {
+        if (grants is null) throw new ArgumentNullException(nameof(grants));
+        return grants
+            .Where(grant => grant is not null && !string.IsNullOrWhiteSpace(grant.ContextId))
+            .GroupBy(grant => grant.ContextId.Trim(), StringComparer.Ordinal)
+            .Select(group => new ApiKeyContextGrant(
+                group.Key,
+                group.SelectMany(x => x.Operations ?? Array.Empty<string>())
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(x => x.Trim())
+                    .Distinct(StringComparer.Ordinal)
+                    .Order(StringComparer.Ordinal)
+                    .ToArray()))
+            .Where(grant => grant.Operations.Length > 0)
+            .OrderBy(grant => grant.ContextId, StringComparer.Ordinal)
+            .ToArray();
+    }
+
     private static bool IsValidRecord(ApiKeyRecord? record)
         => record is not null
             && !string.IsNullOrWhiteSpace(record.Id)
@@ -113,7 +190,13 @@ public sealed class FileSystemApiKeyStore : IApiKeyStore
             && record.KeyHash is { Length: 64 }
             && record.KeyHash.All(Uri.IsHexDigit)
             && record.Scopes is { Length: > 0 }
-            && record.Scopes.All(scope => !string.IsNullOrWhiteSpace(scope));
+            && record.Scopes.All(scope => !string.IsNullOrWhiteSpace(scope))
+            && (record.ConsumerId is null || !string.IsNullOrWhiteSpace(record.ConsumerId))
+            && (record.ContextGrants is null || record.ContextGrants.All(grant =>
+                grant is not null
+                && !string.IsNullOrWhiteSpace(grant.ContextId)
+                && grant.Operations is { Length: > 0 }
+                && grant.Operations.All(operation => !string.IsNullOrWhiteSpace(operation))));
 
     private void WriteAll(dcWsaaFileCacheCoordinator coordinator, List<ApiKeyRecord> records)
     {
