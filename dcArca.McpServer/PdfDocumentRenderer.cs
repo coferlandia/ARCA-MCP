@@ -23,6 +23,8 @@ public sealed class PdfDocumentRenderer(IPdfClient pdfClient) : IPdfDocumentRend
     {
         "fiscal",
         "contractVersion",
+        "provenance",
+        "availableFields",
         "environment",
         "emisorCuit",
         "puntoVenta",
@@ -42,6 +44,8 @@ public sealed class PdfDocumentRenderer(IPdfClient pdfClient) : IPdfDocumentRend
         "importeIva",
         "importeTributos",
         "importeTotal",
+        "iva",
+        "tributos",
         "monedaId",
         "monedaCotizacion",
         "cae",
