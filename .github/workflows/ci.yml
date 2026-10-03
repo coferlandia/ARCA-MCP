@@ -136,3 +136,9 @@ jobs:
 
       - name: Audit CLI packages
         run: dotnet list dcArca.Cli/dcArca.Cli.csproj package --vulnerable --include-transitive
+
+      - name: Test Core
+        run: dotnet test dcArca.Core.Tests/dcArca.Core.Tests.csproj --configuration Release --no-build
+
+      - name: Test MCP
+        run: dotnet test dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj --configuration Release --no-build
