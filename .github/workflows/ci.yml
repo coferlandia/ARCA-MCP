@@ -40,6 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           bash -n deploy/cadencia/bootstrap-pdf-template.sh
+          bash -n deploy/cadencia/tests/bootstrap-pdf-template-tests.sh
           python3 - <<'PY'
           import json, pathlib
           root = pathlib.Path("deploy/cadencia/pdf-templates")
@@ -55,6 +56,7 @@ jobs:
               assert (root / item["template"]).is_file(), item["template"]
               assert (root / item["schema"]).is_file(), item["schema"]
           PY
+          bash deploy/cadencia/tests/bootstrap-pdf-template-tests.sh
 
       - name: Restore Core tests
         run: dotnet restore dcArca.Core.Tests/dcArca.Core.Tests.csproj
