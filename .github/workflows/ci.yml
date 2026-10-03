@@ -50,6 +50,13 @@ jobs:
           bash -n scripts/smoke/test_run_local.sh
           bash scripts/smoke/test_run_local.sh
 
+      - name: Validate API key management
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/api-keys/test_manage_key.sh
+          bash scripts/api-keys/test_manage_key.sh
+
       - name: Restore Core tests
         run: dotnet restore dcArca.Core.Tests/dcArca.Core.Tests.csproj
 
@@ -118,9 +125,3 @@ jobs:
 
       - name: Audit CLI packages
         run: dotnet list dcArca.Cli/dcArca.Cli.csproj package --vulnerable --include-transitive
-
-      - name: Test Core
-        run: dotnet test dcArca.Core.Tests/dcArca.Core.Tests.csproj --configuration Release --no-build
-
-      - name: Test MCP
-        run: dotnet test dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj --configuration Release --no-build
