@@ -68,13 +68,14 @@ public sealed record FiscalDocumentSnapshot
     public string ContractVersion { get; init; } = FiscalDocumentSnapshotContract.Version;
 
     [JsonPropertyName("provenance")]
-    public required FiscalSnapshotProvenance Provenance { get; init; }
+    public FiscalSnapshotProvenance Provenance { get; init; } =
+        new("unspecified", "unspecified", "unspecified");
 
     [JsonPropertyName("availableFields")]
     public IReadOnlyList<string> AvailableFields { get; init; } = Array.Empty<string>();
 
     [JsonPropertyName("environment")]
-    public required string Environment { get; init; }
+    public string Environment { get; init; } = "unspecified";
 
     [JsonPropertyName("emisorCuit")]
     public required string EmisorCuit { get; init; }
