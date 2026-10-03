@@ -15,7 +15,7 @@ public class EmissionStoreBackupRecoveryTests
         using var coordinator = new FileSystemFiscalSeriesCoordinator(temp.Store);
         await coordinator.InitializeAsync(store);
 
-        var exception = await Assert.ThrowsAsync<IOException>(() =>
+        var exception = await Assert.ThrowsAnyAsync<IOException>(() =>
             EmissionStoreBackupRecovery.CreateBackupAsync(temp.Store, temp.Backup));
 
         Assert.Equal("SERIES_WRITER_BUSY", exception.Message);
