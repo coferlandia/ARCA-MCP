@@ -10,27 +10,17 @@ using Xunit;
 
 namespace dcArca.McpServer.Tests;
 
-public class McpAuthTests : IClassFixture<WebApplicationFactory<Program>>
+public class McpAuthTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
     private readonly IApiKeyStore _store;
     private readonly string _storeFilePath;
+    private readonly TestCertificatePlaceholder _certificate = new();
 
     public McpAuthTests(WebApplicationFactory<Program> factory)
     {
         var contentRoot = Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..", "dcArca.McpServer");
-
-        // The Testing config's CertificatePath ("test-cert-placeholder.pfx") only needs to
-        // exist (auth rejects the request with 401 before it's ever read) -- but
-        // dcConfigurationHelper.ValidateConfig checks it with a relative File.Exists,
-        // which resolves against the process's current directory, not the content
-        // root. It's gitignored, so create it here instead of committing a binary.
-        var certPath = Path.Combine(Directory.GetCurrentDirectory(), "test-cert-placeholder.pfx");
-        if (!File.Exists(certPath))
-        {
-            File.WriteAllBytes(certPath, Array.Empty<byte>());
-        }
 
         var directory = Path.Combine(Path.GetTempPath(), "dcarca-auth-tests", Guid.NewGuid().ToString("N"));
         _storeFilePath = Path.Combine(directory, "api_keys.json");
@@ -39,6 +29,7 @@ public class McpAuthTests : IClassFixture<WebApplicationFactory<Program>>
         {
             builder.UseContentRoot(contentRoot);
             builder.UseEnvironment("Testing");
+            _certificate.Apply(builder);
             builder.ConfigureTestServices(services =>
                 services.AddSingleton(_store));
         });
@@ -112,5 +103,11 @@ public class McpAuthTests : IClassFixture<WebApplicationFactory<Program>>
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.Add("Accept", "application/json, text/event-stream");
         return request;
+    }
+
+    public void Dispose()
+    {
+        _factory.Dispose();
+        _certificate.Dispose();
     }
 }
