@@ -21,6 +21,7 @@
   },
   "pdf": {
     "enabled": false,
+    "expectedStatus": "Failed",
     "templateId": "REEMPLAZAR_TEMPLATE_ID",
     "templateVersion": "REEMPLAZAR_VERSION",
     "templateData": {}
