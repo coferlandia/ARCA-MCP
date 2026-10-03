@@ -151,7 +151,7 @@ public class PdfClientTests
     {
         var secret = "super-secret-value";
         var huge = "{\"error\":{\"code\":\"unknown_template\",\"message\":\"" + secret + "\",\"details\":[\""
-            + new string('x', CreadorPdfHttpErrors.MaxErrorBodyBytes + 1024)
+            + new string('x', (64 * 1024) + 1024)
             + "\"]}}";
         var client = CreateClient((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)
         {
