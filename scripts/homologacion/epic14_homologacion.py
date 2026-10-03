@@ -35,6 +35,21 @@ def digest(value: Any) -> str:
     return hashlib.sha256(raw).hexdigest()[:12]
 
 
+def collect_sensitive_values(value: Any) -> set[str]:
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            lowered = key.lower()
+            if any(part in lowered for part in SENSITIVE_KEY_PARTS):
+                if item not in (None, "", 0, False) and not isinstance(item, (dict, list)):
+                    found.add(str(item))
+            found.update(collect_sensitive_values(item))
+    elif isinstance(value, list):
+        for item in value:
+            found.update(collect_sensitive_values(item))
+    return found
+
+
 def redact(value: Any, known_secrets: set[str] | None = None) -> Any:
     known_secrets = known_secrets or set()
     if isinstance(value, dict):
@@ -52,7 +67,7 @@ def redact(value: Any, known_secrets: set[str] | None = None) -> Any:
     if isinstance(value, list):
         return [redact(item, known_secrets) for item in value]
     if isinstance(value, str):
-        for secret in known_secrets:
+        for secret in sorted(known_secrets, key=len, reverse=True):
             if secret and secret in value:
                 value = value.replace(secret, f"<redacted:sha256:{digest(secret)}>")
         if len(value) > 4096:
@@ -190,7 +205,7 @@ def write_report(report: dict[str, Any], output_dir: pathlib.Path) -> tuple[path
         f"- Estado: `{report['overallStatus']}`",
         f"- Build SHA declarado: `{report.get('buildSha') or 'NO_DECLARADO'}`",
         f"- Entorno esperado: `{report.get('expectedEnvironment')}`",
-        "- Secretos/PII: redactados; el reporte no contiene token ni idempotency key en claro.",
+        "- Secretos/PII: redactados; el reporte no contiene token, CUIT, CAE ni idempotency key en claro.",
         "",
         "## Pasos",
         "",
@@ -235,6 +250,7 @@ def main() -> int:
 
     run_key = f"epic14-hml-{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(4)}"
     known_secrets = {token, run_key}
+    known_secrets.update(collect_sensitive_values(config))
     report: dict[str, Any] = {
         "schema": "arca-epic14-homologation/1.0",
         "startedAt": utc_now(),
@@ -255,6 +271,8 @@ def main() -> int:
 
     status, envelope, result = client.tool("obtener_capacidades_fiscales", {"contextId": context_id})
     capabilities = step(report, "obtener_capacidades_fiscales", status, envelope, result, known_secrets)
+    contract_version = find_key(capabilities, "contractVersion") or find_key(capabilities, "version")
+    report["checks"]["contractVersion"] = contract_version or "NO_DETECTADA"
 
     status, envelope, result = client.tool("diagnosticar_contexto_fiscal", {"contextId": context_id})
     diagnostic = step(report, "diagnosticar_contexto_fiscal", status, envelope, result, known_secrets)
@@ -337,7 +355,8 @@ def main() -> int:
                         "idempotencyKey": note_key,
                         "factura": note_invoice,
                     })
-                    step(report, "emitir_nota_asociada", status, envelope, result, known_secrets)
+                    note_result = step(report, "emitir_nota_asociada", status, envelope, result, known_secrets)
+                    report["checks"]["associatedNoteSucceeded"] = bool(find_key(note_result, "success"))
                 else:
                     report["missingEvidence"].append("Nota asociada configurada pero no ejecutada: falta --execute-associated-note.")
 
@@ -352,7 +371,11 @@ def main() -> int:
                 "factura": rejection.get("invoice") or {},
             })
             rejected = step(report, "controlled_fiscal_rejection", status, envelope, result, known_secrets)
-            report["checks"]["controlledRejectionObserved"] = find_key(rejected, "success") is False
+            rejection_outcome = str(find_key(rejected, "emissionOutcome") or "")
+            report["checks"]["controlledRejectionOutcome"] = rejection_outcome or "NO_DETECTADO"
+            report["checks"]["controlledRejectionObserved"] = rejection_outcome.lower() == "fiscalrejected"
+            if rejection_outcome.lower() != "fiscalrejected":
+                report["missingEvidence"].append("El escenario de rechazo no produjo EmissionOutcome=FiscalRejected; no cuenta como rechazo ARCA homologado.")
         else:
             report["missingEvidence"].append("Rechazo fiscal configurado pero no ejecutado: falta --execute-controlled-rejection.")
     else:
@@ -362,7 +385,15 @@ def main() -> int:
         report["missingEvidence"].append("ARCA_MCP_BUILD_SHA no fue declarado; falta trazabilidad exacta del artefacto desplegado.")
 
     failed_steps = [item["name"] for item in report["steps"] if not item["ok"]]
-    if failed_steps:
+    critical_checks = (
+        "environmentVerified",
+        "preflightValid",
+        "emissionSucceeded",
+        "replaySameNumber",
+        "replaySameCae",
+    )
+    false_checks = [name for name in critical_checks if name in report["checks"] and report["checks"][name] is False]
+    if failed_steps or false_checks:
         report["overallStatus"] = "FAILED"
     elif report["missingEvidence"]:
         report["overallStatus"] = "INCOMPLETE"
