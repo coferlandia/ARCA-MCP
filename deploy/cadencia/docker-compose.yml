@@ -19,6 +19,7 @@ services:
       ApiKeys__Directory: /data
       EmissionIdempotency__Directory: /data/emission-idempotency
       FiscalContexts__Directory: /data/fiscal-contexts
+      Recovery__Directory: /data/recovery
       FiscalContext__ConsumerId: ${FISCAL_CONTEXT_CONSUMER_ID:-cadencia}
       FiscalContext__ContextId: ${FISCAL_CONTEXT_ID:-cadencia-arca-homologacion}
       FiscalContext__Environment: ${FISCAL_CONTEXT_ENVIRONMENT:-homologacion}
