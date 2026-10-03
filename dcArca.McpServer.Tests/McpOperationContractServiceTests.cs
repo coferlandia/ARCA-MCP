@@ -136,7 +136,7 @@ public class McpOperationContractServiceTests
 
         Assert.Equal(EmissionIdempotencyState.Authorized.ToString(), result.State);
         Assert.Equal(dcEmissionOutcome.Authorized, result.EmissionOutcome);
-        Assert.Equal("12345678901234", result.FiscalResult?.Cae);
+        Assert.Equal("12345678901234", result.PersistedFiscalResult?.Cae);
         Assert.Equal(1, wsfe.ConsultCalls);
         Assert.Equal(0, wsfe.EmitCalls);
 
