@@ -92,6 +92,42 @@ public class PdfClientTests
         Assert.Null(exception.ProviderErrorCode);
     }
 
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("null")]
+    [InlineData("42")]
+    [InlineData("\"forbidden\"")]
+    public async Task Error403ConRaizJsonNoObjeto_ConservaClasificacionSinExcepcion(string body)
+    {
+        var client = CreateClient((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json")
+        }));
+
+        var exception = await Assert.ThrowsAsync<CreadorPdfException>(() =>
+            client.RenderAsync(LegacyTemplate(), JsonSerializer.SerializeToElement(new { })));
+
+        Assert.Equal(PdfFailureKind.Forbidden, exception.FailureKind);
+        Assert.Equal(403, exception.ProviderStatusCode);
+        Assert.Null(exception.ProviderErrorCode);
+    }
+
+    [Fact]
+    public async Task Error404ConRaizJsonNoObjeto_NoAsumeUnknownTemplate()
+    {
+        var client = CreateClient((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)
+        {
+            Content = new StringContent("[]", Encoding.UTF8, "application/json")
+        }));
+
+        var exception = await Assert.ThrowsAsync<CreadorPdfException>(() =>
+            client.RenderAsync(LegacyTemplate(), JsonSerializer.SerializeToElement(new { })));
+
+        Assert.Equal(PdfFailureKind.RenderFailed, exception.FailureKind);
+        Assert.Equal(404, exception.ProviderStatusCode);
+        Assert.Null(exception.ProviderErrorCode);
+    }
+
     [Fact]
     public async Task RemoteErrorCodeConControles_NoSeExponeComoMetadata()
     {
