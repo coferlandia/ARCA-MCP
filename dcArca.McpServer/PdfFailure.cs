@@ -150,7 +150,9 @@ internal static class CreadorPdfHttpErrors
                 return null;
 
             using var document = JsonDocument.Parse(Encoding.UTF8.GetString(buffer, 0, total));
-            if (!document.RootElement.TryGetProperty("error", out var error)
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("error", out var error)
                 || error.ValueKind != JsonValueKind.Object
                 || !error.TryGetProperty("code", out var code)
                 || code.ValueKind != JsonValueKind.String)
