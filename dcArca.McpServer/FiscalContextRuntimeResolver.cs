@@ -22,6 +22,10 @@ public sealed class FiscalContextAccessException : Exception
         => Code = code;
 }
 
+public sealed record AuthorizedFiscalContext(
+    string ConsumerId,
+    RepresentedFiscalContextRecord Context);
+
 public sealed class FiscalContextRuntime : IDisposable
 {
     public string ConsumerId { get; }
@@ -59,6 +63,12 @@ public sealed class FiscalContextRuntime : IDisposable
 
 public interface IFiscalContextRuntimeResolver
 {
+    Task<AuthorizedFiscalContext> AuthorizeAsync(
+        ClaimsPrincipal principal,
+        string? requestedContextId,
+        string operation,
+        CancellationToken cancellationToken = default);
+
     Task<FiscalContextRuntime> ResolveForReadAsync(
         ClaimsPrincipal principal,
         string? requestedContextId,
@@ -91,13 +101,33 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         _materializer = materializer;
     }
 
+    public async Task<AuthorizedFiscalContext> AuthorizeAsync(
+        ClaimsPrincipal principal,
+        string? requestedContextId,
+        string operation,
+        CancellationToken cancellationToken = default)
+    {
+        if (operation is not ("consultar" or "facturar"))
+            throw new ArgumentException("operation debe ser consultar o facturar.", nameof(operation));
+        var (consumerId, context) = await ResolveAuthorizedContextAsync(
+            principal,
+            requestedContextId,
+            operation,
+            cancellationToken);
+        return new AuthorizedFiscalContext(consumerId, context);
+    }
+
     public async Task<FiscalContextRuntime> ResolveForReadAsync(
         ClaimsPrincipal principal,
         string? requestedContextId,
         CancellationToken cancellationToken = default)
     {
-        var (consumerId, context) = await ResolveAuthorizedContextAsync(
-            principal, requestedContextId, "consultar", cancellationToken);
+        var authorized = await AuthorizeAsync(
+            principal,
+            requestedContextId,
+            "consultar",
+            cancellationToken);
+        var context = authorized.Context;
         if (context.OperationalState == FiscalContextOperationalState.Disabled)
             throw new FiscalContextAccessException("FISCAL_CONTEXT_DISABLED", "El contexto fiscal está deshabilitado.");
 
@@ -105,7 +135,7 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
             ?? throw new FiscalContextAccessException(
                 "ACTIVE_ASSIGNMENT_REQUIRED",
                 "El contexto fiscal no tiene una asignación activa para consultas nuevas.");
-        return CreateRuntime(consumerId, context, assignment);
+        return CreateRuntime(authorized.ConsumerId, context, assignment);
     }
 
     public async Task<FiscalContextRuntime> ResolveForEmissionAsync(
@@ -115,8 +145,13 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         dcTipoComprobante tipoComprobante,
         CancellationToken cancellationToken = default)
     {
-        var (consumerId, context) = await ResolveAuthorizedContextAsync(
-            principal, requestedContextId, "facturar", cancellationToken);
+        var authorized = await AuthorizeAsync(
+            principal,
+            requestedContextId,
+            "facturar",
+            cancellationToken);
+        var consumerId = authorized.ConsumerId;
+        var context = authorized.Context;
         if (context.OperationalState != FiscalContextOperationalState.Active)
             throw new FiscalContextAccessException("FISCAL_CONTEXT_NOT_ACTIVE", "El contexto fiscal no admite nuevas emisiones.");
         if (string.IsNullOrWhiteSpace(idempotencyKey))
