@@ -358,6 +358,7 @@ public class DurableSequencerSafetyTests
                     Importe = request.ImporteIva
                 });
             }
+            response.ConsultEvidence = ConsultEvidenceTestData.ValidFor(response);
             return response;
         }
 
