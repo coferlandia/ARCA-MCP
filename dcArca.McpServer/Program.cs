@@ -34,6 +34,11 @@ builder.Services.AddSingleton<IdcWsfeClient, dcWsfeClient>();
 builder.Services.AddSingleton<IdcPadronClient, dcPadronClient>();
 builder.Services.AddSingleton<IEmissionIdempotencyStore>(_ =>
     new FileSystemEmissionIdempotencyStore(emissionIdempotencyDirectory));
+builder.Services.AddSingleton<IFiscalSeriesCoordinator>(sp =>
+{
+    var store = (FileSystemEmissionIdempotencyStore)sp.GetRequiredService<IEmissionIdempotencyStore>();
+    return new FileSystemFiscalSeriesCoordinator(store.DirectoryPath);
+});
 builder.Services.AddSingleton<McpInvoiceSequencer>();
 builder.Services.AddSingleton<IInvoiceIssuer>(sp => sp.GetRequiredService<McpInvoiceSequencer>());
 builder.Services.AddSingleton<IPdfDocumentRenderer, PdfDocumentRenderer>();
@@ -68,6 +73,12 @@ builder.Services.AddMcpServer()
     .AddAuthorizationFilters();
 
 var app = builder.Build();
+
+// Acquire the supported V1 single-writer lease and rebuild/validate durable reservations
+// before the server becomes ready to accept fiscal work.
+var emissionStore = app.Services.GetRequiredService<IEmissionIdempotencyStore>();
+var seriesCoordinator = app.Services.GetRequiredService<IFiscalSeriesCoordinator>();
+await seriesCoordinator.InitializeAsync(emissionStore);
 
 app.UseAuthentication();
 app.UseAuthorization();
