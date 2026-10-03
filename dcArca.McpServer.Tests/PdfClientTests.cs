@@ -93,6 +93,25 @@ public class PdfClientTests
     }
 
     [Fact]
+    public async Task RemoteErrorCodeConControles_NoSeExponeComoMetadata()
+    {
+        const string secret = "Bearer-super-secret";
+        var unsafeCode = $"unknown_template\nAuthorization:{secret}";
+        var client = CreateClient((_, _) => Task.FromResult(ErrorResponse(
+            HttpStatusCode.NotFound,
+            unsafeCode,
+            "remote message")));
+
+        var exception = await Assert.ThrowsAsync<CreadorPdfException>(() =>
+            client.RenderAsync(LegacyTemplate(), JsonSerializer.SerializeToElement(new { })));
+
+        Assert.Equal(PdfFailureKind.RenderFailed, exception.FailureKind);
+        Assert.Equal(404, exception.ProviderStatusCode);
+        Assert.Null(exception.ProviderErrorCode);
+        Assert.DoesNotContain(secret, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task NetworkFailure_SeClasificaUnavailableSinInventarStatus()
     {
         var client = CreateClient((_, _) => throw new HttpRequestException("connection refused"));
