@@ -18,6 +18,7 @@ public sealed class ArcaTools
     private readonly IEmissionIdempotencyStore _operationStore;
     private readonly IFiscalSeriesCoordinator _seriesCoordinator;
     private readonly IPdfDocumentRenderer _pdfRenderer;
+    private readonly McpOperationContractService _contract;
     private readonly IHttpContextAccessor _httpContextAccessor;
 
     public ArcaTools(
@@ -25,18 +26,60 @@ public sealed class ArcaTools
         IEmissionIdempotencyStore operationStore,
         IFiscalSeriesCoordinator seriesCoordinator,
         IPdfDocumentRenderer pdfRenderer,
+        McpOperationContractService contract,
         IHttpContextAccessor httpContextAccessor)
     {
         _runtimeResolver = runtimeResolver;
         _operationStore = operationStore;
         _seriesCoordinator = seriesCoordinator;
         _pdfRenderer = pdfRenderer;
+        _contract = contract;
         _httpContextAccessor = httpContextAccessor;
     }
 
     private ClaimsPrincipal Principal
         => _httpContextAccessor.HttpContext?.User
             ?? throw new FiscalContextAccessException("AUTHENTICATED_PRINCIPAL_REQUIRED", "No hay una identidad autenticada disponible para resolver el contexto fiscal.");
+
+    [McpServerTool, Description("Devuelve el contrato de capacidades realmente implementadas y autorizadas para un contexto fiscal. No verifica habilitación remota en ARCA.")]
+    [Authorize(Policy = "ArcaConsultar")]
+    public Task<McpCapabilitiesResult> ObtenerCapacidadesFiscales(
+        [Description("Contexto fiscal autorizado. Puede omitirse si existe exactamente uno permitido para consulta.")] string? contextId = null,
+        CancellationToken cancellationToken = default)
+        => _contract.GetCapabilitiesAsync(Principal, contextId, cancellationToken);
+
+    [McpServerTool, Description("Valida determinísticamente un request fiscal completo sin reservar número ni solicitar CAE. No garantiza autorización remota futura.")]
+    [Authorize(Policy = "ArcaFacturar")]
+    public Task<McpValidationResult> ValidarComprobante(
+        [Description("Modelo fiscal completo a validar. NumeroComprobante no se utiliza para la validación server-side.")] dcFacturaRequest factura,
+        [Description("Contexto fiscal autorizado. Puede omitirse si existe exactamente uno permitido para facturar.")] string? contextId = null,
+        CancellationToken cancellationToken = default)
+        => _contract.ValidateRequestAsync(Principal, contextId, factura, cancellationToken);
+
+    [McpServerTool, Description("Ejecuta diagnóstico fiscal explícito y no emisor: configuración local, assignments y verificación remota de autorización/PV. No modifica la assignment activa.")]
+    [Authorize(Policy = "ArcaConsultar")]
+    public Task<McpFiscalDiagnosticResult> DiagnosticarContextoFiscal(
+        [Description("Contexto fiscal autorizado. Puede omitirse si existe exactamente uno permitido para consulta.")] string? contextId = null,
+        CancellationToken cancellationToken = default)
+        => _contract.DiagnoseAsync(Principal, contextId, cancellationToken);
+
+    [McpServerTool, Description("Consulta una operación durable por operationId o idempotencyKey dentro del consumer/contexto autorizado. No llama a emisión.")]
+    [Authorize(Policy = "ArcaConsultar")]
+    public Task<McpOperationResult> ConsultarOperacion(
+        [Description("operationId opaco devuelto por una emisión previa. Informar exactamente éste o idempotencyKey.")] string? operationId = null,
+        [Description("idempotencyKey original. Informar exactamente ésta u operationId; nunca se persiste ni devuelve en claro.")] string? idempotencyKey = null,
+        [Description("Contexto fiscal autorizado. Puede omitirse si existe exactamente uno permitido para consulta.")] string? contextId = null,
+        CancellationToken cancellationToken = default)
+        => _contract.GetOperationAsync(Principal, contextId, operationId, idempotencyKey, cancellationToken);
+
+    [McpServerTool, Description("Reconcilia explícitamente una operación ya existente mediante lectura fiscal y comparación de evidencia. Nunca crea operación, asigna número ni solicita CAE.")]
+    [Authorize(Policy = "ArcaConsultar")]
+    public Task<McpOperationResult> ReconciliarOperacion(
+        [Description("operationId opaco devuelto por una emisión previa. Informar exactamente éste o idempotencyKey.")] string? operationId = null,
+        [Description("idempotencyKey original. Informar exactamente ésta u operationId.")] string? idempotencyKey = null,
+        [Description("Contexto fiscal autorizado. Puede omitirse si existe exactamente uno permitido para consulta.")] string? contextId = null,
+        CancellationToken cancellationToken = default)
+        => _contract.ReconcileAsync(Principal, contextId, operationId, idempotencyKey, cancellationToken);
 
     [McpServerTool, Description("Emite un comprobante de forma idempotente, incorpora el resultado fiscal a una plantilla publicada y devuelve el PDF.")]
     [Authorize(Policy = "ArcaFacturar")]
@@ -63,12 +106,19 @@ public sealed class ArcaTools
             runtime.IdentityProvider,
             _seriesCoordinator);
         var service = new InvoicePdfService(sequencer, _pdfRenderer, runtime.Config);
-        return await service.EmitAsync(
+        var result = await service.EmitAsync(
             factura,
             idempotencyKey,
             new PdfTemplateReference(templateId, templateVersion),
             templateData,
             cancellationToken);
+        await _contract.DecorateEmissionResponseAsync(
+            runtime.ConsumerId,
+            runtime.Context.ContextId,
+            idempotencyKey,
+            result.Fiscal,
+            cancellationToken);
+        return result;
     }
 
     [McpServerTool, Description("Genera o regenera el PDF de un comprobante ya autorizado consultándolo primero en ARCA. Esta operación nunca solicita un nuevo CAE.")]
@@ -170,7 +220,14 @@ public sealed class ArcaTools
             _operationStore,
             runtime.IdentityProvider,
             _seriesCoordinator);
-        return await sequencer.EmitAsync(factura, idempotencyKey, cancellationToken);
+        var response = await sequencer.EmitAsync(factura, idempotencyKey, cancellationToken);
+        await _contract.DecorateEmissionResponseAsync(
+            runtime.ConsumerId,
+            runtime.Context.ContextId,
+            idempotencyKey,
+            response,
+            cancellationToken);
+        return response;
     }
 
     [McpServerTool, Description("Emite un comprobante idempotente usando el modelo fiscal completo de dcARCA y asigna la numeración server-side.")]
@@ -200,7 +257,14 @@ public sealed class ArcaTools
             _operationStore,
             runtime.IdentityProvider,
             _seriesCoordinator);
-        return await sequencer.EmitAsync(factura, idempotencyKey, cancellationToken);
+        var response = await sequencer.EmitAsync(factura, idempotencyKey, cancellationToken);
+        await _contract.DecorateEmissionResponseAsync(
+            runtime.ConsumerId,
+            runtime.Context.ContextId,
+            idempotencyKey,
+            response,
+            cancellationToken);
+        return response;
     }
 
     [McpServerTool, Description("Compatibilidad histórica: la emisión con número elegido por el caller está deshabilitada en el MCP porque puede violar la reserva durable de la serie. Use emitir_comprobante o emitir_comprobante_avanzado.")]
@@ -228,13 +292,7 @@ public sealed class ArcaTools
         [Description("Contexto fiscal autorizado.")] string? contextId = null,
         CancellationToken cancellationToken = default)
     {
-        // Resolve authorization/context even though the compatibility tool never performs I/O.
-        using var runtime = await _runtimeResolver.ResolveForEmissionAsync(
-            Principal,
-            contextId,
-            $"disabled-low-level:{numeroComprobante}",
-            tipoComprobante,
-            cancellationToken);
+        await _runtimeResolver.AuthorizeAsync(Principal, contextId, "facturar", cancellationToken);
         return new dcFacturaResponse
         {
             Success = false,
