@@ -120,6 +120,17 @@ def must_compensate(result: dict[str, Any] | None) -> bool:
     return isinstance(number, int) and number > 0
 
 
+def authorization_from_operation(operation: Any) -> dict[str, Any] | None:
+    state = find_key(operation, "state")
+    if not isinstance(state, str) or state.lower() != "authorized":
+        return None
+    number = find_key(operation, "numeroComprobante")
+    cae = find_key(operation, "cae")
+    if not isinstance(number, int) or number <= 0 or cae in (None, ""):
+        return None
+    return {"number": number, "cae": cae}
+
+
 def _load_json(path: pathlib.Path) -> dict[str, Any]:
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
@@ -145,8 +156,25 @@ def _pdf_base64(value: Any) -> str | None:
 
 
 def _call(client: McpClient, name: str, args: dict[str, Any]) -> tuple[Any, bool]:
-    status, envelope, result = client.tool(name, args)
-    return result, _tool_ok(status, envelope)
+    try:
+        status, envelope, result = client.tool(name, args)
+        return result, _tool_ok(status, envelope)
+    except (OSError, TimeoutError) as exc:
+        return {"transportError": type(exc).__name__, "safeMessage": str(exc)}, False
+
+
+def _recover_authorization(client: McpClient, context_id: str, run_key: str) -> tuple[dict[str, Any] | None, str | None]:
+    lookup_args = {"contextId": context_id, "idempotencyKey": run_key}
+    operation, operation_ok = _call(client, "consultar_operacion", lookup_args)
+    state = find_key(operation, "state") if operation_ok else None
+    recovered = authorization_from_operation(operation) if operation_ok else None
+    if recovered is not None:
+        return recovered, str(state) if state is not None else None
+
+    reconciled, reconcile_ok = _call(client, "reconciliar_operacion", lookup_args)
+    reconcile_state = find_key(reconciled, "state") if reconcile_ok else None
+    recovered = authorization_from_operation(reconciled) if reconcile_ok else None
+    return recovered, str(reconcile_state or state) if (reconcile_state or state) is not None else None
 
 
 def _merge_template_data(base: dict[str, Any] | None, label: str) -> dict[str, Any]:
@@ -181,6 +209,7 @@ def _emit_document(*, client: McpClient, context_id: str, letter: str, label: st
         "type": invoice["tipoComprobante"],
         "status": "FAIL",
         "fiscalAuthorized": False,
+        "manualReconciliationRequired": False,
     }
     validation, validation_ok = _call(client, "validar_comprobante", {"contextId": context_id, "factura": invoice})
     is_valid = find_key(validation, "valid")
@@ -200,9 +229,21 @@ def _emit_document(*, client: McpClient, context_id: str, letter: str, label: st
         and number > 0
         and cae not in (None, "")
     )
+
     if not fiscal_authorized:
-        result.update({"reason": "emission_failed", "emission": emission})
-        return result
+        recovered, durable_state = _recover_authorization(client, context_id, run_key)
+        result["durableStateAfterRecovery"] = durable_state
+        if recovered is None:
+            ambiguous = bool(find_key(emission, "transportError")) or str(durable_state or "").lower() in {"submitting", "uncertain"}
+            result.update({
+                "reason": "emission_ambiguous" if ambiguous else "emission_failed",
+                "manualReconciliationRequired": ambiguous,
+            })
+            return result
+        number = recovered["number"]
+        cae = recovered["cae"]
+        fiscal_authorized = True
+        result["recoveredAfterEmissionFailure"] = True
 
     # From this point forward the fiscal side effect is confirmed. Any ancillary
     # failure must preserve enough state for _run_letter to compensate it.
@@ -267,6 +308,17 @@ def _run_letter(*, client: McpClient, context: dict[str, Any], letter: str, date
         output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-invoice")
     docs.append(invoice_result)
 
+    if invoice_result.get("manualReconciliationRequired"):
+        return {
+            "letter": letter,
+            "status": "FAIL",
+            "documents": docs,
+            "fiscallyBalanced": False,
+            "unbalanced": True,
+            "netEffectArs": "UNKNOWN",
+            "haltRequired": True,
+        }
+
     if not must_compensate(invoice_result):
         return {
             "letter": letter,
@@ -291,6 +343,17 @@ def _run_letter(*, client: McpClient, context: dict[str, Any], letter: str, date
             output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-debit")
         docs.append(debit_result)
 
+        if debit_result.get("manualReconciliationRequired"):
+            return {
+                "letter": letter,
+                "status": "FAIL",
+                "documents": docs,
+                "fiscallyBalanced": False,
+                "unbalanced": True,
+                "netEffectArs": "UNKNOWN",
+                "haltRequired": True,
+            }
+
         if must_compensate(debit_result):
             debit_assoc = {"tipo": type_name(letter, "debit"), "puntoVenta": point_of_sale,
                            "numero": debit_result["number"]}
@@ -299,6 +362,16 @@ def _run_letter(*, client: McpClient, context: dict[str, Any], letter: str, date
                 label=f"nota-credito-{letter.lower()}-anula-nd", invoice=credit_debit, pdf_cfg=pdf_cfg,
                 output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-credit-debit")
             docs.append(credit_debit_result)
+            if credit_debit_result.get("manualReconciliationRequired"):
+                return {
+                    "letter": letter,
+                    "status": "FAIL",
+                    "documents": docs,
+                    "fiscallyBalanced": False,
+                    "unbalanced": True,
+                    "netEffectArs": "UNKNOWN",
+                    "haltRequired": True,
+                }
 
     # Once the invoice exists, always attempt its compensating credit note,
     # regardless of replay/verification/PDF failures on the invoice itself.
@@ -307,6 +380,17 @@ def _run_letter(*, client: McpClient, context: dict[str, Any], letter: str, date
         label=f"nota-credito-{letter.lower()}-anula-factura", invoice=credit_invoice, pdf_cfg=pdf_cfg,
         output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-credit-invoice")
     docs.append(credit_invoice_result)
+
+    if credit_invoice_result.get("manualReconciliationRequired"):
+        return {
+            "letter": letter,
+            "status": "FAIL",
+            "documents": docs,
+            "fiscallyBalanced": False,
+            "unbalanced": True,
+            "netEffectArs": "UNKNOWN",
+            "haltRequired": True,
+        }
 
     invoice_compensated = must_compensate(credit_invoice_result)
     debit_needs_compensation = must_compensate(debit_result)
@@ -327,6 +411,7 @@ def _run_letter(*, client: McpClient, context: dict[str, Any], letter: str, date
         "fiscallyBalanced": fiscally_balanced,
         "unbalanced": not fiscally_balanced,
         "netEffectArs": "0.00" if fiscally_balanced else "UNKNOWN",
+        "haltRequired": False,
     }
 
 
@@ -400,6 +485,7 @@ def main() -> int:
 
     any_skips = False
     any_fail = False
+    halt_required = False
     for context in contexts:
         context_id = str(context.get("contextId") or "").strip()
         if not context_id:
@@ -425,12 +511,20 @@ def main() -> int:
             ctx_report["results"].append(result)
             any_skips = any_skips or result["status"].startswith("SKIPPED")
             any_fail = any_fail or result["status"] == "FAIL"
+            if result.get("haltRequired"):
+                halt_required = True
+                break
         report["contexts"].append(ctx_report)
+        if halt_required:
+            break
 
+    report["manualReconciliationRequired"] = halt_required
     report["overallStatus"] = "FAIL" if any_fail else ("PASS_WITH_SKIPS" if any_skips else "PASS")
     _write_summary(report, output_dir, known_secrets)
     print(f"Smoke result: {report['overallStatus']}")
     print(f"Evidence: {output_dir}")
+    if halt_required:
+        print("ATENCIÓN: resultado fiscal ambiguo; se detuvo el smoke y requiere reconciliación manual.", file=sys.stderr)
     return 1 if any_fail else 0
 
 
