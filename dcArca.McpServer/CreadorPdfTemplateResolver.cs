@@ -18,7 +18,7 @@ public sealed class CreadorPdfTemplateResolver : IPdfTemplateResolver
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
     private readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new(StringComparer.Ordinal);
+    private readonly SemaphoreSlim _resolutionLock = new(1, 1);
 
     public CreadorPdfTemplateResolver(HttpClient httpClient, IConfiguration configuration)
     {
@@ -37,8 +37,7 @@ public sealed class CreadorPdfTemplateResolver : IPdfTemplateResolver
         if (TryGetCached(cacheKey, out var cached))
             return cached;
 
-        var gate = _locks.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken);
+        await _resolutionLock.WaitAsync(cancellationToken);
         try
         {
             if (TryGetCached(cacheKey, out cached))
@@ -52,7 +51,7 @@ public sealed class CreadorPdfTemplateResolver : IPdfTemplateResolver
         }
         finally
         {
-            gate.Release();
+            _resolutionLock.Release();
         }
     }
 
