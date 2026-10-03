@@ -18,6 +18,12 @@ services:
     environment:
       ApiKeys__Directory: /data
       EmissionIdempotency__Directory: /data/emission-idempotency
+      FiscalContexts__Directory: /data/fiscal-contexts
+      FiscalContext__ConsumerId: ${FISCAL_CONTEXT_CONSUMER_ID:-cadencia}
+      FiscalContext__ContextId: ${FISCAL_CONTEXT_ID:-cadencia-arca-homologacion}
+      FiscalContext__Environment: ${FISCAL_CONTEXT_ENVIRONMENT:-homologacion}
+      FiscalContext__ContextRevision: ${FISCAL_CONTEXT_REVISION:-1}
+      FiscalContext__CredentialAssignmentRevision: ${FISCAL_CONTEXT_CREDENTIAL_ASSIGNMENT_REVISION:-legacy-1}
       Pdf__BaseUrl: http://creadorpdf:8080
       Pdf__ApiKey: ${PDF_API_KEY}
     labels:
