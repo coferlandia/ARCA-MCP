@@ -14,7 +14,13 @@ public sealed class ExistingInvoicePdfService
         IdcWsfeClient wsfe,
         IPdfDocumentRenderer renderer,
         dcArcaConfig config)
-        : this(wsfe, renderer, FiscalDocumentContext.FromLegacyConfig(config))
+        : this(
+            wsfe,
+            renderer,
+            new FiscalDocumentContext(
+                string.IsNullOrWhiteSpace(config.Environment) ? "unspecified" : config.Environment,
+                config.Cuit,
+                config.PuntoVenta))
     {
     }
 
