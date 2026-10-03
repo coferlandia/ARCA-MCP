@@ -28,7 +28,13 @@ public sealed class InvoicePdfService
         IInvoiceIssuer issuer,
         IPdfDocumentRenderer renderer,
         dcArcaConfig config)
-        : this(issuer, renderer, FiscalDocumentContext.FromLegacyConfig(config))
+        : this(
+            issuer,
+            renderer,
+            new FiscalDocumentContext(
+                string.IsNullOrWhiteSpace(config.Environment) ? "unspecified" : config.Environment,
+                config.Cuit,
+                config.PuntoVenta))
     {
     }
 
