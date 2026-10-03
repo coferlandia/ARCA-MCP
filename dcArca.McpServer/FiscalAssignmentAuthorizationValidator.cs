@@ -114,7 +114,7 @@ public sealed class FiscalAssignmentAuthorizationValidator : IFiscalAssignmentAu
         if (certificateNotAfter <= now)
         {
             return new FiscalAssignmentValidationResult(
-                FiscalAssignmentValidationStatus.NotVerified,
+                FiscalAssignmentValidationStatus.InvalidConfiguration,
                 "CERTIFICATE_EXPIRED",
                 $"El certificado configurado está vencido y no puede considerarse autorizado. {validity}",
                 context.ContextId,
@@ -128,7 +128,7 @@ public sealed class FiscalAssignmentAuthorizationValidator : IFiscalAssignmentAu
         if (certificateNotBefore > now)
         {
             return new FiscalAssignmentValidationResult(
-                FiscalAssignmentValidationStatus.NotVerified,
+                FiscalAssignmentValidationStatus.InvalidConfiguration,
                 "CERTIFICATE_NOT_YET_VALID",
                 $"El certificado configurado todavía no se encuentra dentro de su período de vigencia. {validity}",
                 context.ContextId,
