@@ -26,8 +26,6 @@ public sealed record FiscalReconciliationResult(
 
 public static class FiscalReconciliationComparer
 {
-    private const decimal Tolerance = 0.01m;
-
     public static FiscalReconciliationResult Compare(
         EmissionIdempotencyRecord operation,
         dcFacturaResponse consulted)
@@ -193,5 +191,5 @@ public static class FiscalReconciliationComparer
     }
 
     private static bool DecimalEqual(decimal left, decimal right)
-        => Math.Abs(left - right) <= Tolerance;
+        => left == right;
 }
