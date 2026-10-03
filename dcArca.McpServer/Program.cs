@@ -105,6 +105,11 @@ builder.Services.AddMcpServer()
 
 var app = builder.Build();
 
+// Exclude restore maintenance for the complete host lifetime. Restore takes the same
+// recovery-directory lease exclusively, so it cannot race host startup or a live process.
+var recoveryGateService = app.Services.GetRequiredService<FileSystemEmissionRecoveryGate>();
+using var recoveryRuntimeLease = recoveryGateService.AcquireRuntimeLease();
+
 var contextStore = app.Services.GetRequiredService<IRepresentedFiscalContextStore>();
 if (!long.TryParse(arcaConfig.Cuit, out var legacyCuit) || legacyCuit <= 0)
     throw new InvalidOperationException("dcArcaConfig:Cuit debe ser numérico para inicializar el contexto fiscal legacy.");
