@@ -49,8 +49,8 @@ list_templates() {
   ' sh "$PDF_BASE_URL"
 }
 
-find_template() {
-  python3 - "$TEMPLATE_NAME" "$TEMPLATE_VERSION" <<'PY'
+managed="$(list_templates)"
+match="$(printf '%s' "$managed" | python3 -c '
 import json, sys
 name, version = sys.argv[1:3]
 items = json.load(sys.stdin)
@@ -59,11 +59,8 @@ for item in items:
         print(item.get("id", ""))
         print(item.get("status", ""))
         break
-PY
-}
+' "$TEMPLATE_NAME" "$TEMPLATE_VERSION")"
 
-managed="$(list_templates)"
-match="$(printf '%s' "$managed" | find_template)"
 template_id="$(printf '%s\n' "$match" | sed -n '1p')"
 status="$(printf '%s\n' "$match" | sed -n '2p')"
 
