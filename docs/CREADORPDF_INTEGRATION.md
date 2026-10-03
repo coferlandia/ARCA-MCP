@@ -1,5 +1,7 @@
 # Integración con creadorpdf
 
+Para operación, publicación de templates, ownership/scopes, smoke tests y troubleshooting, ver [RUNBOOK_PDF_TEMPLATES.md](RUNBOOK_PDF_TEMPLATES.md).
+
 ARCA-MCP encapsula la generación de comprobantes PDF y es el único consumidor que conoce la API key de creadorpdf. SecretarIA nunca llama al renderer directamente ni puede aportar el bloque fiscal.
 
 ## Contrato fiscal canónico
