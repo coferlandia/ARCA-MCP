@@ -93,17 +93,29 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
     private readonly IEmissionIdempotencyStore _operations;
     private readonly SingleFiscalContextOptions _legacyOptions;
     private readonly IFiscalCredentialMaterializer _materializer;
+    private readonly IEmissionRecoveryGate _recoveryGate;
 
     public FiscalContextRuntimeResolver(
         IRepresentedFiscalContextStore contexts,
         IEmissionIdempotencyStore operations,
         SingleFiscalContextOptions legacyOptions,
         IFiscalCredentialMaterializer materializer)
+        : this(contexts, operations, legacyOptions, materializer, OpenEmissionRecoveryGate.Instance)
+    {
+    }
+
+    public FiscalContextRuntimeResolver(
+        IRepresentedFiscalContextStore contexts,
+        IEmissionIdempotencyStore operations,
+        SingleFiscalContextOptions legacyOptions,
+        IFiscalCredentialMaterializer materializer,
+        IEmissionRecoveryGate recoveryGate)
     {
         _contexts = contexts;
         _operations = operations;
         _legacyOptions = legacyOptions;
         _materializer = materializer;
+        _recoveryGate = recoveryGate;
     }
 
     public async Task<AuthorizedFiscalContext> AuthorizeAsync(
@@ -161,6 +173,14 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
             throw new FiscalContextAccessException("FISCAL_CONTEXT_NOT_ACTIVE", "El contexto fiscal no admite nuevas emisiones.");
         if (string.IsNullOrWhiteSpace(idempotencyKey))
             throw new FiscalContextAccessException("IDEMPOTENCY_KEY_REQUIRED", "idempotencyKey es obligatoria para emitir.");
+
+        var recoveryBlock = await _recoveryGate.GetBlockAsync(cancellationToken);
+        if (recoveryBlock is not null)
+        {
+            throw new FiscalContextAccessException(
+                "RESTORE_RECONCILIATION_REQUIRED",
+                $"Las emisiones están bloqueadas por recuperación del restore {recoveryBlock.RestoreId}; reconciliar la ventana no cubierta y completar el recovery antes de autorizar nuevos comprobantes.");
+        }
 
         var operationKeyHash = EmissionRequestFingerprint.OperationKeyHash(
             consumerId,
