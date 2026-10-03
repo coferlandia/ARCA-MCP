@@ -20,7 +20,6 @@ public class ConsultEvidencePositiveTests
             ImporteTotal = 121m,
             ImporteNoGravado = 0m,
             ImporteExento = 0m,
-            ImporteTributos = 0m,
             AlicuotaIva = dcAlicuotaIva.Veintiuno,
             MonedaId = "PES",
             MonedaCotizacion = 1m,
