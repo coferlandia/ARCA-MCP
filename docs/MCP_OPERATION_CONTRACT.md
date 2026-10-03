@@ -36,6 +36,8 @@ La respuesta separa:
 - resultado de la última comprobación realizada durante ese diagnóstico;
 - blockers para retirar una credencial anterior, incluidas operaciones pendientes que conservan su `assignmentRevision` histórica.
 
+Antes de WSAA se comprueba que el PFX configurado sea legible y se conoce su período de vigencia. El mensaje seguro del diagnóstico informa `notBefore/notAfter` cuando están disponibles y devuelve códigos accionables como `CERTIFICATE_EXPIRED`, `CERTIFICATE_NOT_YET_VALID` o `CERTIFICATE_UNREADABLE`, sin exponer ruta, subject, thumbprint ni material secreto.
+
 Una falla de red, WSAA, WSFE o autorización se reporta como no verificada; nunca se transforma en READY por inferencia. El diagnóstico no activa assignments y no emite una factura de prueba.
 
 ## OperationId
