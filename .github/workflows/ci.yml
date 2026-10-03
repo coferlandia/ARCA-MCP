@@ -50,6 +50,51 @@ jobs:
       - name: Build CLI
         run: dotnet build dcArca.Cli/dcArca.Cli.csproj --configuration Release
 
+      - name: Validate Docker Compose
+        env:
+          CERTIFICATE_PATH: /tmp/dummy-certificate.pfx
+          PDF_API_KEY: ci-placeholder
+          APPSETTINGS_PATH: ./dcArca.McpServer/appsettings.Testing.json
+        run: docker compose config -q
+
+      - name: Build MCP container
+        run: docker build -t dcarca-mcpserver:ci -f dcArca.McpServer/Dockerfile .
+
+      - name: Smoke MCP container and restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_cert="$RUNNER_TEMP/test-cert-placeholder.pfx"
+          : > "$test_cert"
+
+          docker run -d --name dcarca-mcp-ci \
+            -e ASPNETCORE_ENVIRONMENT=Testing \
+            -v "$PWD/dcArca.McpServer/appsettings.Testing.json:/app/appsettings.Testing.json:ro" \
+            -v "$test_cert:/app/test-cert-placeholder.pfx:ro" \
+            -p 18080:8080 \
+            dcarca-mcpserver:ci
+          cleanup() {
+            docker logs dcarca-mcp-ci || true
+            docker rm -f dcarca-mcp-ci >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          wait_ready() {
+            for i in {1..30}; do
+              if curl --fail --silent http://127.0.0.1:18080/health/live >/dev/null \
+                && curl --fail --silent http://127.0.0.1:18080/health/ready >/dev/null; then
+                return 0
+              fi
+              sleep 1
+            done
+            echo "MCP container did not become ready" >&2
+            return 1
+          }
+
+          wait_ready
+          docker restart dcarca-mcp-ci >/dev/null
+          wait_ready
+
       - name: Audit Core packages
         run: dotnet list dcArca.Core/dcArca.Core.csproj package --vulnerable --include-transitive
 

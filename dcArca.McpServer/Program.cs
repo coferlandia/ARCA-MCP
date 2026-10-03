@@ -8,12 +8,15 @@ using ModelContextProtocol.AspNetCore;
 
 if (await EmissionStoreMigrationCommand.TryRunAsync(args))
     return;
+if (await EmissionStoreRecoveryCommand.TryRunAsync(args))
+    return;
 
 var builder = WebApplication.CreateBuilder(args);
 
 var apiKeysDirectory = builder.Configuration["ApiKeys:Directory"];
 var emissionIdempotencyDirectory = builder.Configuration["EmissionIdempotency:Directory"];
 var fiscalContextsDirectory = builder.Configuration["FiscalContexts:Directory"];
+var recoveryDirectory = builder.Configuration["Recovery:Directory"];
 if (builder.Environment.EnvironmentName == "Testing")
 {
     var testHostRoot = Path.Combine(
@@ -24,6 +27,16 @@ if (builder.Environment.EnvironmentName == "Testing")
     // explicitly supplies persistence, isolate all fiscal topology owned by that host.
     emissionIdempotencyDirectory ??= Path.Combine(testHostRoot, "emission-idempotency");
     fiscalContextsDirectory ??= Path.Combine(testHostRoot, "fiscal-contexts");
+    recoveryDirectory ??= Path.Combine(testHostRoot, "recovery");
+}
+
+if (string.IsNullOrWhiteSpace(recoveryDirectory))
+{
+    var dataRoot = string.IsNullOrWhiteSpace(emissionIdempotencyDirectory)
+        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dcArca")
+        : Path.GetDirectoryName(Path.GetFullPath(emissionIdempotencyDirectory))
+            ?? throw new InvalidOperationException("No se pudo resolver el directorio padre del store de emisiones.");
+    recoveryDirectory = Path.Combine(dataRoot, "recovery");
 }
 
 var arcaSettingsFile = builder.Environment.EnvironmentName == "Testing"
@@ -38,22 +51,37 @@ builder.Services.AddSingleton(arcaConfig);
 builder.Services.AddSingleton(fiscalContextOptions);
 builder.Services.AddSingleton<IAfipLogger>(sp =>
     new AfipLoggerAdapter(sp.GetRequiredService<ILoggerFactory>().CreateLogger("dcArca")));
+
 builder.Services.AddSingleton(_ => new FileSystemEmissionIdempotencyStore(emissionIdempotencyDirectory));
+builder.Services.AddSingleton<ObservableEmissionIdempotencyStore>();
 builder.Services.AddSingleton<IEmissionIdempotencyStore>(sp =>
-    sp.GetRequiredService<FileSystemEmissionIdempotencyStore>());
+    sp.GetRequiredService<ObservableEmissionIdempotencyStore>());
 builder.Services.AddSingleton<IEmissionOperationInspector, FileSystemEmissionOperationInspector>();
-builder.Services.AddSingleton<IFiscalSeriesCoordinator>(sp =>
+
+builder.Services.AddSingleton(sp =>
 {
     var store = sp.GetRequiredService<FileSystemEmissionIdempotencyStore>();
     return new FileSystemFiscalSeriesCoordinator(store.DirectoryPath);
 });
+builder.Services.AddSingleton<ObservableFiscalSeriesCoordinator>();
+builder.Services.AddSingleton<IFiscalSeriesCoordinator>(sp =>
+    sp.GetRequiredService<ObservableFiscalSeriesCoordinator>());
+
+builder.Services.AddSingleton(_ => new FileSystemEmissionRecoveryGate(recoveryDirectory));
+builder.Services.AddSingleton<IEmissionRecoveryGate>(sp =>
+    sp.GetRequiredService<FileSystemEmissionRecoveryGate>());
 builder.Services.AddSingleton<IRepresentedFiscalContextStore>(_ =>
     new FileSystemRepresentedFiscalContextStore(fiscalContextsDirectory));
 builder.Services.AddSingleton<IFiscalCredentialMaterializer, FiscalCredentialMaterializer>();
 builder.Services.AddSingleton<IFiscalContextRuntimeResolver, FiscalContextRuntimeResolver>();
 builder.Services.AddSingleton<IFiscalAssignmentAuthorizationValidator, FiscalAssignmentAuthorizationValidator>();
 builder.Services.AddSingleton<McpOperationContractService>();
-builder.Services.AddSingleton<IPdfDocumentRenderer, PdfDocumentRenderer>();
+
+builder.Services.AddSingleton<PdfDocumentRenderer>();
+builder.Services.AddSingleton<ObservablePdfDocumentRenderer>();
+builder.Services.AddSingleton<IPdfDocumentRenderer>(sp =>
+    sp.GetRequiredService<ObservablePdfDocumentRenderer>());
+
 builder.Services.AddSingleton<IApiKeyStore>(_ => new FileSystemApiKeyStore(apiKeysDirectory));
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHttpClient(nameof(FiscalAssignmentAuthorizationValidator), client =>
@@ -89,6 +117,11 @@ builder.Services.AddMcpServer()
 
 var app = builder.Build();
 
+// Exclude restore maintenance for the complete host lifetime. Restore takes the same
+// recovery-directory lease exclusively, so it cannot race host startup or a live process.
+var recoveryGateService = app.Services.GetRequiredService<FileSystemEmissionRecoveryGate>();
+using var recoveryRuntimeLease = recoveryGateService.AcquireRuntimeLease();
+
 var contextStore = app.Services.GetRequiredService<IRepresentedFiscalContextStore>();
 if (!long.TryParse(arcaConfig.Cuit, out var legacyCuit) || legacyCuit <= 0)
     throw new InvalidOperationException("dcArcaConfig:Cuit debe ser numérico para inicializar el contexto fiscal legacy.");
@@ -114,17 +147,41 @@ await contextStore.InitializeLegacyAsync(new RepresentedFiscalContextRecord(
             "legacy-bootstrap")
     ]));
 
-// Acquire the supported V1 single-writer lease and rebuild/validate durable reservations
-// before the server becomes ready to accept fiscal work.
-var emissionStore = app.Services.GetRequiredService<IEmissionIdempotencyStore>();
-var seriesCoordinator = app.Services.GetRequiredService<IFiscalSeriesCoordinator>();
-await seriesCoordinator.InitializeAsync(emissionStore);
+// Initialize the concrete store/coordinator once. Runtime callers receive observable
+// decorators over these already-initialized singletons.
+var concreteEmissionStore = app.Services.GetRequiredService<FileSystemEmissionIdempotencyStore>();
+var concreteSeriesCoordinator = app.Services.GetRequiredService<FileSystemFiscalSeriesCoordinator>();
+await concreteSeriesCoordinator.InitializeAsync(concreteEmissionStore);
 
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "alive" }));
-app.MapGet("/health/ready", () => Results.Ok(new { status = "ready" }));
+app.MapGet("/health/ready", async (IEmissionRecoveryGate recoveryGate, CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var block = await recoveryGate.GetBlockAsync(cancellationToken);
+        return block is null
+            ? Results.Ok(new { status = "ready" })
+            : Results.Json(new
+            {
+                status = "not-ready",
+                code = "RESTORE_RECONCILIATION_REQUIRED",
+                restoreId = block.RestoreId,
+                backupCreatedAt = block.BackupCreatedAt,
+                restoredAt = block.RestoredAt
+            }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+    catch (Exception)
+    {
+        return Results.Json(new
+        {
+            status = "not-ready",
+            code = "RECOVERY_GATE_UNREADABLE"
+        }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+});
 
 app.MapMcp().RequireAuthorization();
 

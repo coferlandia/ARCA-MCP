@@ -1,204 +1,85 @@
 # dcArca.McpServer
 
-`dcArca.McpServer` expone las operaciones de facturación electrónica de `dcArca.Core` como tools MCP sobre HTTP, protegidas con API keys Bearer y scopes.
+`dcArca.McpServer` expone facturación electrónica ARCA como tools MCP HTTP stateless, protegidas por API keys Bearer, scopes y grants de contexto.
 
-## Arquitectura
+Contrato actual: `arca-mcp/1.0`.
 
-```text
-SecretarIA -- API key --> dcArca.McpServer
-   |
-   v
-dcArca.Core
-   |
-   +--> WSAA
-   +--> WSFEv1
-   +--> Padrón ARCA
-   +--> creadorpdf
-```
+## Modelo de autoridad
 
-El servidor administra credenciales propias con secreto visible una sola vez, hash persistido, scopes y revocación inmediata. Las emisiones recomendadas además usan una `idempotencyKey` durable para impedir que un retry produzca otro comprobante.
-
-## Requisitos
-
-- .NET 10 SDK para compilar desde código;
-- certificado ARCA/PFX válido para el ambiente elegido;
-- servicios ARCA correspondientes autorizados para ese certificado;
-- un punto de venta habilitado para WSFE.
-
-## Compilar
-
-```bash
-dotnet restore dcArca.McpServer/dcArca.McpServer.csproj
-dotnet build dcArca.McpServer/dcArca.McpServer.csproj -c Release
-```
-
-Docker:
-
-```bash
-docker build -f dcArca.McpServer/Dockerfile -t dcarca-mcpserver .
-```
-
-El `docker-compose.yml` de la raíz es deliberadamente genérico y no contiene dominios, redes privadas ni secretos de producción.
-
-## Configuración
-
-Partir de `dcArca.McpServer/appsettings.example.json`.
-
-Configuración principal:
-
-```json
-{
-  "dcArcaConfig": {
-    "Cuit": "TU_CUIT",
-    "CertificatePath": "/certs/certificado.pfx",
-    "CertificatePassword": "DESDE_SECRET_MANAGER",
-    "WsaaUrl": "https://wsaahomo.afip.gov.ar/ws/services/LoginCms",
-    "WsfeUrl": "https://wswhomo.afip.gov.ar/wsfev1/service.asmx",
-    "PadronUrl": "https://awshomo.afip.gov.ar/sr-padron/webservices/personaServiceA5",
-    "PuntoVenta": 1
-  },
-  "ApiKeys": { "Directory": "/data" },
-  "EmissionIdempotency": { "Directory": "/data/emission-idempotency" },
-  "Pdf": {
-    "BaseUrl": "http://creadorpdf:8080",
-    "ApiKey": "DESDE_SECRET_MANAGER"
-  }
-}
-```
-
-Variables de entorno equivalentes:
-
-```bash
-ApiKeys__Directory=/data
-EmissionIdempotency__Directory=/data/emission-idempotency
-Pdf__BaseUrl=http://creadorpdf:8080
-Pdf__ApiKey=...
-dcArcaConfig__Cuit=...
-dcArcaConfig__CertificatePath=/certs/certificado.pfx
-dcArcaConfig__CertificatePassword=...
-dcArcaConfig__WsaaUrl=...
-dcArcaConfig__WsfeUrl=...
-dcArcaConfig__PadronUrl=...
-dcArcaConfig__PuntoVenta=1
-```
-
-No guardar PFX, passwords, tokens, client secrets ni configuración privada en el repositorio.
-
-### Homologación vs producción
-
-Use certificado y endpoints del mismo ambiente. No mezcle un certificado de homologación con endpoints productivos.
-
-## API keys y scopes
-
-Scopes soportados:
-
-- `arca:consultar`: lectura y regeneración de documentos existentes;
-- `arca:facturar`: emisión.
-
-Son independientes. `arca:facturar` **no implica** `arca:consultar`.
-
-La gestión se realiza con `dcArca.Cli create-key`, `list-keys` y `revoke-key`. El secreto pertenece al backend consumidor y nunca a un navegador o usuario final.
-
-## Endpoint MCP
-
-El transporte HTTP es stateless y se publica en la raíz `/`.
-
-Sin una key válida el endpoint devuelve 401. Cuando un tool requiere un scope que la key no posee, el SDK MCP lo oculta de `tools/list` y rechaza llamadas directas.
-
-## Tools
-
-### Lectura — scope `arca:consultar`
-
-#### `consultar_ultimo_comprobante`
-
-Consulta el último número autorizado para el tipo indicado y el punto de venta configurado.
-
-#### `consultar_comprobante`
-
-Consulta un comprobante ya emitido. La respuesta puede incluir CAE, importes, moneda/cotización, IVA, tributos, fechas y observaciones.
-
-#### `generar_pdf_comprobante`
-
-Genera o regenera el PDF de un comprobante ya autorizado.
-
-Parámetros principales:
+La identidad de una operación fiscal combina:
 
 ```text
-numeroComprobante
-tipoComprobante
-templateId
-templateVersion
-templateData
+consumerId + contextId + ambiente + CUIT representado + PV + tipo
 ```
 
-El flujo es estrictamente:
+La serie fiscal se coordina por:
 
 ```text
-FECompConsultar -> FiscalDocumentSnapshot -> creadorpdf
+ambiente + CUIT representado + PV + tipo
 ```
 
-Nunca ejecuta `FECAESolicitar` ni el sequencer de emisión. Sirve tanto para el render separado inmediatamente después de emitir como para reenvíos históricos.
+Una API key no identifica una credencial fiscal. La key autentica un `consumerId` estable y sus grants; el servidor resuelve el `contextId` y una `assignmentRevision` server-owned hacia una referencia opaca de certificado.
 
-#### `consultar_condiciones_iva`
+Las operaciones idempotentes persisten esa revisión histórica: rotar una API key o certificado no redirige un retry ya existente.
 
-Consulta condiciones de IVA válidas para un receptor y tipo de comprobante.
+## Tools contractuales
 
-#### `consultar_padron`
+### `arca:consultar`
 
-Consulta información registral de un CUIT en el padrón autorizado.
+- `obtener_capacidades_fiscales` — capacidades locales autorizadas; no prueba habilitación remota.
+- `diagnosticar_contexto_fiscal` — probe/diagnóstico no emisor.
+- `consultar_operacion` — lectura durable por `operationId` o `idempotencyKey`.
+- `reconciliar_operacion` — consulta oficial + comparación; nunca emite.
+- `consultar_ultimo_comprobante`.
+- `consultar_comprobante`.
+- `generar_pdf_comprobante`.
+- `consultar_condiciones_iva`.
+- `consultar_padron`.
 
-### Emisión — scope `arca:facturar`
+### `arca:facturar`
 
-Las tres tools recomendadas de emisión requieren `idempotencyKey`:
+- `validar_comprobante` — preflight determinístico, sin numeración ni side effect.
+- `emitir_comprobante`.
+- `emitir_comprobante_avanzado`.
+- `emitir_comprobante_con_pdf`.
+
+`solicitar_cae` se conserva sólo como superficie histórica de compatibilidad pero el MCP devuelve `LOW_LEVEL_EMISSION_DISABLED`; elegir el número desde el caller rompería la reserva durable.
+
+`arca:facturar` no implica `arca:consultar`, ni al revés.
+
+## Emisión segura
+
+Flujo simplificado:
 
 ```text
-emitir_comprobante
-emitir_comprobante_avanzado
-emitir_comprobante_con_pdf
+preflight
+ -> identidad/contexto/grant
+ -> operation namespace
+ -> reserva durable de serie
+ -> NumberAssigned
+ -> revalidación FECompUltimoAutorizado
+ -> Submitting
+ -> FECAESolicitar
+ -> Authorized | FiscalRejected | Uncertain
 ```
 
-Una key repetida con el mismo request fiscal recupera la operación existente. La misma key con datos fiscales diferentes devuelve `IDEMPOTENCY_KEY_REUSED` sin llamar a ARCA.
+Antes de cruzar el side effect, la reserva ya está persistida. `Submitting`/`Uncertain` mantienen la serie bloqueada.
 
-#### `emitir_comprobante`
+Una segunda key sobre la misma serie no avanza mientras exista una operación pendiente.
 
-Caso simple. No recibe número de comprobante: el servidor coordina la numeración y la persiste antes del side effect fiscal.
+## Single writer V1
 
-#### `emitir_comprobante_avanzado`
+La topología filesystem soportada admite un único proceso escritor por store. `FileSystemFiscalSeriesCoordinator` mantiene un lease exclusivo `writer.lock`; un segundo proceso sobre el mismo store falla con `SERIES_WRITER_BUSY` antes de aceptar trabajo fiscal.
 
-Recibe `dcFacturaRequest` completo para múltiples alícuotas, exentos/no gravados, tributos, moneda, servicios y notas. `NumeroComprobante` recibido es ignorado y se asigna server-side.
+Esto no coordina sistemas externos que llamen a ARCA usando el mismo PV. El PV administrado debe considerarse dedicado; una revalidación inmediatamente antes del envío detecta drift y bloquea fail-closed.
 
-#### `emitir_comprobante_con_pdf`
+No se declara soporte multi-host mediante NFS/directorio compartido.
 
-Compone emisión fiscal idempotente + generación PDF.
+## Idempotencia y outcomes
 
-El PDF es un side effect posterior. Un resultado:
+La `idempotencyKey` se hashea y namespacia por `consumerId + contextId`; nunca se persiste en claro.
 
-```text
-Fiscal = Authorized
-PDF = Failed
-```
-
-significa que la factura ya existe. Un retry con la misma `idempotencyKey` recupera la misma autorización y reintenta sólo el render.
-
-#### `solicitar_cae` — bajo nivel
-
-Permite elegir manualmente el número fiscal. Se conserva para integraciones avanzadas que coordinan por su cuenta numeración e idempotencia. No es el flujo recomendado para callers generales ni retries automáticos.
-
-## Idempotencia durable
-
-ARCA-MCP almacena únicamente la información mínima necesaria para proteger el side effect fiscal:
-
-```text
-hash de idempotencyKey
-hash determinístico del request fiscal
-tipo / punto de venta / número asignado
-estado
-resultado fiscal mínimo
-```
-
-No almacena la key en claro, PDFs, `templateData`, datos de Mercado Pago, delivery, certificados, tokens WSAA ni payloads SOAP completos.
-
-Estados:
+Estados internos:
 
 ```text
 Created
@@ -209,66 +90,113 @@ FiscalRejected
 Uncertain
 ```
 
-El número se persiste como `NumberAssigned` antes de iniciar el side effect y `Submitting` se persiste antes de llamar a ARCA.
+Outcomes de contrato:
 
-Ante `Submitting` o `Uncertain`, un retry consulta exclusivamente ese mismo tipo/número con `FECompConsultar`. Si ARCA lo confirma, devuelve `RecoveredSuccess`; si todavía no puede confirmarse, permanece `Uncertain` y **no solicita otro CAE**.
+- `InvalidRequest` — fallo determinístico antes del side effect.
+- `FailedBeforeSubmission` — no hubo envío comprobado, aunque puede existir una reserva según fase.
+- `FiscalRejected` — rechazo fiscal terminal.
+- `Uncertain` — el envío pudo ocurrir o falta evidencia.
+- `Authorized` — autorización terminal.
+- `RecoveredSuccess` — operación previamente ambigua confirmada por lectura fiscal equivalente.
 
-El fingerprint fiscal excluye número server-side, template, datos visuales y PDF. Por eso el mismo comprobante puede volver a renderizarse sin ser una nueva emisión.
+Una consulta por número/CAE no basta para `RecoveredSuccess`: debe coincidir con la evidencia fiscal persistida. Mismatch o evidencia insuficiente mantienen `Uncertain` y la reserva.
 
-Detalles operativos: `docs/MCP_IDEMPOTENCY.md`.
+## Recuperación de operación
 
-## Numeración y concurrencia
-
-Las emisiones recomendadas serializan la secuencia por:
+Ante timeout/respuesta perdida:
 
 ```text
-(CUIT emisor, punto de venta, tipo de comprobante)
+emitir
+ -> consultar_operacion
+ -> reconciliar_operacion si sigue incierta
+ -> nunca un segundo FECAESolicitar ciego
 ```
 
-El lock de numeración es **in-process**. El store de idempotencia es durable en filesystem y protege retries/restarts sobre el mismo volumen, pero no convierte el sistema en un coordinador multi-host. Varias réplicas escritoras compartiendo el mismo punto de venta requieren coordinación distribuida o puntos de venta dedicados.
+`operationId` es una referencia opaca durable devuelta por el MCP y puede persistirse en el consumidor.
 
-## Resultado incierto y reconciliación
+## Multiemisor y credenciales
 
-`dcFacturaResponse.EmissionOutcome` puede indicar:
+Los contextos fiscales se administran server-side. Una assignment candidata sólo puede activarse después de un probe no emisor que autentica contra WSFE y confirma el PV.
 
-- `Authorized`;
-- `FiscalRejected`;
-- `RecoveredSuccess`;
-- `Uncertain`.
+Dos contextos pueden compartir la misma serie fiscal si representan el mismo ambiente/CUIT/PV/tipo; eso no les da los mismos grants ni el mismo namespace idempotente.
 
-Si el transporte falla durante `FECAESolicitar`, `dcArca.Core` ya intenta reconciliar el mismo comprobante. Además, la capa MCP persiste la identidad de la operación, por lo que un retry posterior conserva tipo/número y vuelve a consultar antes de considerar cualquier nueva emisión.
+Cambiar CUIT/titular fiscal requiere otro contexto. Cambiar sólo la credencial que representa al mismo emisor crea otra `assignmentRevision`.
 
-## Cache WSAA
+## PDF
 
-Por defecto el TA se mantiene en memoria. No se persisten `token/sign` silenciosamente.
+El PDF es un side effect documental posterior al fiscal. El snapshot fiscal V2 diferencia procedencia/completitud y nunca rellena silenciosamente evidencia ausente con valores inventados.
 
-Si el host necesita persistencia entre procesos del mismo equipo, puede inyectar `FileSystemWsaaTokenStore`. Para protección cifrada o coordinación multi-host, implemente `IWsaaTokenStore` en el host.
+Caso válido:
+
+```text
+Fiscal = Authorized
+PDF = Failed
+```
+
+La factura ya existe. Un retry con la misma operación recupera la misma autorización y reintenta sólo el render. `generar_pdf_comprobante` consulta ARCA y nunca emite.
+
+`templateData` es presentación; el bloque `fiscal` y aliases fiscales están reservados por el servidor.
+
+## Persistencia
+
+Configurar almacenamiento durable para:
+
+```text
+ApiKeys__Directory
+EmissionIdempotency__Directory
+FiscalContexts__Directory
+Recovery__Directory
+```
+
+Ver `MCP_CONFIGURATION.md` y `OPERATIONS_RECOVERY.md`.
+
+## Restore fail-closed
+
+El restore soportado de un backup del store fiscal crea un recovery gate separado. Si el backup es anterior a autorizaciones posteriores, el proceso puede estar vivo pero:
+
+- `/health/ready` devuelve 503 `RESTORE_RECONCILIATION_REQUIRED`;
+- nuevas emisiones se bloquean antes de resolver credenciales/crear operaciones;
+- consulta, diagnóstico y reconciliación siguen disponibles;
+- sólo una completion explícita con referencia de evidencia levanta el gate.
+
+Copiar archivos antiguos directamente sobre el store no es un restore soportado.
 
 ## Health
 
 - `GET /health/live`: proceso vivo.
-- `GET /health/ready`: configuración esencial cargada y servidor listo.
+- `GET /health/ready`: listo para nuevas emisiones; puede ser 503 durante recovery.
 
-No llaman a ARCA y no devuelven secretos ni CUIT.
+No llaman a ARCA ni revelan secretos/CUIT.
+
+## Docker
+
+```bash
+docker compose config -q
+docker build -f dcArca.McpServer/Dockerfile -t dcarca-mcpserver .
+```
+
+El compose genérico no configura TLS/proxy/red privada. En Cadencia, TLS se termina mediante Traefik y el contenedor queda en redes privadas.
 
 ## Seguridad
 
-- TLS obligatorio en producción.
-- No commitear certificados, PFX, passwords ni API keys.
-- Usar una key distinta por consumidor y revocarla inmediatamente ante una exposición.
-- No entregar secretos a frontend, LLM o usuario final.
-- Aplicar mínimo privilegio en scopes.
-- No registrar `idempotencyKey` en claro; usar su hash para correlación.
-- Preferir las tools idempotentes recomendadas sobre `solicitar_cae`.
-- Mantener certificados y secretos en mecanismos provistos por el host.
+- PFX/password/API keys/token-sign fuera del repositorio y del payload MCP.
+- mínimo privilegio en scopes + grants.
+- secretos visibles una sola vez y hashes en persistencia de keys.
+- no registrar idempotency key en claro ni payload fiscal/SOAP completo.
+- no usar una assignment nueva como fallback de una operación histórica.
+- no liberar reservas inciertas para “destrabar” numeración.
+- no interpretar corrupción/schema desconocido como store vacío.
 
-## Referencias internas
+## Referencias
 
-- `docs/MCP_AUTHORIZATION.md`
-- `docs/MCP_NUMBERING.md`
-- `docs/MCP_CONFIGURATION.md`
-- `docs/MCP_IDEMPOTENCY.md`
-- `docs/CREADORPDF_INTEGRATION.md`
-- `docs/WSFE_RECONCILIATION.md`
-- `docs/WSAA_CACHE.md`
-- `docs/REPOSITORY_SECURITY.md`
+- `SECRETARIA_HANDOFF.md`
+- `EPIC14_ACCEPTANCE.md`
+- `OPERATIONS_RECOVERY.md`
+- `MCP_AUTHORIZATION.md`
+- `MCP_FISCAL_CONTEXTS.md`
+- `MCP_NUMBERING.md`
+- `MCP_CONFIGURATION.md`
+- `MCP_IDEMPOTENCY.md`
+- `CREADORPDF_INTEGRATION.md`
+- `WSFE_RECONCILIATION.md`
+- `EMISSION_STORE_MIGRATION.md`
