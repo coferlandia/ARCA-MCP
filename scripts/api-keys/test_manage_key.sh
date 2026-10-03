@@ -9,6 +9,10 @@ if [[ ! -f "$RUNNER" ]]; then
   exit 1
 fi
 
+help_output="$(bash "$RUNNER" --help)"
+grep -q '^Usage:' <<<"$help_output"
+grep -q 'create --directory DIR' <<<"$help_output"
+
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/capture" "$tmp/store"
