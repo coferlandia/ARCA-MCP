@@ -61,6 +61,11 @@ if (($# == 0)); then
   exit 2
 fi
 
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
 command_name="$1"
 shift
 
