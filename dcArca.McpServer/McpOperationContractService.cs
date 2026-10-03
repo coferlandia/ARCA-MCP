@@ -39,9 +39,9 @@ public sealed class McpOperationContractService
         var context = authorized.Context;
         var operations = new List<string>();
         if (HasScope(principal, "arca:consultar") && HasGrant(principal, context.ContextId, "consultar", allowLegacy: true))
-            operations.AddRange(["capabilities", "validate", "diagnose", "consult", "reconcile", "render-pdf"]);
+            operations.AddRange(["capabilities", "diagnose", "consult", "reconcile", "render-pdf"]);
         if (HasScope(principal, "arca:facturar") && HasGrant(principal, context.ContextId, "facturar", allowLegacy: true))
-            operations.Add("emit");
+            operations.AddRange(["validate", "emit"]);
 
         return new McpCapabilitiesResult(
             ArcaMcpContract.Version,
@@ -112,7 +112,10 @@ public sealed class McpOperationContractService
             "consultar",
             cancellationToken);
         var context = authorized.Context;
-        var operationSummaries = await _inspector.ListByContextAsync(context.ContextId, cancellationToken);
+        var operationSummaries = await _inspector.ListByContextAsync(
+            authorized.ConsumerId,
+            context.ContextId,
+            cancellationToken);
         var diagnostics = new List<McpCredentialAssignmentDiagnostic>();
         FiscalAssignmentValidationResult? activeProbe = null;
         var localReady = context.ActiveAssignment is not null
@@ -162,9 +165,7 @@ public sealed class McpOperationContractService
                 blockers));
         }
 
-        var remoteState = activeProbe?.Verified == true
-            ? "verified"
-            : activeProbe is null ? "not-verified" : "not-verified";
+        var remoteState = activeProbe?.Verified == true ? "verified" : "not-verified";
         var safeMessage = activeProbe?.Verified == true
             ? "La asignación activa fue verificada remotamente sin emitir comprobantes."
             : "La autorización fiscal remota de la asignación activa no está verificada en este diagnóstico.";
