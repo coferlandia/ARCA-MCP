@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+body { font-family: Arial, sans-serif; font-size: 12px; margin: 32px; color: #222; }
+.header { display: flex; justify-content: space-between; border-bottom: 2px solid #222; padding-bottom: 15px; margin-bottom: 20px; }
+.tipo { font-size: 30px; font-weight: bold; }
+h1 { margin: 0 0 8px 0; }
+table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+th, td { border: 1px solid #bbb; padding: 7px; }
+th { text-align: left; }
+.num { text-align: right; }
+.totales { margin-top: 20px; margin-left: auto; width: 300px; }
+.fiscal { margin-top: 30px; border-top: 1px solid #aaa; padding-top: 15px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1>{{ emisor.razonSocial }}</h1>
+    <div>{{ emisor.domicilio }}</div>
+    <div>CUIT: {{ fiscal.emisorCuit }}</div>
+  </div>
+  <div>
+    <div class="tipo">{% if fiscal.tipoComprobante == 1 %}A{% elif fiscal.tipoComprobante == 6 %}B{% elif fiscal.tipoComprobante == 11 %}C{% else %}-{% endif %}</div>
+    <strong>Factura</strong><br>
+    Punto de venta: {{ fiscal.puntoVenta }}<br>
+    Comprobante: {{ fiscal.numeroComprobante }}<br>
+    Fecha: {{ fiscal.fechaComprobante }}
+  </div>
+</div>
+
+<h3>Receptor</h3>
+<div>{{ receptor.razonSocial }}</div>
+{% if receptor.domicilio %}<div>{{ receptor.domicilio }}</div>{% endif %}
+<div>Documento: {{ fiscal.documentoReceptorNumero }}</div>
+
+<table>
+<thead>
+<tr><th>Descripción</th><th class="num">Cantidad</th><th class="num">Precio unitario</th><th class="num">Importe</th></tr>
+</thead>
+<tbody>
+{% for item in conceptos %}
+<tr>
+  <td>{{ item.descripcion }}</td>
+  <td class="num">{{ item.cantidad }}</td>
+  <td class="num">{{ item.precioUnitario }}</td>
+  <td class="num">{{ item.importe }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+
+<table class="totales">
+<tr><th>Neto</th><td class="num">{{ fiscal.importeNeto }}</td></tr>
+<tr><th>IVA</th><td class="num">{{ fiscal.importeIva }}</td></tr>
+<tr><th>Tributos</th><td class="num">{{ fiscal.importeTributos }}</td></tr>
+<tr><th>Total</th><td class="num"><strong>{{ fiscal.importeTotal }}</strong></td></tr>
+</table>
+
+<div class="fiscal">
+  <strong>CAE:</strong> {{ fiscal.cae }}<br>
+  <strong>Vencimiento CAE:</strong> {{ fiscal.caeVencimiento }}<br>
+  <strong>Moneda:</strong> {{ fiscal.monedaId }}
+</div>
+</body>
+</html>

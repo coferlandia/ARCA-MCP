@@ -1,0 +1,62 @@
+{
+  "type": "object",
+  "required": ["emisor", "receptor", "conceptos", "fiscal"],
+  "properties": {
+    "emisor": {
+      "type": "object",
+      "required": ["razonSocial", "domicilio"],
+      "properties": {
+        "razonSocial": { "type": "string" },
+        "domicilio": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "receptor": {
+      "type": "object",
+      "required": ["razonSocial"],
+      "properties": {
+        "razonSocial": { "type": "string" },
+        "domicilio": {
+          "anyOf": [
+            { "type": "string" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "conceptos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["descripcion", "cantidad", "precioUnitario", "importe"],
+        "properties": {
+          "descripcion": { "type": "string" },
+          "cantidad": { "type": "number" },
+          "precioUnitario": { "type": "number" },
+          "importe": { "type": "number" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "fiscal": {
+      "type": "object",
+      "required": [
+        "emisorCuit",
+        "puntoVenta",
+        "tipoComprobante",
+        "numeroComprobante",
+        "fechaComprobante",
+        "importeNeto",
+        "importeIva",
+        "importeTributos",
+        "importeTotal",
+        "monedaId",
+        "cae",
+        "caeVencimiento"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
