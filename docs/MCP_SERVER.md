@@ -148,7 +148,7 @@ FiscalContexts__Directory
 Recovery__Directory
 ```
 
-Ver `MCP_CONFIGURATION.md` y `OPERATIONS_RECOVERY.md`.
+Ver `MCP_CONFIGURATION.md`, `API_KEYS_RUNBOOK.md` y `OPERATIONS_RECOVERY.md`.
 
 ## Restore fail-closed
 
@@ -175,6 +175,8 @@ docker compose config -q
 docker build -f dcArca.McpServer/Dockerfile -t dcarca-mcpserver .
 ```
 
+La imagen también contiene `/tools/dcArca.Cli.dll` para operaciones administrativas explícitas como gestión de API keys. El proceso normal sigue arrancando únicamente `dcArca.McpServer.dll`.
+
 El compose genérico no configura TLS/proxy/red privada. En Cadencia, TLS se termina mediante Traefik y el contenedor queda en redes privadas.
 
 ## Seguridad
@@ -192,6 +194,7 @@ El compose genérico no configura TLS/proxy/red privada. En Cadencia, TLS se ter
 - `SECRETARIA_HANDOFF.md`
 - `EPIC14_ACCEPTANCE.md`
 - `OPERATIONS_RECOVERY.md`
+- `API_KEYS_RUNBOOK.md`
 - `MCP_AUTHORIZATION.md`
 - `MCP_FISCAL_CONTEXTS.md`
 - `MCP_NUMBERING.md`
