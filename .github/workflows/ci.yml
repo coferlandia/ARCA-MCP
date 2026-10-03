@@ -41,7 +41,11 @@ jobs:
           python3 -m unittest scripts/homologacion/test_epic14_homologacion.py
 
       - name: Validate fiscal smoke harness
+        shell: bash
         run: |
+          set -euo pipefail
+          bash -n scripts/smoke/fiscal_smoke.sh
+          python3 -m py_compile scripts/smoke/fiscal_smoke.py
           python3 -m unittest scripts/smoke/test_fiscal_smoke.py
 
       - name: Restore Core tests
