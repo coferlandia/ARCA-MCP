@@ -8,6 +8,7 @@ Este runbook describe la topología soportada por ARCA-MCP V1. No habilita produ
 - almacenamiento local durable para operaciones/reservas, contextos fiscales, API keys y recovery state;
 - punto de venta dedicado al servicio; escritores externos sobre la misma serie no participan del lock local;
 - `FileSystemFiscalSeriesCoordinator` mantiene un lease exclusivo `writer.lock` y reservas por serie;
+- el host mantiene además un runtime lease en `Recovery__Directory`; restore toma ese lease en modo exclusivo para impedir carrera con startup/live host;
 - no se declara soporte multi-host mediante un directorio compartido/NFS;
 - TLS se termina en el reverse proxy/host; el contenedor escucha HTTP interno;
 - certificados, passwords y API keys permanecen fuera del repositorio.
@@ -17,7 +18,7 @@ Rutas Docker recomendadas:
 ```text
 /data/emission-idempotency   operaciones + reservas
 /data/fiscal-contexts        catálogo server-owned de contextos/assignments
-/data/recovery               gate e historial de restores
+/data/recovery               gate, maintenance lease e historial de restores
 /data                        store de API keys en la topología legacy actual
 ```
 
@@ -30,6 +31,28 @@ Rutas Docker recomendadas:
 
 Durante ese bloqueo siguen permitidas las herramientas de consulta, diagnóstico y reconciliación autorizadas. Las rutas de emisión fallan antes de materializar credenciales o crear una operación nueva.
 
+## Observabilidad segura
+
+El host emite eventos estructurados mínimos para operación:
+
+- transición/estado/outcome de la operación fiscal;
+- reserva activa, liberada o bloqueada;
+- errores de store/coordinación por tipo de excepción;
+- estado/código del render PDF;
+- ambiente y tipo de comprobante cuando son necesarios para diagnóstico.
+
+Para correlación se usan `OperationRef` y `ContextRef` opacos/hash truncados. Los eventos **no** incluyen:
+
+- CUIT del emisor o receptor;
+- CAE;
+- número de documento/receptor;
+- `idempotencyKey` en claro;
+- rutas/passwords de PFX;
+- token/sign WSAA;
+- request fiscal, templateData, XML/SOAP o PDF.
+
+Los logs no sustituyen el store durable ni son fuente de verdad para liberar una reserva o completar un restore.
+
 ## Backup consistente del store de emisiones
 
 Detener primero el escritor. El comando verifica que puede obtener el lease exclusivo y falla con `SERIES_WRITER_BUSY` si otro proceso continúa activo.
@@ -41,6 +64,8 @@ dotnet dcArca.McpServer.dll backup-emission-store \
 ```
 
 El backup contiene un `backup-manifest.json` con id, timestamp, conteos y SHA-256 de cada archivo durable. Locks y temporales no se copian.
+
+El manifest provee integridad contra corrupción/modificación accidental del contenido respecto del manifest; no es una firma criptográfica de autenticidad. La protección del repositorio de backups, acceso y retención pertenece al host.
 
 El catálogo `/data/fiscal-contexts`, las API keys y la configuración/secret references se respaldan por separado con el servicio detenido o mediante un snapshot consistente del host. No copiar PFX/passwords a GitHub ni a los manifests del store fiscal.
 
@@ -57,12 +82,14 @@ dotnet dcArca.McpServer.dll restore-emission-store \
 
 El comando:
 
-1. valida manifest, tamaño y SHA-256;
-2. demuestra que no hay writer activo;
-3. crea un recovery gate fuera del store restaurado;
-4. copia a staging y valida operaciones/reservas;
-5. intercambia el directorio por rename;
-6. conserva el store anterior como rollback local `*.pre-restore-<restoreId>` cuando existía.
+1. toma el maintenance lease exclusivo de `/data/recovery`; si el host está vivo falla con `RECOVERY_RUNTIME_ACTIVE`;
+2. valida manifest, tamaño y SHA-256;
+3. demuestra que no hay writer activo y conserva ese lock durante la preparación del staging;
+4. crea un recovery gate fuera del store restaurado;
+5. copia a staging y valida operaciones/reservas;
+6. libera el writer lock sólo en la ventana mínima necesaria para el rename; el maintenance lease sigue impidiendo arrancar un host actual;
+7. intercambia el directorio por rename;
+8. conserva el store anterior como rollback local `*.pre-restore-<restoreId>` cuando existía.
 
 Si falla luego de crear el gate, el gate permanece bloqueado deliberadamente hasta que un operador determine qué directorio quedó activo.
 
@@ -108,6 +135,8 @@ dotnet dcArca.McpServer.dll complete-emission-restore \
 ```
 
 `--evidence-reference` es obligatorio. El completion se guarda bajo `recovery/history`; no debe contener CUIT, CAE, payload fiscal, secretos ni PII.
+
+La completion es crash-idempotent: si el historial quedó persistido y el proceso murió antes de borrar el gate, repetir el comando conserva la evidencia original y termina de levantar el bloqueo. Un historial corrupto mantiene el gate fail-closed.
 
 ## Operación `Uncertain` / mismatch
 
