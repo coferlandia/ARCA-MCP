@@ -64,9 +64,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test_cert="$RUNNER_TEMP/test-cert-placeholder.pfx"
+          : > "$test_cert"
+
           docker run -d --name dcarca-mcp-ci \
             -e ASPNETCORE_ENVIRONMENT=Testing \
             -v "$PWD/dcArca.McpServer/appsettings.Testing.json:/app/appsettings.Testing.json:ro" \
+            -v "$test_cert:/app/test-cert-placeholder.pfx:ro" \
             -p 18080:8080 \
             dcarca-mcpserver:ci
           cleanup() {
