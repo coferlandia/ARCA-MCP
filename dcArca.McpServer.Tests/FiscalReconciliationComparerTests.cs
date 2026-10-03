@@ -51,6 +51,19 @@ public class FiscalReconciliationComparerTests
     }
 
     [Fact]
+    public void OneCentDifference_IsMismatch()
+    {
+        var request = Request();
+        var operation = Operation(request);
+        var response = ResponseFrom(request, 42);
+        response.ImporteTotal += 0.01m;
+
+        var result = FiscalReconciliationComparer.Compare(operation, response);
+
+        Assert.Equal(FiscalReconciliationMatch.Mismatch, result.Match);
+    }
+
+    [Fact]
     public void LegacyEvidence_IsInsufficient()
     {
         var request = Request();
@@ -109,7 +122,6 @@ public class FiscalReconciliationComparerTests
         ImporteTotal = 121m,
         ImporteNoGravado = 0m,
         ImporteExento = 0m,
-        ImporteTributos = 0m,
         AlicuotaIva = dcAlicuotaIva.Veintiuno,
         MonedaId = "PES",
         MonedaCotizacion = 1m,
