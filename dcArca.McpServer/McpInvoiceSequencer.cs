@@ -95,7 +95,18 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
             if (replay is not null) return replay;
 
             if (record.State is EmissionIdempotencyState.Submitting or EmissionIdempotencyState.Uncertain)
+            {
+                if (record.FiscalEvidence.State == FiscalEvidenceState.LegacyUnavailable)
+                {
+                    return Error(
+                        "LEGACY_RECONCILIATION_REQUIRED",
+                        "La operación legacy quedó pendiente sin evidencia fiscal comparable y requiere resolución manual antes de continuar.",
+                        dcEmissionOutcome.Uncertain,
+                        record.NumeroComprobante ?? 0);
+                }
+
                 return await ReconcileRecordedAttemptAsync(record, tipo, cancellationToken);
+            }
 
             if (!record.NumeroComprobante.HasValue)
             {
