@@ -38,7 +38,25 @@ public sealed class CreadorPdfException : Exception
     {
         FailureKind = failureKind;
         ProviderStatusCode = providerStatusCode;
-        ProviderErrorCode = string.IsNullOrWhiteSpace(providerErrorCode) ? null : providerErrorCode;
+        ProviderErrorCode = NormalizeProviderErrorCode(providerErrorCode);
+    }
+
+    private static string? NormalizeProviderErrorCode(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 128)
+            return null;
+
+        foreach (var character in value)
+        {
+            var allowed = character is >= 'a' and <= 'z'
+                or >= 'A' and <= 'Z'
+                or >= '0' and <= '9'
+                or '_' or '-' or '.' or ':';
+            if (!allowed)
+                return null;
+        }
+
+        return value;
     }
 }
 
@@ -140,14 +158,17 @@ internal static class CreadorPdfHttpErrors
                 return null;
             }
 
-            var value = code.GetString();
-            return string.IsNullOrWhiteSpace(value) || value.Length > 128 ? null : value;
+            return code.GetString();
         }
         catch (JsonException)
         {
             return null;
         }
         catch (DecoderFallbackException)
+        {
+            return null;
+        }
+        catch (IOException)
         {
             return null;
         }
