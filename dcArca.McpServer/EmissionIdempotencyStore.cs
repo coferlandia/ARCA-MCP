@@ -282,11 +282,9 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
 
         if (IsTerminal(existing.State))
         {
-            // A terminal fiscal result is authoritative. Repeated writes of the same terminal
-            // state are idempotent and keep the first persisted result; any stale or competing
-            // transition must observe the winner instead of replacing it.
-            if (record.State == existing.State)
-                return;
+            // The first durable terminal result is authoritative, including its fiscal result
+            // metadata. Every later writer must observe that exact winner instead of silently
+            // replacing it or assuming its own same-state result was persisted.
             throw new EmissionTerminalStateConflictException(existing);
         }
 
