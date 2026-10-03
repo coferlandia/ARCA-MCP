@@ -39,13 +39,24 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
         string idempotencyKey,
         CancellationToken cancellationToken = default)
     {
-        if (!factura.TipoComprobante.HasValue)
-            return Error("TIPOC_INVALID", "TipoComprobante es obligatorio para emitir con numeración server-side.");
+        var preflight = dcFacturaPreflightValidator.Validate(factura);
+        if (!preflight.IsValid)
+        {
+            return Error(
+                preflight.Code ?? "INVALID_REQUEST",
+                preflight.Message ?? "La solicitud fiscal no supera la validación local.",
+                dcEmissionOutcome.InvalidRequest);
+        }
 
         if (string.IsNullOrWhiteSpace(idempotencyKey))
-            return Error("IDEMPOTENCY_KEY_REQUIRED", "idempotencyKey es obligatoria para emitir.");
+        {
+            return Error(
+                "IDEMPOTENCY_KEY_REQUIRED",
+                "idempotencyKey es obligatoria para emitir.",
+                dcEmissionOutcome.InvalidRequest);
+        }
 
-        var tipo = factura.TipoComprobante.Value;
+        var tipo = factura.TipoComprobante!.Value;
         var identity = _identityProvider.For(tipo);
         var requestHash = EmissionRequestFingerprint.RequestHash(factura);
         var keyHash = EmissionRequestFingerprint.OperationKeyHash(
@@ -111,7 +122,12 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
             if (!record.NumeroComprobante.HasValue)
             {
                 var ultimo = await _wsfe.FECompUltimoAutorizadoAsync(tipo, cancellationToken);
-                if (!ultimo.Success) return ultimo;
+                if (!ultimo.Success)
+                {
+                    if (ultimo.EmissionOutcome == dcEmissionOutcome.None)
+                        ultimo.EmissionOutcome = dcEmissionOutcome.FailedBeforeSubmission;
+                    return ultimo;
+                }
 
                 var numero = ultimo.NumeroComprobante + 1;
                 factura.NumeroComprobante = numero;
@@ -165,6 +181,19 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
                 : result.EmissionOutcome == dcEmissionOutcome.FiscalRejected
                     ? EmissionIdempotencyState.FiscalRejected
                     : EmissionIdempotencyState.Uncertain;
+
+            // Una respuesta inesperada/None luego de cruzar el límite de envío es incierta.
+            // InvalidRequest debería haber sido eliminada por preflight; si un adapter la devuelve
+            // después de Submitting tampoco se usa como prueba para reenviar automáticamente.
+            if (!result.Success
+                && result.EmissionOutcome is dcEmissionOutcome.None
+                    or dcEmissionOutcome.InvalidRequest
+                    or dcEmissionOutcome.FailedBeforeSubmission)
+            {
+                result.EmissionOutcome = dcEmissionOutcome.Uncertain;
+                if (string.IsNullOrWhiteSpace(result.Codigo)) result.Codigo = "EMISSION_UNCERTAIN";
+                state = EmissionIdempotencyState.Uncertain;
+            }
 
             await SaveOutcomeAsync(record, state, result, cancellationToken);
             return result;
@@ -235,7 +264,8 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
     private static dcFacturaResponse IdempotencyConflict()
         => Error(
             "IDEMPOTENCY_KEY_REUSED",
-            "La idempotencyKey ya fue utilizada con una solicitud o identidad fiscal diferente.");
+            "La idempotencyKey ya fue utilizada con una solicitud o identidad fiscal diferente.",
+            dcEmissionOutcome.InvalidRequest);
 
     private static dcFacturaResponse Error(
         string code,
