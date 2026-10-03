@@ -31,15 +31,17 @@ Endpoint:
   --url takes precedence over ARCA_MCP_URL. If neither is set, defaults to
   https://arca.cadencia.com.ar/. Remote endpoints must use HTTPS; plain HTTP is
   accepted only for localhost/127.0.0.1 development endpoints.
+
+Python:
+  The delegated smoke runner auto-detects a usable Python 3 launcher among
+  python3, python, and py -3 (including Git Bash on Windows).
 EOF
 }
 
-for command in curl python3; do
-  if ! command -v "$command" >/dev/null 2>&1; then
-    echo "ERROR: $command is required." >&2
-    exit 127
-  fi
-done
+if ! command -v curl >/dev/null 2>&1; then
+  echo "ERROR: curl is required." >&2
+  exit 127
+fi
 
 url="${ARCA_MCP_URL:-$DEFAULT_URL}"
 args=()
