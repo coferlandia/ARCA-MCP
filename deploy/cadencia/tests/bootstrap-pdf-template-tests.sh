@@ -149,6 +149,64 @@ run_failure() {
   fi
 }
 
+# Manifest JSON truncado => fail closed y cero create/publish.
+prepare_scenario invalid-json
+printf '{' > "$PDF_TEMPLATE_MANIFEST"
+invalid_json_output="$scenario_dir/output.txt"
+run_failure "$invalid_json_output" bash "$BOOTSTRAP"
+grep -q 'Manifest inválido' "$invalid_json_output"
+[[ ! -s "$FAKE_DOCKER_LOG" ]]
+
+# Versión no soportada => fail closed antes de mutar templates.
+prepare_scenario invalid-version
+python3 - "$PDF_TEMPLATE_MANIFEST" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+manifest = json.loads(path.read_text(encoding="utf-8"))
+manifest["version"] = 999
+path.write_text(json.dumps(manifest), encoding="utf-8")
+PY
+invalid_version_output="$scenario_dir/output.txt"
+run_failure "$invalid_version_output" bash "$BOOTSTRAP"
+grep -q 'version debe ser 1' "$invalid_version_output"
+[[ ! -s "$FAKE_DOCKER_LOG" ]]
+
+# Shape inválido de templates => fail closed.
+prepare_scenario invalid-shape
+cat > "$PDF_TEMPLATE_MANIFEST" <<'JSON'
+{"version":1,"templates":{}}
+JSON
+invalid_shape_output="$scenario_dir/output.txt"
+run_failure "$invalid_shape_output" bash "$BOOTSTRAP"
+grep -q 'templates debe ser una lista no vacía' "$invalid_shape_output"
+[[ ! -s "$FAKE_DOCKER_LOG" ]]
+
+# Referencia lógica duplicada => validar todo antes de cualquier create/publish.
+prepare_scenario duplicate-logical
+cat > "$PDF_TEMPLATE_MANIFEST" <<'JSON'
+{
+  "version": 1,
+  "templates": [
+    {"key":"factura-ar","version":"3","template":"factura-ar-v3.html","schema":"factura-ar-v3.schema.json"},
+    {"key":"factura-ar","version":"3","template":"factura-ar-v3.html","schema":"factura-ar-v3.schema.json"}
+  ]
+}
+JSON
+duplicate_output="$scenario_dir/output.txt"
+run_failure "$duplicate_output" bash "$BOOTSTRAP"
+grep -q 'referencia duplicada factura-ar:3' "$duplicate_output"
+[[ ! -s "$FAKE_DOCKER_LOG" ]]
+
+# Campo requerido ausente => fail closed.
+prepare_scenario missing-required
+cat > "$PDF_TEMPLATE_MANIFEST" <<'JSON'
+{"version":1,"templates":[{"key":"factura-ar","version":"3","template":"factura-ar-v3.html"}]}
+JSON
+missing_required_output="$scenario_dir/output.txt"
+run_failure "$missing_required_output" bash "$BOOTSTRAP"
+grep -q 'requiere key/version/template/schema' "$missing_required_output"
+[[ ! -s "$FAKE_DOCKER_LOG" ]]
+
 # Existing published => no-op and no management key required.
 prepare_scenario published
 cat > "$FAKE_STATE_FILE" <<'JSON'
