@@ -50,6 +50,8 @@ Certificados/
 # Passwords and secrets
 secrets.json
 *.secret
+scripts/homologacion/homologacion.env
+.homologation-evidence/
 
 # Windows image file caches
 Thumbs.db
