@@ -23,8 +23,6 @@ if (builder.Environment.EnvironmentName == "Testing")
         Path.GetTempPath(),
         "dcarca-mcp-host-tests",
         Guid.NewGuid().ToString("N"));
-    // WebApplicationFactory can start several independent hosts in parallel. Unless a test
-    // explicitly supplies persistence, isolate all fiscal topology owned by that host.
     emissionIdempotencyDirectory ??= Path.Combine(testHostRoot, "emission-idempotency");
     fiscalContextsDirectory ??= Path.Combine(testHostRoot, "fiscal-contexts");
     recoveryDirectory ??= Path.Combine(testHostRoot, "recovery");
@@ -84,12 +82,18 @@ builder.Services.AddHttpClient(nameof(FiscalAssignmentAuthorizationValidator), c
 {
     client.Timeout = TimeSpan.FromSeconds(20);
 });
-builder.Services.AddHttpClient<IPdfClient, PdfClient>(client =>
+
+static void ConfigurePdfHttpClient(HttpClient client, IConfiguration configuration)
 {
-    var baseUrl = builder.Configuration["Pdf:BaseUrl"];
+    var baseUrl = configuration["Pdf:BaseUrl"];
     if (!string.IsNullOrWhiteSpace(baseUrl)) client.BaseAddress = new Uri(baseUrl);
     client.Timeout = TimeSpan.FromSeconds(15);
-});
+}
+
+builder.Services.AddHttpClient<IPdfTemplateResolver, CreadorPdfTemplateResolver>(client =>
+    ConfigurePdfHttpClient(client, builder.Configuration));
+builder.Services.AddHttpClient<IPdfClient, PdfClient>(client =>
+    ConfigurePdfHttpClient(client, builder.Configuration));
 
 builder.Services.AddAuthentication(ApiKeyAuthenticationHandler.SchemeName)
     .AddScheme<ApiKeyAuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
@@ -113,8 +117,6 @@ builder.Services.AddMcpServer()
 
 var app = builder.Build();
 
-// Exclude restore maintenance for the complete host lifetime. Restore takes the same
-// recovery-directory lease exclusively, so it cannot race host startup or a live process.
 var recoveryGateService = app.Services.GetRequiredService<FileSystemEmissionRecoveryGate>();
 using var recoveryRuntimeLease = recoveryGateService.AcquireRuntimeLease();
 
@@ -143,8 +145,6 @@ await contextStore.InitializeLegacyAsync(new RepresentedFiscalContextRecord(
             "legacy-bootstrap")
     ]));
 
-// Initialize the concrete store/coordinator once. Runtime callers receive observable
-// decorators over these already-initialized singletons.
 var concreteEmissionStore = app.Services.GetRequiredService<FileSystemEmissionIdempotencyStore>();
 var concreteSeriesCoordinator = app.Services.GetRequiredService<FileSystemFiscalSeriesCoordinator>();
 await concreteSeriesCoordinator.InitializeAsync(concreteEmissionStore);

@@ -86,8 +86,8 @@ public sealed class ArcaTools
     public async Task<InvoiceWithPdfResult> EmitirComprobanteConPdf(
         [Description("Modelo fiscal completo. La numeración es asignada por el servidor.")] dcFacturaRequest factura,
         [Description("Clave idempotente estable para esta emisión fiscal. Repetirla con el mismo request recupera la misma operación.")] string idempotencyKey,
-        [Description("Id de la plantilla publicada en creadorpdf.")] string templateId,
-        [Description("Versión inmutable de la plantilla.")] string templateVersion,
+        [Description("Clave lógica estable de la plantilla (ej. factura-ar). Por compatibilidad también acepta temporalmente tpl_* legacy.")] string templateId,
+        [Description("Versión inmutable de la plantilla lógica.")] string templateVersion,
         [Description("Datos visuales de la plantilla. No puede contener el campo reservado fiscal.")] JsonElement templateData,
         [Description("Contexto fiscal autorizado. Puede omitirse sólo si existe exactamente uno permitido para la operación.")] string? contextId = null,
         CancellationToken cancellationToken = default)
@@ -126,8 +126,8 @@ public sealed class ArcaTools
     public async Task<InvoiceWithPdfResult> GenerarPdfComprobante(
         [Description("Número del comprobante ya emitido/autorizado.")] long numeroComprobante,
         [Description("Tipo de comprobante ARCA (ej: 1=Factura A, 6=Factura B, 11=Factura C).")] dcTipoComprobante tipoComprobante,
-        [Description("Id de la plantilla publicada en creadorpdf.")] string templateId,
-        [Description("Versión inmutable de la plantilla.")] string templateVersion,
+        [Description("Clave lógica estable de la plantilla (ej. factura-ar). Por compatibilidad también acepta temporalmente tpl_* legacy.")] string templateId,
+        [Description("Versión inmutable de la plantilla lógica.")] string templateVersion,
         [Description("Datos visuales originales de la plantilla. No puede contener el campo reservado fiscal.")] JsonElement templateData,
         [Description("Contexto fiscal autorizado. Puede omitirse sólo si existe exactamente uno permitido para la operación.")] string? contextId = null,
         CancellationToken cancellationToken = default)

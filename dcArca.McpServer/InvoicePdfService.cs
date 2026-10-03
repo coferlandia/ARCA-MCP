@@ -14,7 +14,11 @@ public sealed record PdfRenderResult(
     PdfRenderStatus Status,
     string? Base64,
     string? ErrorCode,
-    string? Message);
+    string? Message,
+    string? Provider = null,
+    int? ProviderStatusCode = null,
+    string? ProviderErrorCode = null,
+    PdfFailureKind? FailureKind = null);
 
 public sealed record InvoiceWithPdfResult(dcFacturaResponse Fiscal, PdfRenderResult Pdf);
 

@@ -58,6 +58,29 @@ jobs:
           bash -n scripts/api-keys/test_manage_key.sh
           bash scripts/api-keys/test_manage_key.sh
 
+      - name: Validate PDF template deploy assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n deploy/cadencia/bootstrap-pdf-template.sh
+          bash -n deploy/cadencia/tests/bootstrap-pdf-template-tests.sh
+          python3 - <<'PY'
+          import json, pathlib
+          root = pathlib.Path("deploy/cadencia/pdf-templates")
+          manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+          assert manifest.get("version") == 1
+          templates = manifest.get("templates")
+          assert isinstance(templates, list) and templates
+          seen = set()
+          for item in templates:
+              logical = (item["key"], item["version"])
+              assert logical not in seen, f"duplicate logical template: {logical}"
+              seen.add(logical)
+              assert (root / item["template"]).is_file(), item["template"]
+              assert (root / item["schema"]).is_file(), item["schema"]
+          PY
+          bash deploy/cadencia/tests/bootstrap-pdf-template-tests.sh
+
       - name: Restore Core tests
         run: dotnet restore dcArca.Core.Tests/dcArca.Core.Tests.csproj
 
