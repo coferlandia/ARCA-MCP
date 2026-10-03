@@ -175,9 +175,10 @@ public class PdfClientTests
     public async Task BodyPdfDetenido_RespetaTimeoutEndToEnd()
     {
         var client = CreateClient((_, _) => Task.FromResult(PdfResponse(new BlockingReadStream())), TimeSpan.FromMilliseconds(200));
+        using var safetyCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
 
         var exception = await Assert.ThrowsAsync<CreadorPdfException>(() =>
-            client.RenderAsync(LegacyTemplate(), JsonSerializer.SerializeToElement(new { })));
+            client.RenderAsync(LegacyTemplate(), JsonSerializer.SerializeToElement(new { }), safetyCancellation.Token));
 
         Assert.Equal(PdfFailureKind.Timeout, exception.FailureKind);
     }
@@ -189,9 +190,10 @@ public class PdfClientTests
         {
             Content = new StreamContent(new BlockingReadStream())
         }), TimeSpan.FromMilliseconds(200));
+        using var safetyCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
 
         var exception = await Assert.ThrowsAsync<CreadorPdfException>(() =>
-            client.RenderAsync(LegacyTemplate(), JsonSerializer.SerializeToElement(new { })));
+            client.RenderAsync(LegacyTemplate(), JsonSerializer.SerializeToElement(new { }), safetyCancellation.Token));
 
         Assert.Equal(PdfFailureKind.Timeout, exception.FailureKind);
     }
