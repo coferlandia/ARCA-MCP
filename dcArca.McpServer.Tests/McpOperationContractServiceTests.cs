@@ -376,7 +376,7 @@ public class McpOperationContractServiceTests
             ConsultEntered?.TrySetResult();
             if (ReleaseConsult is not null)
                 await ReleaseConsult.Task.WaitAsync(cancellationToken);
-            return ConsultResponse;
+            return ConsultResponse.Success ? ConsultEvidenceTestData.MarkValid(ConsultResponse) : ConsultResponse;
         }
 
         public Task<dcFacturaResponse> FECAESolicitarAsync(dcFacturaRequest factura, CancellationToken cancellationToken = default)

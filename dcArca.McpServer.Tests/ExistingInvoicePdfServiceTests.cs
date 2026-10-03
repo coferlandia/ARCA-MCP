@@ -212,7 +212,7 @@ public class ExistingInvoicePdfServiceTests
         public Task<dcFacturaResponse> FECompConsultarAsync(long numeroComprobante, dcTipoComprobante tipoComprobante, CancellationToken cancellationToken = default)
         {
             ConsultCallCount++;
-            return Task.FromResult(ConsultResult);
+            return Task.FromResult(ConsultEvidenceTestData.MarkValid(ConsultResult));
         }
 
         public Task<dcFacturaResponse> FECAESolicitarAsync(dcFacturaRequest factura, CancellationToken cancellationToken = default)

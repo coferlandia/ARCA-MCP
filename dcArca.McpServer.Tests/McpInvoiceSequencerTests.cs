@@ -378,6 +378,7 @@ public class McpInvoiceSequencerTests
                         Importe = request.ImporteIva
                     });
                 }
+                response.ConsultEvidence = ConsultEvidenceTestData.ValidFor(response);
                 return Task.FromResult(response);
             }
 

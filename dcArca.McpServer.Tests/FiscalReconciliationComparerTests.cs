@@ -182,6 +182,7 @@ public class FiscalReconciliationComparerTests
                 Importe = item.Importe
             });
         }
+        response.ConsultEvidence = ConsultEvidenceTestData.ValidFor(response);
         return response;
     }
 }

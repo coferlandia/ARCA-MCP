@@ -283,7 +283,7 @@ public class McpOperationRecoveryTransportTests : IClassFixture<WebApplicationFa
         {
             ConsultCalls++;
             var request = _submitted ?? throw new InvalidOperationException("No existe envío previo.");
-            return Task.FromResult(new dcFacturaResponse
+            var response = new dcFacturaResponse
             {
                 Success = true,
                 Cae = "12345678901234",
@@ -329,7 +329,9 @@ public class McpOperationRecoveryTransportTests : IClassFixture<WebApplicationFa
                     Alicuota = x.Alicuota,
                     Importe = x.Importe
                 }).ToList()
-            });
+            };
+            response.ConsultEvidence = ConsultEvidenceTestData.ValidFor(response);
+            return Task.FromResult(response);
         }
 
         public Task<List<dcCondicionIvaOption>> GetCondicionesIVAReceptorAsync(

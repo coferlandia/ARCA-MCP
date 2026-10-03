@@ -257,39 +257,44 @@ public class FiscalDocumentSnapshotTests
         Resultado = "A"
     };
 
-    private static dcFacturaResponse ComplexConsulted(long number, int pointOfSale) => new()
+    private static dcFacturaResponse ComplexConsulted(long number, int pointOfSale)
     {
-        Success = true,
-        NumeroComprobante = number,
-        PuntoVenta = pointOfSale,
-        TipoComprobante = dcTipoComprobante.FacturaB,
-        Concepto = dcConcepto.Servicios,
-        DocTipo = dcTipoDocumento.CUIT,
-        DocNro = 20333444559,
-        CondicionIvaReceptor = dcCondicionIvaReceptor.ResponsableInscripto,
-        FechaComprobante = "20261001",
-        FechaServicioDesde = "20260901",
-        FechaServicioHasta = "20260930",
-        FechaVencimientoPago = "20261015",
-        ImporteNeto = 150m,
-        ImporteNoGravado = 10m,
-        ImporteExento = 20m,
-        ImporteIva = 26.25m,
-        ImporteTributos = 3.5m,
-        ImporteTotal = 209.75m,
-        Iva =
-        [
-            new dcFacturaResponse.IvaDetalle { Alicuota = dcAlicuotaIva.Veintiuno, BaseImponible = 100m, Importe = 21m },
-            new dcFacturaResponse.IvaDetalle { Alicuota = dcAlicuotaIva.Diez_Cinco, BaseImponible = 50m, Importe = 5.25m }
-        ],
-        Tributos =
-        [
-            new dcFacturaResponse.TributoDetalle { Id = 99, Descripcion = "Tasa", BaseImponible = 100m, Alicuota = 3.5m, Importe = 3.5m }
-        ],
-        MonedaId = "DOL",
-        MonedaCotizacion = 1450.25m,
-        Cae = "CAE123",
-        CaeVencimiento = "20261011",
-        Resultado = "A"
-    };
+        var response = new dcFacturaResponse
+        {
+            Success = true,
+            NumeroComprobante = number,
+            PuntoVenta = pointOfSale,
+            TipoComprobante = dcTipoComprobante.FacturaB,
+            Concepto = dcConcepto.Servicios,
+            DocTipo = dcTipoDocumento.CUIT,
+            DocNro = 20333444559,
+            CondicionIvaReceptor = dcCondicionIvaReceptor.ResponsableInscripto,
+            FechaComprobante = "20261001",
+            FechaServicioDesde = "20260901",
+            FechaServicioHasta = "20260930",
+            FechaVencimientoPago = "20261015",
+            ImporteNeto = 150m,
+            ImporteNoGravado = 10m,
+            ImporteExento = 20m,
+            ImporteIva = 26.25m,
+            ImporteTributos = 3.5m,
+            ImporteTotal = 209.75m,
+            Iva =
+            [
+                new dcFacturaResponse.IvaDetalle { Alicuota = dcAlicuotaIva.Veintiuno, BaseImponible = 100m, Importe = 21m },
+                new dcFacturaResponse.IvaDetalle { Alicuota = dcAlicuotaIva.Diez_Cinco, BaseImponible = 50m, Importe = 5.25m }
+            ],
+            Tributos =
+            [
+                new dcFacturaResponse.TributoDetalle { Id = 99, Descripcion = "Tasa", BaseImponible = 100m, Alicuota = 3.5m, Importe = 3.5m }
+            ],
+            MonedaId = "DOL",
+            MonedaCotizacion = 1450.25m,
+            Cae = "CAE123",
+            CaeVencimiento = "20261011",
+            Resultado = "A"
+        };
+        response.ConsultEvidence = ConsultEvidenceTestData.ValidFor(response);
+        return response;
+    }
 }
