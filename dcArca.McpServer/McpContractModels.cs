@@ -6,9 +6,7 @@ namespace dcArca.McpServer;
 public static class ArcaMcpContract
 {
     public const string Version = "arca-mcp/1.0";
-
     public static readonly string[] ImplementedCurrenciesContract = ["caller-supplied-arca-code"];
-    public static readonly string[] ReadActions = ["consult", "reconcile", "render-pdf"];
 }
 
 public sealed record McpValidationIssue(
@@ -49,6 +47,18 @@ public sealed record McpFiscalReference(
     int InvoiceType,
     long? InvoiceNumber);
 
+public sealed record McpPersistedFiscalResult(
+    bool Success,
+    string? Cae,
+    string? CaeVencimiento,
+    long? InvoiceNumber,
+    string? Resultado,
+    string? ErrorCode,
+    dcEmissionOutcome EmissionOutcome,
+    IReadOnlyList<string> Observaciones,
+    IReadOnlyList<string> Errores,
+    string DataCompleteness = "stored-minimal");
+
 public sealed record McpOperationResult(
     string ContractVersion,
     bool Found,
@@ -62,7 +72,8 @@ public sealed record McpOperationResult(
     string SafeMessage,
     IReadOnlyList<McpValidationIssue> ValidationIssues,
     IReadOnlyList<string> AllowedNextActions,
-    dcFacturaResponse? FiscalResult,
+    McpPersistedFiscalResult? PersistedFiscalResult,
+    dcFacturaResponse? OfficialRead,
     IReadOnlyList<string> UnavailableFields,
     DateTimeOffset? CreatedAt,
     DateTimeOffset? UpdatedAt);
