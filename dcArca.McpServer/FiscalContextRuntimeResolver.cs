@@ -32,8 +32,8 @@ public sealed class FiscalContextRuntime : IDisposable
     public RepresentedFiscalContextRecord Context { get; }
     public CredentialAssignmentRecord Assignment { get; }
     public dcArcaConfig Config { get; }
-    public dcWsfeClient Wsfe { get; }
-    public dcPadronClient Padron { get; }
+    public IdcWsfeClient Wsfe { get; }
+    public IdcPadronClient Padron { get; }
     public IFiscalOperationIdentityProvider IdentityProvider { get; }
 
     public FiscalContextRuntime(
@@ -41,8 +41,8 @@ public sealed class FiscalContextRuntime : IDisposable
         RepresentedFiscalContextRecord context,
         CredentialAssignmentRecord assignment,
         dcArcaConfig config,
-        dcWsfeClient wsfe,
-        dcPadronClient padron,
+        IdcWsfeClient wsfe,
+        IdcPadronClient padron,
         IFiscalOperationIdentityProvider identityProvider)
     {
         ConsumerId = consumerId;
@@ -56,8 +56,8 @@ public sealed class FiscalContextRuntime : IDisposable
 
     public void Dispose()
     {
-        Wsfe.Dispose();
-        Padron.Dispose();
+        if (Wsfe is IDisposable wsfeDisposable) wsfeDisposable.Dispose();
+        if (Padron is IDisposable padronDisposable) padronDisposable.Dispose();
     }
 }
 
@@ -332,11 +332,11 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
                 "La asignación de credencial todavía no está activa para trabajo fiscal.");
 
         var materialized = _materializer.Materialize(context, assignment);
-        var wsfe = new dcWsfeClient(
+        IdcWsfeClient wsfe = new dcWsfeClient(
             materialized.Config,
             materialized.WsfeAuth,
             logger: null);
-        var padron = new dcPadronClient(
+        IdcPadronClient padron = new dcPadronClient(
             materialized.Config,
             materialized.PadronAuth,
             logger: null);
