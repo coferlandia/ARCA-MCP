@@ -47,6 +47,8 @@ jobs:
           bash -n scripts/smoke/fiscal_smoke.sh
           python3 -m py_compile scripts/smoke/fiscal_smoke.py
           python3 -m unittest scripts/smoke/test_fiscal_smoke.py
+          bash -n scripts/smoke/test_run_local.sh
+          bash scripts/smoke/test_run_local.sh
 
       - name: Restore Core tests
         run: dotnet restore dcArca.Core.Tests/dcArca.Core.Tests.csproj
