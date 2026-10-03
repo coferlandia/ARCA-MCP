@@ -141,7 +141,7 @@ public sealed class ArcaTools
         return _sequencer.EmitAsync(factura, idempotencyKey, cancellationToken);
     }
 
-    [McpServerTool, Description("Solicita a AFIP la autorización (CAE) de un comprobante con número elegido por el caller. Operación avanzada: el caller debe coordinar numeración e idempotencia.")]
+    [McpServerTool, Description("Compatibilidad histórica: la emisión con número elegido por el caller está deshabilitada en el MCP porque puede violar la reserva durable de la serie. Use emitir_comprobante o emitir_comprobante_avanzado.")]
     [Authorize(Policy = "ArcaFacturar")]
     public Task<dcFacturaResponse> SolicitarCae(
         [Description("Tipo de comprobante AFIP a autorizar.")] dcTipoComprobante tipoComprobante,
@@ -158,38 +158,21 @@ public sealed class ArcaTools
         [Description("Fecha de servicio desde, formato YYYYMMDD. Obligatorio si concepto es Servicios o ProductosYServicios.")] string? fechaServicioDesde,
         [Description("Fecha de servicio hasta, formato YYYYMMDD. Obligatorio si concepto es Servicios o ProductosYServicios.")] string? fechaServicioHasta,
         [Description("Fecha de vencimiento de pago, formato YYYYMMDD. Obligatorio si concepto es Servicios o ProductosYServicios.")] string? fechaVencimiento,
-        [Description("Tipo de comprobante asociado. Junto con puntoVentaAsociado y numeroAsociado, identifica la factura original que esta Nota de Crédito/Débito ajusta (obligatorio en Notas, salvo que se informe periodoAsociadoDesde/Hasta en su lugar).")] int? tipoComprobanteAsociado,
+        [Description("Tipo de comprobante asociado.")] int? tipoComprobanteAsociado,
         [Description("Punto de venta del comprobante asociado.")] int? puntoVentaAsociado,
         [Description("Número del comprobante asociado.")] long? numeroAsociado,
-        [Description("Fecha desde del período asociado, formato YYYYMMDD. Alternativa a informar el comprobante asociado en Notas de Crédito/Débito.")] string? periodoAsociadoDesde,
-        [Description("Fecha hasta del período asociado, formato YYYYMMDD. Alternativa a informar el comprobante asociado en Notas de Crédito/Débito.")] string? periodoAsociadoHasta,
+        [Description("Fecha desde del período asociado, formato YYYYMMDD.")] string? periodoAsociadoDesde,
+        [Description("Fecha hasta del período asociado, formato YYYYMMDD.")] string? periodoAsociadoHasta,
         CancellationToken cancellationToken)
-    {
-        var factura = new dcFacturaRequest
+        => Task.FromResult(new dcFacturaResponse
         {
-            TipoComprobante = tipoComprobante,
+            Success = false,
+            Codigo = "LOW_LEVEL_EMISSION_DISABLED",
+            Mensaje = "La emisión MCP con número elegido por el caller está deshabilitada para proteger la serie fiscal. Use emitir_comprobante o emitir_comprobante_avanzado.",
+            EmissionOutcome = dcEmissionOutcome.InvalidRequest,
             NumeroComprobante = numeroComprobante,
-            Concepto = concepto,
-            CuitReceptor = cuitReceptor,
-            TipoDocReceptor = (int)tipoDocReceptor,
-            CondicionIvaReceptor = condicionIvaReceptor,
-            ImporteNeto = importeNeto,
-            ImporteIva = importeIva,
-            ImporteTotal = importeTotal,
-            AlicuotaIva = alicuotaIva,
-            FechaComprobante = fechaComprobante,
-            FechaServicioDesde = fechaServicioDesde,
-            FechaServicioHasta = fechaServicioHasta,
-            FechaVencimiento = fechaVencimiento,
-            CbteAsociadoTipo = tipoComprobanteAsociado,
-            CbteAsociadoPtoVta = puntoVentaAsociado,
-            CbteAsociadoNro = numeroAsociado,
-            PeriodoAsocDesde = periodoAsociadoDesde,
-            PeriodoAsocHasta = periodoAsociadoHasta,
-        };
-
-        return _wsfe.FECAESolicitarAsync(factura, cancellationToken);
-    }
+            Errores = ["La numeración de una serie administrada sólo puede asignarla el sequencer durable."]
+        });
 
     [McpServerTool, Description("Consulta las condiciones de IVA válidas para un receptor dado, según el tipo de comprobante a emitir.")]
     [Authorize(Policy = "ArcaConsultar")]
