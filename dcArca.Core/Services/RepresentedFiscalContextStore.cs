@@ -214,7 +214,12 @@ public sealed class FileSystemRepresentedFiscalContextStore : IRepresentedFiscal
         CancellationToken cancellationToken = default)
     {
         _ = RequiredActor(actor);
-        return UpdateContextAsync(contextId, context => context with { OperationalState = state }, cancellationToken);
+        return UpdateContextAsync(contextId, context =>
+        {
+            if (state == FiscalContextOperationalState.Active && context.ActiveAssignment is null)
+                throw new InvalidOperationException("ACTIVE_ASSIGNMENT_REQUIRED");
+            return context with { OperationalState = state };
+        }, cancellationToken);
     }
 
     private async Task UpdateContextAsync(
@@ -284,6 +289,8 @@ public sealed class FileSystemRepresentedFiscalContextStore : IRepresentedFiscal
             throw new InvalidDataException("FISCAL_CONTEXT_DUPLICATE_ASSIGNMENT_REVISION");
         if (context.Assignments.Any(x => string.IsNullOrWhiteSpace(x.AssignmentRevision) || string.IsNullOrWhiteSpace(x.CredentialId)))
             throw new InvalidDataException("FISCAL_CONTEXT_ASSIGNMENT_INVALID");
+        if (context.OperationalState == FiscalContextOperationalState.Active && context.ActiveAssignment is null)
+            throw new InvalidDataException("FISCAL_CONTEXT_ACTIVE_WITHOUT_ASSIGNMENT");
     }
 
     private static string RequiredActor(string actor)
