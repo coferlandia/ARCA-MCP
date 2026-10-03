@@ -57,6 +57,13 @@ public class dcFacturaResponse
     public dcEmissionOutcome EmissionOutcome { get; set; } = dcEmissionOutcome.None;
 
     /// <summary>
+    /// Metadata interna de presencia/validez de campos fiscales provenientes de FECompConsultar.
+    /// No forma parte del contrato JSON público y evita confundir cero explícito con ausencia/error de parseo.
+    /// </summary>
+    [JsonIgnore]
+    public dcConsultFiscalEvidence? ConsultEvidence { get; set; }
+
+    /// <summary>
     /// Identificador opaco y estable de la operación durable cuando la respuesta proviene del MCP.
     /// Nunca contiene la idempotency key original.
     /// </summary>
