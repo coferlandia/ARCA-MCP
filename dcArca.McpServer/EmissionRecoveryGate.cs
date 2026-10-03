@@ -57,6 +57,52 @@ public sealed class FileSystemEmissionRecoveryGate : IEmissionRecoveryGate
 
     public string DirectoryPath => _directory;
     public string BlockPath => Path.Combine(_directory, "restore-reconciliation-required.json");
+    public string MaintenanceLockPath => Path.Combine(_directory, "maintenance.lock");
+
+    /// <summary>
+    /// Held for the lifetime of a running MCP host. It allows other readers of the same
+    /// runtime lease but conflicts with the exclusive maintenance lease used by restore.
+    /// The durable fiscal writer lock remains the authority that rejects a second writer
+    /// over the same emission store.
+    /// </summary>
+    public FileStream AcquireRuntimeLease()
+    {
+        try
+        {
+            return new FileStream(
+                MaintenanceLockPath,
+                FileMode.OpenOrCreate,
+                FileAccess.Read,
+                FileShare.Read,
+                1,
+                FileOptions.None);
+        }
+        catch (IOException exception)
+        {
+            throw new IOException("RECOVERY_MAINTENANCE_IN_PROGRESS", exception);
+        }
+    }
+
+    /// <summary>
+    /// Exclusive lease for backup/restore maintenance that must not race a running MCP host.
+    /// </summary>
+    public FileStream AcquireMaintenanceLease()
+    {
+        try
+        {
+            return new FileStream(
+                MaintenanceLockPath,
+                FileMode.OpenOrCreate,
+                FileAccess.ReadWrite,
+                FileShare.None,
+                1,
+                FileOptions.None);
+        }
+        catch (IOException exception)
+        {
+            throw new IOException("RECOVERY_RUNTIME_ACTIVE", exception);
+        }
+    }
 
     public async Task<EmissionRecoveryBlock?> GetBlockAsync(CancellationToken cancellationToken = default)
     {
