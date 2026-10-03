@@ -59,12 +59,6 @@ public sealed class FileSystemEmissionRecoveryGate : IEmissionRecoveryGate
     public string BlockPath => Path.Combine(_directory, "restore-reconciliation-required.json");
     public string MaintenanceLockPath => Path.Combine(_directory, "maintenance.lock");
 
-    /// <summary>
-    /// Held for the lifetime of a running MCP host. It allows other readers of the same
-    /// runtime lease but conflicts with the exclusive maintenance lease used by restore.
-    /// The durable fiscal writer lock remains the authority that rejects a second writer
-    /// over the same emission store.
-    /// </summary>
     public FileStream AcquireRuntimeLease()
     {
         try
@@ -83,9 +77,6 @@ public sealed class FileSystemEmissionRecoveryGate : IEmissionRecoveryGate
         }
     }
 
-    /// <summary>
-    /// Exclusive lease for backup/restore maintenance that must not race a running MCP host.
-    /// </summary>
     public FileStream AcquireMaintenanceLease()
     {
         try
@@ -159,6 +150,19 @@ public sealed class FileSystemEmissionRecoveryGate : IEmissionRecoveryGate
 
         var block = await GetBlockAsync(cancellationToken)
             ?? throw new InvalidOperationException("RECOVERY_GATE_NOT_BLOCKED");
+        var historyPath = HistoryPath(block.RestoreId);
+
+        // Crash-idempotency: history is the durable proof of completion. If a previous
+        // attempt wrote it but died before deleting the block, finish only the delete and
+        // return the original evidence rather than replacing it.
+        if (File.Exists(historyPath))
+        {
+            var existing = await ReadCompletionAsync(historyPath, cancellationToken);
+            EnsureCompletionMatchesBlock(existing, block);
+            File.Delete(BlockPath);
+            return existing;
+        }
+
         var completion = new EmissionRecoveryCompletion(
             CurrentSchemaVersion,
             block.RestoreId,
@@ -170,16 +174,57 @@ public sealed class FileSystemEmissionRecoveryGate : IEmissionRecoveryGate
             NormalizeOptional(confirmedBy),
             NormalizeOptional(note));
 
-        var historyPath = Path.Combine(
-            _historyDirectory,
-            $"{SanitizeFileName(block.RestoreId)}.completed.json");
-        if (File.Exists(historyPath))
-            throw new InvalidOperationException("RECOVERY_COMPLETION_ALREADY_EXISTS");
+        try
+        {
+            WriteAtomic(historyPath, completion);
+        }
+        catch (IOException) when (File.Exists(historyPath))
+        {
+            var existing = await ReadCompletionAsync(historyPath, cancellationToken);
+            EnsureCompletionMatchesBlock(existing, block);
+            File.Delete(BlockPath);
+            return existing;
+        }
 
-        WriteAtomic(historyPath, completion);
         File.Delete(BlockPath);
         return completion;
     }
+
+    private async Task<EmissionRecoveryCompletion> ReadCompletionAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var completion = await JsonSerializer.DeserializeAsync<EmissionRecoveryCompletion>(stream, cancellationToken: cancellationToken)
+                ?? throw new InvalidDataException("RECOVERY_COMPLETION_EMPTY");
+            if (completion.SchemaVersion != CurrentSchemaVersion
+                || string.IsNullOrWhiteSpace(completion.RestoreId)
+                || string.IsNullOrWhiteSpace(completion.BackupId)
+                || string.IsNullOrWhiteSpace(completion.EvidenceReference))
+                throw new InvalidDataException("RECOVERY_COMPLETION_INVALID");
+            return completion;
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("RECOVERY_COMPLETION_CORRUPT", exception);
+        }
+    }
+
+    private static void EnsureCompletionMatchesBlock(
+        EmissionRecoveryCompletion completion,
+        EmissionRecoveryBlock block)
+    {
+        if (!string.Equals(completion.RestoreId, block.RestoreId, StringComparison.Ordinal)
+            || !string.Equals(completion.BackupId, block.BackupId, StringComparison.Ordinal)
+            || completion.BackupCreatedAt != block.BackupCreatedAt
+            || completion.RestoredAt != block.RestoredAt)
+            throw new InvalidDataException("RECOVERY_COMPLETION_BLOCK_MISMATCH");
+    }
+
+    private string HistoryPath(string restoreId)
+        => Path.Combine(_historyDirectory, $"{SanitizeFileName(restoreId)}.completed.json");
 
     private static void Validate(EmissionRecoveryBlock block)
     {
