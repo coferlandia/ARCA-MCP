@@ -60,12 +60,18 @@ builder.Services.AddHttpClient(nameof(FiscalAssignmentAuthorizationValidator), c
 {
     client.Timeout = TimeSpan.FromSeconds(20);
 });
-builder.Services.AddHttpClient<IPdfClient, PdfClient>(client =>
+
+static void ConfigurePdfHttpClient(HttpClient client, IConfiguration configuration)
 {
-    var baseUrl = builder.Configuration["Pdf:BaseUrl"];
+    var baseUrl = configuration["Pdf:BaseUrl"];
     if (!string.IsNullOrWhiteSpace(baseUrl)) client.BaseAddress = new Uri(baseUrl);
     client.Timeout = TimeSpan.FromSeconds(15);
-});
+}
+
+builder.Services.AddHttpClient<IPdfTemplateResolver, CreadorPdfTemplateResolver>(client =>
+    ConfigurePdfHttpClient(client, builder.Configuration));
+builder.Services.AddHttpClient<IPdfClient, PdfClient>(client =>
+    ConfigurePdfHttpClient(client, builder.Configuration));
 
 builder.Services.AddAuthentication(ApiKeyAuthenticationHandler.SchemeName)
     .AddScheme<ApiKeyAuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
