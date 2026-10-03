@@ -13,15 +13,17 @@ var builder = WebApplication.CreateBuilder(args);
 
 var apiKeysDirectory = builder.Configuration["ApiKeys:Directory"];
 var emissionIdempotencyDirectory = builder.Configuration["EmissionIdempotency:Directory"];
-if (builder.Environment.EnvironmentName == "Testing"
-    && string.IsNullOrWhiteSpace(emissionIdempotencyDirectory))
+var fiscalContextsDirectory = builder.Configuration["FiscalContexts:Directory"];
+if (builder.Environment.EnvironmentName == "Testing")
 {
-    // WebApplicationFactory can start several independent test hosts in parallel. Give each
-    // host its own durable filesystem topology unless a test explicitly supplies a store.
-    emissionIdempotencyDirectory = Path.Combine(
+    var testHostRoot = Path.Combine(
         Path.GetTempPath(),
         "dcarca-mcp-host-tests",
         Guid.NewGuid().ToString("N"));
+    // WebApplicationFactory can start several independent hosts in parallel. Unless a test
+    // explicitly supplies persistence, isolate all fiscal topology owned by that host.
+    emissionIdempotencyDirectory ??= Path.Combine(testHostRoot, "emission-idempotency");
+    fiscalContextsDirectory ??= Path.Combine(testHostRoot, "fiscal-contexts");
 }
 
 var arcaSettingsFile = builder.Environment.EnvironmentName == "Testing"
@@ -34,14 +36,8 @@ var fiscalContextOptions = SingleFiscalContextOptions.FromConfiguration(
 
 builder.Services.AddSingleton(arcaConfig);
 builder.Services.AddSingleton(fiscalContextOptions);
-builder.Services.AddSingleton<IFiscalOperationIdentityProvider, SingleFiscalOperationIdentityProvider>();
 builder.Services.AddSingleton<IAfipLogger>(sp =>
     new AfipLoggerAdapter(sp.GetRequiredService<ILoggerFactory>().CreateLogger("dcArca")));
-builder.Services.AddSingleton<dcArcaAuthService>(sp => new dcArcaAuthService(
-    arcaConfig.WsaaUrl, arcaConfig.CertificatePath, arcaConfig.CertificatePassword, arcaConfig.Cuit,
-    logger: sp.GetRequiredService<IAfipLogger>()));
-builder.Services.AddSingleton<IdcWsfeClient, dcWsfeClient>();
-builder.Services.AddSingleton<IdcPadronClient, dcPadronClient>();
 builder.Services.AddSingleton<IEmissionIdempotencyStore>(_ =>
     new FileSystemEmissionIdempotencyStore(emissionIdempotencyDirectory));
 builder.Services.AddSingleton<IFiscalSeriesCoordinator>(sp =>
@@ -49,12 +45,18 @@ builder.Services.AddSingleton<IFiscalSeriesCoordinator>(sp =>
     var store = (FileSystemEmissionIdempotencyStore)sp.GetRequiredService<IEmissionIdempotencyStore>();
     return new FileSystemFiscalSeriesCoordinator(store.DirectoryPath);
 });
-builder.Services.AddSingleton<McpInvoiceSequencer>();
-builder.Services.AddSingleton<IInvoiceIssuer>(sp => sp.GetRequiredService<McpInvoiceSequencer>());
+builder.Services.AddSingleton<IRepresentedFiscalContextStore>(_ =>
+    new FileSystemRepresentedFiscalContextStore(fiscalContextsDirectory));
+builder.Services.AddSingleton<IFiscalCredentialMaterializer, FiscalCredentialMaterializer>();
+builder.Services.AddSingleton<IFiscalContextRuntimeResolver, FiscalContextRuntimeResolver>();
+builder.Services.AddSingleton<IFiscalAssignmentAuthorizationValidator, FiscalAssignmentAuthorizationValidator>();
 builder.Services.AddSingleton<IPdfDocumentRenderer, PdfDocumentRenderer>();
-builder.Services.AddSingleton<InvoicePdfService>();
-builder.Services.AddSingleton<ExistingInvoicePdfService>();
 builder.Services.AddSingleton<IApiKeyStore>(_ => new FileSystemApiKeyStore(apiKeysDirectory));
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddHttpClient(nameof(FiscalAssignmentAuthorizationValidator), client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(20);
+});
 builder.Services.AddHttpClient<IPdfClient, PdfClient>(client =>
 {
     var baseUrl = builder.Configuration["Pdf:BaseUrl"];
@@ -83,6 +85,31 @@ builder.Services.AddMcpServer()
     .AddAuthorizationFilters();
 
 var app = builder.Build();
+
+var contextStore = app.Services.GetRequiredService<IRepresentedFiscalContextStore>();
+if (!long.TryParse(arcaConfig.Cuit, out var legacyCuit) || legacyCuit <= 0)
+    throw new InvalidOperationException("dcArcaConfig:Cuit debe ser numérico para inicializar el contexto fiscal legacy.");
+var now = DateTimeOffset.UtcNow;
+await contextStore.InitializeLegacyAsync(new RepresentedFiscalContextRecord(
+    fiscalContextOptions.ContextId,
+    fiscalContextOptions.Environment,
+    legacyCuit,
+    arcaConfig.PuntoVenta,
+    FiscalContextOperationalState.Active,
+    fiscalContextOptions.ContextRevision,
+    LegacyDefault: true,
+    Assignments:
+    [
+        new CredentialAssignmentRecord(
+            fiscalContextOptions.CredentialAssignmentRevision,
+            "legacy-default",
+            CredentialAssignmentStatus.Active,
+            "legacy-config-bootstrap",
+            now,
+            now,
+            now,
+            "legacy-bootstrap")
+    ]));
 
 // Acquire the supported V1 single-writer lease and rebuild/validate durable reservations
 // before the server becomes ready to accept fiscal work.

@@ -12,12 +12,18 @@ public sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAu
 {
     public const string SchemeName = "ApiKey";
     private readonly IApiKeyStore _store;
+    private readonly SingleFiscalContextOptions _legacyContext;
 
     public ApiKeyAuthenticationHandler(
         IOptionsMonitor<ApiKeyAuthenticationSchemeOptions> options,
         ILoggerFactory logger,
         UrlEncoder encoder,
-        IApiKeyStore store) : base(options, logger, encoder) => _store = store;
+        IApiKeyStore store,
+        SingleFiscalContextOptions legacyContext) : base(options, logger, encoder)
+    {
+        _store = store;
+        _legacyContext = legacyContext;
+    }
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
@@ -41,8 +47,23 @@ public sealed class ApiKeyAuthenticationHandler : AuthenticationHandler<ApiKeyAu
 
         if (record is null) return AuthenticateResult.Fail("Credenciales inválidas.");
 
-        var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, record.Id), new(ClaimTypes.Name, record.Name) };
+        var isLegacy = string.IsNullOrWhiteSpace(record.ConsumerId);
+        var consumerId = isLegacy ? _legacyContext.ConsumerId : record.ConsumerId!.Trim();
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, record.Id),
+            new(ClaimTypes.Name, record.Name),
+            new(ArcaClaimTypes.ConsumerId, consumerId)
+        };
         claims.AddRange(record.Scopes.Select(scope => new Claim("scope", scope)));
+        foreach (var grant in record.Grants)
+        {
+            foreach (var operation in grant.Operations)
+                claims.Add(new Claim(ArcaClaimTypes.ContextGrant, ArcaClaimTypes.GrantValue(grant.ContextId, operation)));
+        }
+        if (isLegacy)
+            claims.Add(new Claim(ArcaClaimTypes.LegacyKey, "true"));
+
         var identity = new ClaimsIdentity(claims, SchemeName);
         return AuthenticateResult.Success(
             new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName));
