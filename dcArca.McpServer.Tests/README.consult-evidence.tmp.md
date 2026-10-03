@@ -1,1 +1,0 @@
-Temporary fixture note for #40 tests. Consult responses constructed in tests must set `ConsultEvidence` explicitly; production FECompConsultar responses receive it from the SOAP parser. This file will be removed before merge.
