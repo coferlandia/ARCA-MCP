@@ -17,7 +17,10 @@ public sealed record FiscalDocumentContext(
     public static FiscalDocumentContext FromLegacyConfig(dcArcaConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
-        return new FiscalDocumentContext("unspecified", config.Cuit, config.PuntoVenta);
+        return new FiscalDocumentContext(
+            string.IsNullOrWhiteSpace(config.Environment) ? "unspecified" : config.Environment,
+            config.Cuit,
+            config.PuntoVenta);
     }
 }
 
@@ -167,8 +170,7 @@ public static class FiscalDocumentSnapshotFactory
         "environment", "emisorCuit", "puntoVenta", "tipoComprobante", "numeroComprobante",
         "concepto", "documentoReceptorTipo", "documentoReceptorNumero", "fechaComprobante",
         "importeNeto", "importeNoGravado", "importeExento", "importeIva", "importeTributos",
-        "importeTotal", "iva", "tributos", "monedaId", "monedaCotizacion", "cae",
-        "caeVencimiento", "resultado"
+        "importeTotal", "iva", "tributos", "monedaId", "monedaCotizacion", "cae"
     ];
 
     public static FiscalDocumentSnapshot FromEmission(
@@ -204,7 +206,9 @@ public static class FiscalDocumentSnapshotFactory
             !string.IsNullOrWhiteSpace(request.FechaServicioHasta),
             !string.IsNullOrWhiteSpace(request.FechaVencimiento),
             associations.Length > 0,
-            period is not null);
+            period is not null,
+            !string.IsNullOrWhiteSpace(response.CaeVencimiento),
+            !string.IsNullOrWhiteSpace(response.Resultado));
 
         return new FiscalDocumentSnapshot
         {
@@ -264,6 +268,8 @@ public static class FiscalDocumentSnapshotFactory
             throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta no devolvió la fecha del comprobante.");
         if (string.IsNullOrWhiteSpace(response.MonedaId) || response.MonedaCotizacion <= 0m)
             throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta no devolvió moneda y cotización fiscal utilizables.");
+        if (string.IsNullOrWhiteSpace(response.CaeVencimiento))
+            throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta no devolvió el vencimiento de la autorización fiscal.");
         ValidateConsultAmounts(response);
         ValidateServiceDates(response);
         if (IsNote(tipo))
@@ -279,7 +285,9 @@ public static class FiscalDocumentSnapshotFactory
             !string.IsNullOrWhiteSpace(response.FechaServicioHasta),
             !string.IsNullOrWhiteSpace(response.FechaVencimientoPago),
             hasAssociatedDocuments: false,
-            hasAssociatedPeriod: false);
+            hasAssociatedPeriod: false,
+            hasCaeExpiry: true,
+            hasResult: !string.IsNullOrWhiteSpace(response.Resultado));
 
         return new FiscalDocumentSnapshot
         {
@@ -353,22 +361,31 @@ public static class FiscalDocumentSnapshotFactory
                 "Los importes devueltos por la consulta no permiten reconstruir el total fiscal sin asumir valores ausentes.");
         }
 
-        if (response.ImporteIva > 0m)
+        if (response.Iva.Any(x => !x.Alicuota.HasValue || x.BaseImponible < 0m || x.Importe < 0m))
+            throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta devolvió líneas de IVA incompletas o inválidas.");
+        if (response.ImporteIva > 0m && response.Iva.Count == 0)
+            throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta no devolvió el detalle de IVA requerido por el importe agregado.");
+        if (Math.Abs(response.Iva.Sum(x => x.Importe) - response.ImporteIva) > FiscalDocumentSnapshotContract.MonetaryTolerance)
+            throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta no devolvió un detalle de IVA consistente con el total informado.");
+        if (response.Iva.Count > 0
+            && Math.Abs(response.Iva.Sum(x => x.BaseImponible) - response.ImporteNeto) > FiscalDocumentSnapshotContract.MonetaryTolerance)
         {
-            if (response.Iva.Count == 0
-                || Math.Abs(response.Iva.Sum(x => x.Importe) - response.ImporteIva) > FiscalDocumentSnapshotContract.MonetaryTolerance)
-            {
-                throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta no devolvió un detalle de IVA consistente con el total informado.");
-            }
+            throw Error("FISCAL_DOCUMENT_INCOMPLETE", "Las bases de IVA consultadas no reconstruyen el neto fiscal informado.");
         }
-        if (response.ImporteTributos > 0m)
+
+        if (response.Tributos.Any(x =>
+                !x.Id.HasValue
+                || string.IsNullOrWhiteSpace(x.Descripcion)
+                || x.BaseImponible < 0m
+                || x.Alicuota < 0m
+                || x.Importe < 0m))
         {
-            if (response.Tributos.Count == 0
-                || Math.Abs(response.Tributos.Sum(x => x.Importe) - response.ImporteTributos) > FiscalDocumentSnapshotContract.MonetaryTolerance)
-            {
-                throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta no devolvió tributos consistentes con el total informado.");
-            }
+            throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta devolvió líneas de tributos incompletas o inválidas.");
         }
+        if (response.ImporteTributos > 0m && response.Tributos.Count == 0)
+            throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta no devolvió el detalle de tributos requerido por el importe agregado.");
+        if (Math.Abs(response.Tributos.Sum(x => x.Importe) - response.ImporteTributos) > FiscalDocumentSnapshotContract.MonetaryTolerance)
+            throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta no devolvió tributos consistentes con el total informado.");
     }
 
     private static void ValidateServiceDates(dcFacturaResponse response)
@@ -411,7 +428,9 @@ public static class FiscalDocumentSnapshotFactory
         bool hasServiceTo,
         bool hasPaymentDue,
         bool hasAssociatedDocuments,
-        bool hasAssociatedPeriod)
+        bool hasAssociatedPeriod,
+        bool hasCaeExpiry,
+        bool hasResult)
     {
         var fields = BaseAvailableFields.ToList();
         if (hasIvaCondition) fields.Add("condicionIvaReceptor");
@@ -420,6 +439,8 @@ public static class FiscalDocumentSnapshotFactory
         if (hasPaymentDue) fields.Add("fechaVencimientoPago");
         if (hasAssociatedDocuments) fields.Add("comprobantesAsociados");
         if (hasAssociatedPeriod) fields.Add("periodoAsociado");
+        if (hasCaeExpiry) fields.Add("caeVencimiento");
+        if (hasResult) fields.Add("resultado");
         return fields.Order(StringComparer.Ordinal).ToArray();
     }
 
