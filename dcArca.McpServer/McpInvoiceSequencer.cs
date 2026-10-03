@@ -239,6 +239,23 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
                 throw;
             }
 
+            // dcWsfeClient can recover a transport ambiguity internally through FECompConsultar.
+            // That path must pass the same fiscal-equivalence gate as a later MCP retry.
+            if (result.Success && result.EmissionOutcome == dcEmissionOutcome.RecoveredSuccess)
+            {
+                var comparison = FiscalReconciliationComparer.Compare(record, result);
+                if (comparison.Match != FiscalReconciliationMatch.Equivalent)
+                {
+                    var blocked = Error(
+                        comparison.Code,
+                        comparison.Message,
+                        dcEmissionOutcome.Uncertain,
+                        record.NumeroComprobante.Value);
+                    await SaveOutcomeAsync(record, EmissionIdempotencyState.Uncertain, blocked, cancellationToken);
+                    return blocked;
+                }
+            }
+
             var state = result.Success
                 ? EmissionIdempotencyState.Authorized
                 : result.EmissionOutcome == dcEmissionOutcome.FiscalRejected
@@ -337,8 +354,7 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
     {
         response.Success = false;
         response.NumeroComprobante = numero;
-        if (response.EmissionOutcome == dcEmissionOutcome.None)
-            response.EmissionOutcome = dcEmissionOutcome.FailedBeforeSubmission;
+        response.EmissionOutcome = dcEmissionOutcome.FailedBeforeSubmission;
         return response;
     }
 
