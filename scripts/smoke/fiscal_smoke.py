@@ -26,15 +26,9 @@ HOMOLOGACION_DIR = REPO_ROOT / "scripts" / "homologacion"
 if str(HOMOLOGACION_DIR) not in sys.path:
     sys.path.insert(0, str(HOMOLOGACION_DIR))
 
-from epic14_homologacion import (  # noqa: E402
-    McpClient,
-    collect_sensitive_values,
-    find_key,
-    redact,
-)
+from epic14_homologacion import McpClient, collect_sensitive_values, find_key, redact  # noqa: E402
 
 MAX_DOCUMENT_TOTAL = Decimal("1.00")
-
 TYPE_MATRIX = {
     "A": {"invoice": "FacturaA", "debit": "NotaDebitoA", "credit": "NotaCreditoA"},
     "B": {"invoice": "FacturaB", "debit": "NotaDebitoB", "credit": "NotaCreditoB"},
@@ -43,9 +37,8 @@ TYPE_MATRIX = {
 
 
 def type_name(letter: str, kind: str) -> str:
-    letter = letter.upper()
     try:
-        return TYPE_MATRIX[letter][kind]
+        return TYPE_MATRIX[letter.upper()][kind]
     except KeyError as exc:
         raise ValueError(f"Combinación de comprobante no soportada: {letter}/{kind}") from exc
 
@@ -57,13 +50,18 @@ def smoke_items() -> list[dict[str, Any]]:
     ]
 
 
-def build_invoice(
-    letter: str,
-    kind: str,
-    receptor: dict[str, Any],
-    invoice_date: str,
-    association: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+def receiver_for(context: dict[str, Any], letter: str) -> dict[str, Any]:
+    overrides = context.get("receivers") or {}
+    if isinstance(overrides, dict) and isinstance(overrides.get(letter.upper()), dict):
+        return overrides[letter.upper()]
+    receiver = context.get("receiver")
+    if not isinstance(receiver, dict):
+        raise ValueError(f"No hay receiver configurado para letra {letter.upper()}.")
+    return receiver
+
+
+def build_invoice(letter: str, kind: str, receptor: dict[str, Any], invoice_date: str,
+                  association: dict[str, Any] | None = None) -> dict[str, Any]:
     letter = letter.upper()
     invoice: dict[str, Any] = {
         "tipoComprobante": type_name(letter, kind),
@@ -77,23 +75,12 @@ def build_invoice(
         "monedaCotizacion": 1.00,
         "fechaComprobante": invoice_date,
     }
-
     if letter in ("A", "B"):
-        invoice.update({
-            "importeNeto": 0.83,
-            "importeIva": 0.17,
-            "importeTotal": 1.00,
-            "alicuotaIva": "Veintiuno",
-        })
+        invoice.update({"importeNeto": 0.83, "importeIva": 0.17, "importeTotal": 1.00, "alicuotaIva": "Veintiuno"})
     elif letter == "C":
-        invoice.update({
-            "importeNeto": 1.00,
-            "importeIva": 0.00,
-            "importeTotal": 1.00,
-        })
+        invoice.update({"importeNeto": 1.00, "importeIva": 0.00, "importeTotal": 1.00})
     else:
         raise ValueError(f"Letra no soportada: {letter}")
-
     if kind != "invoice":
         if not association:
             raise ValueError("Las notas requieren comprobante asociado.")
@@ -102,7 +89,6 @@ def build_invoice(
             "cbteAsociadoPtoVta": int(association["puntoVenta"]),
             "cbteAsociadoNro": int(association["numero"]),
         })
-
     assert_safe_invoice(invoice)
     return invoice
 
@@ -131,14 +117,12 @@ def _load_json(path: pathlib.Path) -> dict[str, Any]:
 
 
 def _tool_ok(http_status: int, envelope: Any) -> bool:
-    if not (200 <= http_status < 300):
-        return False
-    if isinstance(envelope, dict) and envelope.get("error") is not None:
-        return False
-    if isinstance(envelope, dict) and isinstance(envelope.get("result"), dict):
-        if envelope["result"].get("isError") is True:
-            return False
-    return True
+    return (
+        200 <= http_status < 300
+        and not (isinstance(envelope, dict) and envelope.get("error") is not None)
+        and not (isinstance(envelope, dict) and isinstance(envelope.get("result"), dict)
+                 and envelope["result"].get("isError") is True)
+    )
 
 
 def _pdf_base64(value: Any) -> str | None:
@@ -177,37 +161,24 @@ def _write_pdf(result: Any, path: pathlib.Path) -> bool:
     return True
 
 
-def _emit_document(
-    *,
-    client: McpClient,
-    context_id: str,
-    point_of_sale: int,
-    letter: str,
-    label: str,
-    invoice: dict[str, Any],
-    pdf_cfg: dict[str, Any],
-    output_dir: pathlib.Path,
-    run_key: str,
-) -> dict[str, Any]:
+def _emit_document(*, client: McpClient, context_id: str, letter: str, label: str,
+                   invoice: dict[str, Any], pdf_cfg: dict[str, Any], output_dir: pathlib.Path,
+                   run_key: str) -> dict[str, Any]:
     assert_safe_invoice(invoice)
     result: dict[str, Any] = {"label": label, "type": invoice["tipoComprobante"], "status": "FAIL"}
-
     validation, validation_ok = _call(client, "validar_comprobante", {"contextId": context_id, "factura": invoice})
     is_valid = find_key(validation, "valid")
     result["preflightValid"] = bool(is_valid)
     if not validation_ok or is_valid is False:
-        result["status"] = "SKIPPED_UNSUPPORTED"
-        result["reason"] = "preflight_invalid"
+        result.update({"status": "SKIPPED_UNSUPPORTED", "reason": "preflight_invalid"})
         return result
 
     emission_args = {"contextId": context_id, "idempotencyKey": run_key, "factura": invoice}
     emission, emission_ok = _call(client, "emitir_comprobante_avanzado", emission_args)
     number = find_key(emission, "numeroComprobante")
     cae = find_key(emission, "cae")
-    success = bool(find_key(emission, "success"))
-    if not emission_ok or not success or not isinstance(number, int) or number <= 0:
-        result["reason"] = "emission_failed"
-        result["emission"] = emission
+    if not emission_ok or not bool(find_key(emission, "success")) or not isinstance(number, int) or number <= 0:
+        result.update({"reason": "emission_failed", "emission": emission})
         return result
 
     replay, replay_ok = _call(client, "emitir_comprobante_avanzado", emission_args)
@@ -240,13 +211,10 @@ def _emit_document(
         "templateVersion": template_version,
         "templateData": _merge_template_data(pdf_cfg.get("templateData"), label),
     })
-    filename = f"{label}-{number}.pdf"
-    pdf_path = output_dir / letter / filename
-    pdf_saved = pdf_ok and _write_pdf(pdf_result, pdf_path)
-    if not pdf_saved:
-        result["reason"] = "pdf_failed"
-        result["pdfStatus"] = find_key(pdf_result, "status")
-        result["pdfErrorCode"] = find_key(pdf_result, "errorCode")
+    pdf_path = output_dir / letter / f"{label}-{number}.pdf"
+    if not (pdf_ok and _write_pdf(pdf_result, pdf_path)):
+        result.update({"reason": "pdf_failed", "pdfStatus": find_key(pdf_result, "status"),
+                       "pdfErrorCode": find_key(pdf_result, "errorCode")})
         return result
 
     result.update({
@@ -259,78 +227,68 @@ def _emit_document(
     return result
 
 
-def _run_letter(
-    *,
-    client: McpClient,
-    context: dict[str, Any],
-    letter: str,
-    date: str,
-    output_dir: pathlib.Path,
-    run_prefix: str,
-) -> dict[str, Any]:
+def _run_letter(*, client: McpClient, context: dict[str, Any], letter: str, date: str,
+                output_dir: pathlib.Path, run_prefix: str) -> dict[str, Any]:
     context_id = str(context["contextId"])
-    receptor = context["receiver"]
+    receptor = receiver_for(context, letter)
     point_of_sale = int(context["pointOfSale"])
     pdf_cfg = context.get("pdf") or {}
+    docs: list[dict[str, Any]] = []
 
     invoice = build_invoice(letter, "invoice", receptor, date)
-    invoice_result = _emit_document(
-        client=client, context_id=context_id, point_of_sale=point_of_sale, letter=letter,
+    invoice_result = _emit_document(client=client, context_id=context_id, letter=letter,
         label=f"factura-{letter.lower()}", invoice=invoice, pdf_cfg=pdf_cfg,
-        output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-invoice",
-    )
+        output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-invoice")
+    docs.append(invoice_result)
     if invoice_result["status"] != "PASS":
-        return {"letter": letter, "status": invoice_result["status"], "documents": [invoice_result]}
+        return {"letter": letter, "status": invoice_result["status"], "documents": docs, "unbalanced": False}
 
-    invoice_assoc = {"tipo": type_name(letter, "invoice"), "puntoVenta": point_of_sale, "numero": invoice_result["number"]}
+    invoice_assoc = {"tipo": type_name(letter, "invoice"), "puntoVenta": point_of_sale,
+                     "numero": invoice_result["number"]}
     debit = build_invoice(letter, "debit", receptor, date, invoice_assoc)
-    debit_result = _emit_document(
-        client=client, context_id=context_id, point_of_sale=point_of_sale, letter=letter,
+    debit_result = _emit_document(client=client, context_id=context_id, letter=letter,
         label=f"nota-debito-{letter.lower()}", invoice=debit, pdf_cfg=pdf_cfg,
-        output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-debit",
-    )
-    if debit_result["status"] != "PASS":
-        return {"letter": letter, "status": "FAIL", "documents": [invoice_result, debit_result], "unbalanced": True}
+        output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-debit")
+    docs.append(debit_result)
 
-    debit_assoc = {"tipo": type_name(letter, "debit"), "puntoVenta": point_of_sale, "numero": debit_result["number"]}
-    credit_debit = build_invoice(letter, "credit", receptor, date, debit_assoc)
-    credit_debit_result = _emit_document(
-        client=client, context_id=context_id, point_of_sale=point_of_sale, letter=letter,
-        label=f"nota-credito-{letter.lower()}-anula-nd", invoice=credit_debit, pdf_cfg=pdf_cfg,
-        output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-credit-debit",
-    )
-    if credit_debit_result["status"] != "PASS":
-        return {"letter": letter, "status": "FAIL", "documents": [invoice_result, debit_result, credit_debit_result], "unbalanced": True}
+    credit_debit_result: dict[str, Any] | None = None
+    if debit_result["status"] == "PASS":
+        debit_assoc = {"tipo": type_name(letter, "debit"), "puntoVenta": point_of_sale,
+                       "numero": debit_result["number"]}
+        credit_debit = build_invoice(letter, "credit", receptor, date, debit_assoc)
+        credit_debit_result = _emit_document(client=client, context_id=context_id, letter=letter,
+            label=f"nota-credito-{letter.lower()}-anula-nd", invoice=credit_debit, pdf_cfg=pdf_cfg,
+            output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-credit-debit")
+        docs.append(credit_debit_result)
 
+    # Once the invoice exists, always attempt its compensating credit note.
     credit_invoice = build_invoice(letter, "credit", receptor, date, invoice_assoc)
-    credit_invoice_result = _emit_document(
-        client=client, context_id=context_id, point_of_sale=point_of_sale, letter=letter,
+    credit_invoice_result = _emit_document(client=client, context_id=context_id, letter=letter,
         label=f"nota-credito-{letter.lower()}-anula-factura", invoice=credit_invoice, pdf_cfg=pdf_cfg,
-        output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-credit-invoice",
+        output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-credit-invoice")
+    docs.append(credit_invoice_result)
+
+    full_pass = (
+        debit_result["status"] == "PASS"
+        and credit_debit_result is not None
+        and credit_debit_result["status"] == "PASS"
+        and credit_invoice_result["status"] == "PASS"
     )
-    docs = [invoice_result, debit_result, credit_debit_result, credit_invoice_result]
     return {
         "letter": letter,
-        "status": "PASS" if credit_invoice_result["status"] == "PASS" else "FAIL",
+        "status": "PASS" if full_pass else "FAIL",
         "documents": docs,
-        "unbalanced": credit_invoice_result["status"] != "PASS",
-        "netEffectArs": "0.00" if credit_invoice_result["status"] == "PASS" else "UNKNOWN",
+        "compensationAttempted": True,
+        "unbalanced": not full_pass,
+        "netEffectArs": "0.00" if full_pass else "UNKNOWN",
     }
 
 
 def _write_summary(report: dict[str, Any], output_dir: pathlib.Path, known_secrets: set[str]) -> None:
     safe = redact(report, known_secrets)
     (output_dir / "summary.json").write_text(json.dumps(safe, ensure_ascii=False, indent=2), encoding="utf-8")
-    lines = [
-        "# ARCA-MCP fiscal smoke",
-        "",
-        f"- Environment: `{safe['environment']}`",
-        f"- Overall: `{safe['overallStatus']}`",
-        f"- Started UTC: `{safe['startedAt']}`",
-        "",
-        "## Results",
-        "",
-    ]
+    lines = ["# ARCA-MCP fiscal smoke", "", f"- Environment: `{safe['environment']}`",
+             f"- Overall: `{safe['overallStatus']}`", f"- Started UTC: `{safe['startedAt']}`", "", "## Results", ""]
     for ctx in safe["contexts"]:
         lines.append(f"### Context `{ctx['contextId']}`")
         for result in ctx["results"]:
@@ -367,7 +325,6 @@ def main() -> int:
     output_dir = pathlib.Path(args.output_dir) / stamp
     output_dir.mkdir(parents=True, exist_ok=True)
     client = McpClient(endpoint, token, int(config.get("timeoutSeconds", 45)))
-
     known_secrets = {token, run_prefix}
     known_secrets.update(collect_sensitive_values(config))
     report: dict[str, Any] = {
@@ -385,14 +342,12 @@ def main() -> int:
         if not context_id:
             print("Cada contexto requiere contextId.", file=sys.stderr)
             return 2
-
         diagnostic, diag_ok = _call(client, "diagnosticar_contexto_fiscal", {"contextId": context_id})
         environment = str(find_key(diagnostic, "environment") or "").strip()
         if not diag_ok or not environment:
             print(f"No se pudo diagnosticar environment para {context_id}.", file=sys.stderr)
             return 3
         report["environment"] = environment if report["environment"] == "UNKNOWN" else report["environment"]
-
         try:
             assert_execution_allowed(environment, execute=args.execute, allow_production=args.allow_production)
         except ValueError as exc:
@@ -402,14 +357,8 @@ def main() -> int:
         letters = [str(x).upper() for x in context.get("letters", ["A", "B", "C"])]
         ctx_report = {"contextId": context_id, "environment": environment, "results": []}
         for letter in letters:
-            result = _run_letter(
-                client=client,
-                context=context,
-                letter=letter,
-                date=dt.date.today().strftime("%Y%m%d"),
-                output_dir=output_dir,
-                run_prefix=run_prefix,
-            )
+            result = _run_letter(client=client, context=context, letter=letter,
+                date=dt.date.today().strftime("%Y%m%d"), output_dir=output_dir, run_prefix=run_prefix)
             ctx_report["results"].append(result)
             any_skips = any_skips or result["status"].startswith("SKIPPED")
             any_fail = any_fail or result["status"] == "FAIL"
