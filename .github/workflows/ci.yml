@@ -66,6 +66,7 @@ jobs:
           set -euo pipefail
           docker run -d --name dcarca-mcp-ci \
             -e ASPNETCORE_ENVIRONMENT=Testing \
+            -v "$PWD/dcArca.McpServer/appsettings.Testing.json:/app/appsettings.Testing.json:ro" \
             -p 18080:8080 \
             dcarca-mcpserver:ci
           cleanup() {
