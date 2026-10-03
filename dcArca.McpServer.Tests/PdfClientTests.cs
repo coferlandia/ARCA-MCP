@@ -172,6 +172,41 @@ public class PdfClientTests
     }
 
     [Fact]
+    public async Task BodyPdfDetenido_RespetaTimeoutEndToEnd()
+    {
+        var client = CreateClient((_, _) => Task.FromResult(PdfResponse(new BlockingReadStream())), TimeSpan.FromMilliseconds(200));
+
+        var exception = await Assert.ThrowsAsync<CreadorPdfException>(() =>
+            client.RenderAsync(LegacyTemplate(), JsonSerializer.SerializeToElement(new { })));
+
+        Assert.Equal(PdfFailureKind.Timeout, exception.FailureKind);
+    }
+
+    [Fact]
+    public async Task BodyErrorDetenido_RespetaTimeoutEndToEnd()
+    {
+        var client = CreateClient((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden)
+        {
+            Content = new StreamContent(new BlockingReadStream())
+        }), TimeSpan.FromMilliseconds(200));
+
+        var exception = await Assert.ThrowsAsync<CreadorPdfException>(() =>
+            client.RenderAsync(LegacyTemplate(), JsonSerializer.SerializeToElement(new { })));
+
+        Assert.Equal(PdfFailureKind.Timeout, exception.FailureKind);
+    }
+
+    [Fact]
+    public async Task CancelacionExplicitaDuranteLecturaBody_SePropaga()
+    {
+        var client = CreateClient((_, _) => Task.FromResult(PdfResponse(new BlockingReadStream())), TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            client.RenderAsync(LegacyTemplate(), JsonSerializer.SerializeToElement(new { }), cts.Token));
+    }
+
+    [Fact]
     public async Task CancelacionExplicita_SePropaga()
     {
         var client = CreateClient((_, cancellationToken) =>
@@ -221,12 +256,13 @@ public class PdfClientTests
     }
 
     private static PdfClient CreateClient(
-        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder)
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder,
+        TimeSpan? timeout = null)
     {
         var httpClient = new HttpClient(new DelegateHandler(responder))
         {
             BaseAddress = new Uri("https://pdf.test"),
-            Timeout = TimeSpan.FromSeconds(5)
+            Timeout = timeout ?? TimeSpan.FromSeconds(5)
         };
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -247,6 +283,13 @@ public class PdfClientTests
         return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
     }
 
+    private static HttpResponseMessage PdfResponse(Stream stream)
+    {
+        var content = new StreamContent(stream);
+        content.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+    }
+
     private static HttpResponseMessage ErrorResponse(HttpStatusCode status, string code, string message)
         => new(status)
         {
@@ -263,5 +306,31 @@ public class PdfClientTests
             HttpRequestMessage request,
             CancellationToken cancellationToken)
             => callback(request, cancellationToken);
+    }
+
+    private sealed class BlockingReadStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+
+        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
     }
 }
