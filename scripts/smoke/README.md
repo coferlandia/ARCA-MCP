@@ -4,6 +4,41 @@ Smoke test fiscal reutilizable para validar una instalación de ARCA-MCP tanto e
 
 El runner genera comprobantes reales, por lo que nunca emite sin `--execute`. Si el contexto diagnosticado por el MCP es producción, exige además `--allow-production`.
 
+## Cliente local recomendado
+
+Para probar ARCA-MCP exactamente como lo haría un consumidor externo, usar `run-local.sh` desde Git Bash, Linux o macOS. El wrapper no accede a archivos ni servicios internos del servidor: usa únicamente el endpoint HTTP público, health checks y el contrato MCP autenticado con `Authorization: Bearer <api-key>`.
+
+Primero crear la configuración local no versionada:
+
+```bash
+cp scripts/smoke/fiscal_smoke.example.json scripts/smoke/fiscal_smoke.local.json
+```
+
+Completar el JSON y luego ejecutar:
+
+```bash
+bash scripts/smoke/run-local.sh --execute
+```
+
+Si `ARCA_MCP_TOKEN` no está exportado, el script pide la API key sin mostrarla. Por defecto usa `https://arca.cadencia.com.ar/`; se puede cambiar con `--url` o `ARCA_MCP_URL`. Para evitar enviar la credencial en claro, los endpoints remotos deben usar HTTPS; `http://` sólo se admite para `localhost` o `127.0.0.1` durante desarrollo local.
+
+Ejemplo con otro endpoint:
+
+```bash
+bash scripts/smoke/run-local.sh \
+  --url https://arca.example.com \
+  --config scripts/smoke/fiscal_smoke.local.json \
+  --execute
+```
+
+Producción requiere además el opt-in explícito que ya impone el runner fiscal:
+
+```bash
+bash scripts/smoke/run-local.sh --execute --allow-production
+```
+
+El wrapper verifica `/health/live` y `/health/ready` y luego delega al mismo `fiscal_smoke.py`. La primera operación MCP es el diagnóstico del contexto usando la API key real; una credencial inválida, scopes/grants insuficientes o un contexto no autorizado abortan antes de iniciar emisiones.
+
 ## Qué prueba
 
 Por cada letra configurada (`A`, `B`, `C`) intenta el circuito completo:
@@ -28,12 +63,6 @@ Si la llamada de emisión sufre timeout o error de transporte, el runner consult
 
 ## Configuración
 
-Copiar el ejemplo a un archivo local no versionado:
-
-```bash
-cp scripts/smoke/fiscal_smoke.example.json scripts/smoke/fiscal_smoke.local.json
-```
-
 Completar:
 
 - `contextId`: contexto fiscal de la instalación.
@@ -46,26 +75,19 @@ Completar:
 
 No guardar tokens, certificados ni passwords en el JSON.
 
-## Variables de entorno
+## Uso directo del runner
+
+El wrapper local es la forma recomendada para testing manual. Para automatizaciones también se puede invocar directamente el runner existente:
 
 ```bash
 export ARCA_MCP_URL="https://arca.example.com/"
-read -s -p "ARCA MCP token: " ARCA_MCP_TOKEN
-echo
-export ARCA_MCP_TOKEN
-```
-
-## Homologación
-
-```bash
+export ARCA_MCP_TOKEN="<api-key>"
 bash scripts/smoke/fiscal_smoke.sh \
   --config scripts/smoke/fiscal_smoke.local.json \
   --execute
 ```
 
-## Producción
-
-Producción requiere doble opt-in deliberado:
+Producción:
 
 ```bash
 bash scripts/smoke/fiscal_smoke.sh \
@@ -110,6 +132,7 @@ Cada letra informa además `fiscallyBalanced`. Un `FAIL` puede tener `fiscallyBa
 
 ```bash
 python3 -m unittest scripts/smoke/test_fiscal_smoke.py
+bash scripts/smoke/test_run_local.sh
 ```
 
 Estos tests no llaman a ARCA ni al MCP desplegado.
