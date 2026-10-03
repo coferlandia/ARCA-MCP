@@ -22,7 +22,9 @@ Cada documento tiene un límite duro de ARS 1,00. La factura y los datos visuale
 
 Para A y B el smoke usa neto ARS 0,83 + IVA ARS 0,17 = total ARS 1,00. Para C usa neto ARS 1,00, IVA ARS 0,00 y no informa alícuota.
 
-Si la factura de una letra no pasa el preflight determinístico, esa letra queda como `SKIPPED_UNSUPPORTED`. Si una factura ya fue autorizada y falla un paso posterior, el runner intenta igualmente emitir la nota de crédito que compensa la factura original y marca el resultado como `FAIL`/`unbalanced` si no puede demostrar el circuito completo.
+Si la factura de una letra no pasa el preflight determinístico, esa letra queda como `SKIPPED_UNSUPPORTED`. Si un comprobante ya fue autorizado y falla un paso posterior, incluso replay, verificación o PDF, el runner conserva ese hecho fiscal y prioriza su compensación antes de continuar.
+
+Si la llamada de emisión sufre timeout o error de transporte, el runner consulta la operación durable por la misma idempotency key y ejecuta `reconciliar_operacion`. Si recupera estado `Authorized`, continúa usando el número/CAE durable sin reemitir una operación nueva. Si el estado sigue `Submitting`/`Uncertain` o no puede demostrarse el resultado, termina con `FAIL`, `manualReconciliationRequired=true` y deja de iniciar nuevas letras. Antes de detenerse intenta compensar cualquier autorización previa cuyo estado sí esté confirmado.
 
 ## Configuración
 
@@ -72,7 +74,7 @@ bash scripts/smoke/fiscal_smoke.sh \
   --allow-production
 ```
 
-El flag no fuerza el entorno: primero el runner llama a `diagnosticar_contexto_fiscal` y sólo usa `--allow-production` cuando el MCP reporta producción.
+El flag no fuerza el entorno: primero el runner llama a `diagnosticar_contexto_fiscal` y sólo usa `--allow-production` cuando el MCP reporta producción. Cualquier nombre de entorno desconocido se rechaza de forma fail-closed.
 
 ## Evidencia y PDFs
 
@@ -100,7 +102,9 @@ Estados globales:
 
 - `PASS`: todas las letras configuradas completaron el circuito y quedaron compensadas.
 - `PASS_WITH_SKIPS`: al menos una letra no pasó el preflight inicial y fue omitida, sin fallos posteriores a una emisión.
-- `FAIL`: hubo un fallo después de iniciar un circuito o no se pudo verificar/descargar un PDF.
+- `FAIL`: hubo un fallo después de iniciar un circuito, no se pudo verificar/descargar un PDF o existe un resultado fiscal que requiere reconciliación manual.
+
+Cada letra informa además `fiscallyBalanced`. Un `FAIL` puede tener `fiscallyBalanced=true` cuando el fallo fue de verificación/PDF pero las autorizaciones fiscales confirmadas quedaron correctamente compensadas.
 
 ## Tests sin emitir
 
