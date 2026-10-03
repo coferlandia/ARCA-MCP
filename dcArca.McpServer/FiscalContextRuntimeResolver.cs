@@ -1,7 +1,6 @@
 using System.Security.Claims;
 using dcArca.Core.Models;
 using dcArca.Core.Services;
-using dcArca.Core.Services.Logging;
 
 namespace dcArca.McpServer;
 
@@ -22,17 +21,6 @@ public sealed class FiscalContextAccessException : Exception
     public FiscalContextAccessException(string code, string message) : base(message)
         => Code = code;
 }
-
-public sealed record FiscalCredentialSecret(
-    string CredentialId,
-    string CacheIdentity,
-    string CertificatePath,
-    string CertificatePassword);
-
-public sealed record FiscalEnvironmentEndpoints(
-    string WsaaUrl,
-    string WsfeUrl,
-    string PadronUrl);
 
 public sealed class FiscalContextRuntime : IDisposable
 {
@@ -88,25 +76,19 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
 {
     private readonly IRepresentedFiscalContextStore _contexts;
     private readonly IEmissionIdempotencyStore _operations;
-    private readonly IConfiguration _configuration;
-    private readonly dcArcaConfig _legacyConfig;
     private readonly SingleFiscalContextOptions _legacyOptions;
-    private readonly IAfipLogger _logger;
+    private readonly IFiscalCredentialMaterializer _materializer;
 
     public FiscalContextRuntimeResolver(
         IRepresentedFiscalContextStore contexts,
         IEmissionIdempotencyStore operations,
-        IConfiguration configuration,
-        dcArcaConfig legacyConfig,
         SingleFiscalContextOptions legacyOptions,
-        IAfipLogger logger)
+        IFiscalCredentialMaterializer materializer)
     {
         _contexts = contexts;
         _operations = operations;
-        _configuration = configuration;
-        _legacyConfig = legacyConfig;
         _legacyOptions = legacyOptions;
-        _logger = logger;
+        _materializer = materializer;
     }
 
     public async Task<FiscalContextRuntime> ResolveForReadAsync(
@@ -120,7 +102,9 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
             throw new FiscalContextAccessException("FISCAL_CONTEXT_DISABLED", "El contexto fiscal está deshabilitado.");
 
         var assignment = context.ActiveAssignment
-            ?? throw new FiscalContextAccessException("ACTIVE_ASSIGNMENT_REQUIRED", "El contexto fiscal no tiene una asignación activa para consultas nuevas.");
+            ?? throw new FiscalContextAccessException(
+                "ACTIVE_ASSIGNMENT_REQUIRED",
+                "El contexto fiscal no tiene una asignación activa para consultas nuevas.");
         return CreateRuntime(consumerId, context, assignment);
     }
 
@@ -138,7 +122,10 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         if (string.IsNullOrWhiteSpace(idempotencyKey))
             throw new FiscalContextAccessException("IDEMPOTENCY_KEY_REQUIRED", "idempotencyKey es obligatoria para emitir.");
 
-        var operationKeyHash = EmissionRequestFingerprint.OperationKeyHash(consumerId, context.ContextId, idempotencyKey);
+        var operationKeyHash = EmissionRequestFingerprint.OperationKeyHash(
+            consumerId,
+            context.ContextId,
+            idempotencyKey);
         var existing = await _operations.GetAsync(operationKeyHash, cancellationToken);
 
         CredentialAssignmentRecord assignment;
@@ -151,20 +138,33 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
                 || existing.Identity.PuntoVenta != context.PointOfSale
                 || existing.Identity.TipoComprobante != (int)tipoComprobante)
             {
-                throw new FiscalContextAccessException("IDEMPOTENCY_CONTEXT_MISMATCH", "La operación persistida no pertenece al contexto fiscal solicitado.");
+                throw new FiscalContextAccessException(
+                    "IDEMPOTENCY_CONTEXT_MISMATCH",
+                    "La operación persistida no pertenece al contexto fiscal solicitado.");
             }
 
             assignment = context.Assignments.SingleOrDefault(x =>
-                    string.Equals(x.AssignmentRevision, existing.Identity.CredentialAssignmentRevision, StringComparison.Ordinal))
-                ?? throw new FiscalContextAccessException("HISTORICAL_ASSIGNMENT_MISSING", "La asignación de credencial histórica de la operación ya no está disponible.");
+                    string.Equals(
+                        x.AssignmentRevision,
+                        existing.Identity.CredentialAssignmentRevision,
+                        StringComparison.Ordinal))
+                ?? throw new FiscalContextAccessException(
+                    "HISTORICAL_ASSIGNMENT_MISSING",
+                    "La asignación de credencial histórica de la operación ya no está disponible.");
 
             if (assignment.Status == CredentialAssignmentStatus.Disabled)
-                throw new FiscalContextAccessException("HISTORICAL_ASSIGNMENT_INTERVENTION_REQUIRED", "La credencial original de la operación está deshabilitada; se requiere intervención explícita y no se hará fallback automático.");
+            {
+                throw new FiscalContextAccessException(
+                    "HISTORICAL_ASSIGNMENT_INTERVENTION_REQUIRED",
+                    "La credencial original de la operación está deshabilitada; se requiere intervención explícita y no se hará fallback automático.");
+            }
         }
         else
         {
             assignment = context.ActiveAssignment
-                ?? throw new FiscalContextAccessException("ACTIVE_ASSIGNMENT_REQUIRED", "El contexto fiscal no tiene una asignación activa para nuevas emisiones.");
+                ?? throw new FiscalContextAccessException(
+                    "ACTIVE_ASSIGNMENT_REQUIRED",
+                    "El contexto fiscal no tiene una asignación activa para nuevas emisiones.");
         }
 
         return CreateRuntime(consumerId, context, assignment);
@@ -178,13 +178,16 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
     {
         var consumerId = principal.FindFirstValue(ArcaClaimTypes.ConsumerId);
         if (string.IsNullOrWhiteSpace(consumerId))
-            throw new FiscalContextAccessException("CONSUMER_ID_REQUIRED", "La identidad autenticada no contiene un consumerId estable.");
+            throw new FiscalContextAccessException(
+                "CONSUMER_ID_REQUIRED",
+                "La identidad autenticada no contiene un consumerId estable.");
 
         var contexts = await _contexts.ListAsync(cancellationToken);
         var explicitGrants = principal.FindAll(ArcaClaimTypes.ContextGrant)
             .Select(claim => ParseGrant(claim.Value))
             .Where(grant => string.Equals(grant.Operation, operation, StringComparison.Ordinal))
             .Select(grant => grant.ContextId)
+            .Where(contextId => !string.IsNullOrWhiteSpace(contextId))
             .Distinct(StringComparer.Ordinal)
             .ToHashSet(StringComparer.Ordinal);
 
@@ -213,17 +216,26 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         {
             var contextId = requestedContextId.Trim();
             if (!authorized.Contains(contextId))
-                throw new FiscalContextAccessException("FISCAL_CONTEXT_FORBIDDEN", "El consumidor no tiene grant para el contexto fiscal solicitado.");
-            var selected = contexts.SingleOrDefault(x => string.Equals(x.ContextId, contextId, StringComparison.Ordinal))
-                ?? throw new FiscalContextAccessException("FISCAL_CONTEXT_NOT_FOUND", "El contexto fiscal solicitado no existe.");
+                throw new FiscalContextAccessException(
+                    "FISCAL_CONTEXT_FORBIDDEN",
+                    "El consumidor no tiene grant para el contexto fiscal solicitado.");
+            var selected = contexts.SingleOrDefault(x =>
+                    string.Equals(x.ContextId, contextId, StringComparison.Ordinal))
+                ?? throw new FiscalContextAccessException(
+                    "FISCAL_CONTEXT_NOT_FOUND",
+                    "El contexto fiscal solicitado no existe.");
             return (consumerId, selected);
         }
 
         var candidates = contexts.Where(x => authorized.Contains(x.ContextId)).ToArray();
         if (candidates.Length == 0)
-            throw new FiscalContextAccessException("FISCAL_CONTEXT_FORBIDDEN", "El consumidor no tiene un contexto fiscal autorizado para esta operación.");
+            throw new FiscalContextAccessException(
+                "FISCAL_CONTEXT_FORBIDDEN",
+                "El consumidor no tiene un contexto fiscal autorizado para esta operación.");
         if (candidates.Length > 1)
-            throw new FiscalContextAccessException("FISCAL_CONTEXT_REQUIRED", "contextId es obligatorio porque el consumidor tiene más de un contexto autorizado.");
+            throw new FiscalContextAccessException(
+                "FISCAL_CONTEXT_REQUIRED",
+                "contextId es obligatorio porque el consumidor tiene más de un contexto autorizado.");
         return (consumerId, candidates[0]);
     }
 
@@ -233,43 +245,21 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         CredentialAssignmentRecord assignment)
     {
         if (assignment.Status is CredentialAssignmentStatus.Candidate or CredentialAssignmentStatus.Validated)
-            throw new FiscalContextAccessException("ASSIGNMENT_NOT_ACTIVE", "La asignación de credencial todavía no está activa para trabajo fiscal.");
+            throw new FiscalContextAccessException(
+                "ASSIGNMENT_NOT_ACTIVE",
+                "La asignación de credencial todavía no está activa para trabajo fiscal.");
 
-        var secret = ResolveCredentialSecret(assignment.CredentialId, context.Environment);
-        var endpoints = ResolveEnvironment(context.Environment);
-        var config = new dcArcaConfig
-        {
-            Cuit = context.RepresentedCuit.ToString(),
-            PuntoVenta = context.PointOfSale,
-            CertificatePath = secret.CertificatePath,
-            CertificatePassword = secret.CertificatePassword,
-            WsaaUrl = endpoints.WsaaUrl,
-            WsfeUrl = endpoints.WsfeUrl,
-            PadronUrl = endpoints.PadronUrl
-        };
-
-        // dcArcaAuthService currently uses its cuit constructor argument only as the WSAA
-        // token-cache namespace. Passing an opaque credential/environment identity prevents
-        // two operator certificates representing the same CUIT from sharing a token.
-        var wsfeAuth = new dcArcaAuthService(
-            endpoints.WsaaUrl,
-            secret.CertificatePath,
-            secret.CertificatePassword,
-            secret.CacheIdentity,
-            serviceName: "wsfe",
-            logger: _logger);
-        var padronAuth = new dcArcaAuthService(
-            endpoints.WsaaUrl,
-            secret.CertificatePath,
-            secret.CertificatePassword,
-            secret.CacheIdentity,
-            serviceName: "ws_sr_constancia_inscripcion",
-            logger: _logger);
-
-        var wsfe = new dcWsfeClient(config, wsfeAuth, logger: _logger);
-        var padron = new dcPadronClient(config, padronAuth, logger: _logger);
+        var materialized = _materializer.Materialize(context, assignment);
+        var wsfe = new dcWsfeClient(
+            materialized.Config,
+            materialized.WsfeAuth,
+            logger: null);
+        var padron = new dcPadronClient(
+            materialized.Config,
+            materialized.PadronAuth,
+            logger: null);
         var identityProvider = new SingleFiscalOperationIdentityProvider(
-            config,
+            materialized.Config,
             new SingleFiscalContextOptions(
                 consumerId,
                 context.ContextId,
@@ -277,49 +267,14 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
                 context.ContextRevision,
                 assignment.AssignmentRevision));
 
-        return new FiscalContextRuntime(consumerId, context, assignment, config, wsfe, padron, identityProvider);
-    }
-
-    private FiscalCredentialSecret ResolveCredentialSecret(string credentialId, string environment)
-    {
-        var section = _configuration.GetSection($"FiscalCredentials:{credentialId}");
-        var certificatePath = section["CertificatePath"]?.Trim();
-        var certificatePassword = section["CertificatePassword"] ?? string.Empty;
-
-        if (string.IsNullOrWhiteSpace(certificatePath)
-            && string.Equals(credentialId, "legacy-default", StringComparison.Ordinal))
-        {
-            certificatePath = _legacyConfig.CertificatePath;
-            certificatePassword = _legacyConfig.CertificatePassword;
-        }
-
-        if (string.IsNullOrWhiteSpace(certificatePath))
-            throw new FiscalContextAccessException("CREDENTIAL_REFERENCE_UNRESOLVED", "La referencia de credencial del contexto no está disponible en el host.");
-
-        return new FiscalCredentialSecret(
-            credentialId,
-            $"{environment}:{credentialId}",
-            certificatePath,
-            certificatePassword);
-    }
-
-    private FiscalEnvironmentEndpoints ResolveEnvironment(string environment)
-    {
-        var section = _configuration.GetSection($"FiscalEnvironments:{environment}");
-        var wsaa = section["WsaaUrl"]?.Trim();
-        var wsfe = section["WsfeUrl"]?.Trim();
-        var padron = section["PadronUrl"]?.Trim();
-
-        if (string.Equals(environment, _legacyOptions.Environment, StringComparison.OrdinalIgnoreCase))
-        {
-            wsaa ??= _legacyConfig.WsaaUrl;
-            wsfe ??= _legacyConfig.WsfeUrl;
-            padron ??= _legacyConfig.PadronUrl;
-        }
-
-        if (string.IsNullOrWhiteSpace(wsaa) || string.IsNullOrWhiteSpace(wsfe) || string.IsNullOrWhiteSpace(padron))
-            throw new FiscalContextAccessException("FISCAL_ENVIRONMENT_UNRESOLVED", "El ambiente fiscal del contexto no tiene endpoints server-owned completos.");
-        return new FiscalEnvironmentEndpoints(wsaa, wsfe, padron);
+        return new FiscalContextRuntime(
+            consumerId,
+            context,
+            assignment,
+            materialized.Config,
+            wsfe,
+            padron,
+            identityProvider);
     }
 
     private static (string ContextId, string Operation) ParseGrant(string value)
