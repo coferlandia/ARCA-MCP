@@ -107,6 +107,15 @@ public sealed class EmissionIdempotencyConflictException : Exception
         : base("IDEMPOTENCY_KEY_REUSED") { }
 }
 
+public sealed class EmissionTerminalStateConflictException : Exception
+{
+    public EmissionIdempotencyRecord Existing { get; }
+
+    public EmissionTerminalStateConflictException(EmissionIdempotencyRecord existing)
+        : base("EMISSION_TERMINAL_STATE_ALREADY_PERSISTED")
+        => Existing = existing;
+}
+
 public interface IEmissionIdempotencyStore
 {
     Task EnsureContextAsync(
@@ -271,6 +280,14 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
         if (!FiscalEvidenceEquals(existing.FiscalEvidence, record.FiscalEvidence))
             throw new InvalidDataException("La evidencia fiscal congelada de la operación no puede modificarse.");
 
+        if (IsTerminal(existing.State))
+        {
+            // The first durable terminal result is authoritative, including its fiscal result
+            // metadata. Every later writer must observe that exact winner instead of silently
+            // replacing it or assuming its own same-state result was persisted.
+            throw new EmissionTerminalStateConflictException(existing);
+        }
+
         WriteAtomic(path, record with
         {
             SchemaVersion = CurrentSchemaVersion,
@@ -349,6 +366,9 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
             throw new EmissionIdempotencyConflictException();
         }
     }
+
+    private static bool IsTerminal(EmissionIdempotencyState state)
+        => state is EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected;
 
     private static bool FiscalEvidenceEquals(StoredFiscalEvidence left, StoredFiscalEvidence right)
         => string.Equals(

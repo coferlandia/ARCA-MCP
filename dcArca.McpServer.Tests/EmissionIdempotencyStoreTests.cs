@@ -50,6 +50,102 @@ public class EmissionIdempotencyStoreTests
     }
 
     [Fact]
+    public async Task Authorized_NoPuedeSerDegradadoPorSnapshotUncertainAtrasado()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemEmissionIdempotencyStore(temp.Path);
+        var keyHash = new string('a', 64);
+        var created = await store.GetOrCreateAsync(
+            keyHash,
+            new string('b', 64),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            Identity(),
+            StoredFiscalEvidence.FromRequest(Request()));
+        var uncertainSnapshot = created with
+        {
+            NumeroComprobante = 123,
+            State = EmissionIdempotencyState.Uncertain,
+            FiscalResult = StoredFiscalResult.FromResponse(new dcFacturaResponse
+            {
+                Success = false,
+                NumeroComprobante = 123,
+                Codigo = "EMISSION_UNCERTAIN",
+                EmissionOutcome = dcEmissionOutcome.Uncertain
+            }),
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        await store.SaveAsync(uncertainSnapshot);
+
+        var authorized = uncertainSnapshot with
+        {
+            State = EmissionIdempotencyState.Authorized,
+            FiscalResult = StoredFiscalResult.FromResponse(new dcFacturaResponse
+            {
+                Success = true,
+                NumeroComprobante = 123,
+                Cae = "CAE123",
+                CaeVencimiento = "20261011",
+                Resultado = "A",
+                EmissionOutcome = dcEmissionOutcome.Authorized
+            }),
+            UpdatedAt = DateTimeOffset.UtcNow.AddSeconds(1)
+        };
+        await store.SaveAsync(authorized);
+
+        var conflict = await Assert.ThrowsAsync<EmissionTerminalStateConflictException>(() =>
+            store.SaveAsync(uncertainSnapshot with { UpdatedAt = DateTimeOffset.UtcNow.AddSeconds(2) }));
+
+        Assert.Equal(EmissionIdempotencyState.Authorized, conflict.Existing.State);
+        Assert.Equal("CAE123", conflict.Existing.FiscalResult?.Cae);
+        var persisted = await store.GetAsync(keyHash);
+        Assert.Equal(EmissionIdempotencyState.Authorized, persisted!.State);
+        Assert.Equal("CAE123", persisted.FiscalResult?.Cae);
+    }
+
+    [Fact]
+    public async Task FiscalRejected_NoPuedeSerReabiertoPorEstadoPrevio()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemEmissionIdempotencyStore(temp.Path);
+        var keyHash = new string('a', 64);
+        var created = await store.GetOrCreateAsync(
+            keyHash,
+            new string('b', 64),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            Identity(),
+            StoredFiscalEvidence.FromRequest(Request()));
+        var submitting = created with
+        {
+            NumeroComprobante = 123,
+            State = EmissionIdempotencyState.Submitting,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        await store.SaveAsync(submitting);
+        var rejected = submitting with
+        {
+            State = EmissionIdempotencyState.FiscalRejected,
+            FiscalResult = StoredFiscalResult.FromResponse(new dcFacturaResponse
+            {
+                Success = false,
+                NumeroComprobante = 123,
+                Codigo = "ARCA_REJECTED",
+                Resultado = "R",
+                EmissionOutcome = dcEmissionOutcome.FiscalRejected
+            }),
+            UpdatedAt = DateTimeOffset.UtcNow.AddSeconds(1)
+        };
+        await store.SaveAsync(rejected);
+
+        var conflict = await Assert.ThrowsAsync<EmissionTerminalStateConflictException>(() =>
+            store.SaveAsync(submitting with { UpdatedAt = DateTimeOffset.UtcNow.AddSeconds(2) }));
+
+        Assert.Equal(EmissionIdempotencyState.FiscalRejected, conflict.Existing.State);
+        var persisted = await store.GetAsync(keyHash);
+        Assert.Equal(EmissionIdempotencyState.FiscalRejected, persisted!.State);
+        Assert.Equal("ARCA_REJECTED", persisted.FiscalResult?.Codigo);
+    }
+
+    [Fact]
     public async Task MismaKeyHashConOtroRequestHash_FallaCerrado()
     {
         using var temp = new TempDirectory();
