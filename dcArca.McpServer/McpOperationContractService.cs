@@ -208,7 +208,7 @@ public sealed class McpOperationContractService
         var record = located.Record;
         if (record is null) return NotFound(located.ContextId);
 
-        if (record.State is EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected)
+        if (IsTerminal(record.State))
             return Build(record, officialRead: null);
 
         if (record.State is EmissionIdempotencyState.Created or EmissionIdempotencyState.NumberAssigned)
@@ -246,6 +246,13 @@ public sealed class McpOperationContractService
             (dcTipoComprobante)record.Identity.TipoComprobante,
             cancellationToken);
 
+        var concurrentWinner = await GetTerminalWinnerAsync(record.KeyHash, cancellationToken);
+        if (concurrentWinner is not null)
+        {
+            await ReleaseReservationIfOwnedAsync(concurrentWinner, cancellationToken);
+            return Build(concurrentWinner, consulted);
+        }
+
         if (!consulted.Success || string.IsNullOrWhiteSpace(consulted.Cae))
         {
             return Build(record, consulted) with
@@ -266,11 +273,13 @@ public sealed class McpOperationContractService
                 FiscalResult = StoredFiscalResult.FromResponse(consulted),
                 UpdatedAt = DateTimeOffset.UtcNow
             };
-            await _operations.SaveAsync(authorized, cancellationToken);
-            await _seriesCoordinator.ReleaseAsync(record.Identity, record.KeyHash, cancellationToken);
-            return Build(authorized, consulted) with
+            var persisted = await SaveOrObserveTerminalWinnerAsync(authorized, cancellationToken);
+            await ReleaseReservationIfOwnedAsync(persisted, cancellationToken);
+            return Build(persisted, consulted) with
             {
-                SafeMessage = "La lectura fiscal confirmó equivalencia completa con la intención persistida; no se emitió un nuevo comprobante."
+                SafeMessage = persisted == authorized
+                    ? "La lectura fiscal confirmó equivalencia completa con la intención persistida; no se emitió un nuevo comprobante."
+                    : "Una transición concurrente ya fijó el resultado fiscal terminal; se preservó el resultado durable ganador."
             };
         }
 
@@ -289,8 +298,16 @@ public sealed class McpOperationContractService
             FiscalResult = StoredFiscalResult.FromResponse(synthetic),
             UpdatedAt = DateTimeOffset.UtcNow
         };
-        await _operations.SaveAsync(uncertain, cancellationToken);
-        return Build(uncertain, consulted) with
+        var afterSave = await SaveOrObserveTerminalWinnerAsync(uncertain, cancellationToken);
+        if (IsTerminal(afterSave.State))
+        {
+            await ReleaseReservationIfOwnedAsync(afterSave, cancellationToken);
+            return Build(afterSave, consulted) with
+            {
+                SafeMessage = "Una transición concurrente ya fijó el resultado fiscal terminal; la reconciliación atrasada no lo degradó."
+            };
+        }
+        return Build(afterSave, consulted) with
         {
             ErrorCode = comparison.Code,
             SafeMessage = comparison.Message
@@ -313,6 +330,39 @@ public sealed class McpOperationContractService
         response.OperationContextId = record.Identity.ContextId;
         response.OperationState = record.State.ToString();
         response.AllowedNextActions = AllowedActions(record);
+    }
+
+    private async Task<EmissionIdempotencyRecord?> GetTerminalWinnerAsync(
+        string keyHash,
+        CancellationToken cancellationToken)
+    {
+        var current = await _operations.GetAsync(keyHash, cancellationToken);
+        return current is not null && IsTerminal(current.State) ? current : null;
+    }
+
+    private async Task<EmissionIdempotencyRecord> SaveOrObserveTerminalWinnerAsync(
+        EmissionIdempotencyRecord proposed,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _operations.SaveAsync(proposed, cancellationToken);
+            return proposed;
+        }
+        catch (EmissionTerminalStateConflictException conflict)
+        {
+            return conflict.Existing;
+        }
+    }
+
+    private async Task ReleaseReservationIfOwnedAsync(
+        EmissionIdempotencyRecord record,
+        CancellationToken cancellationToken)
+    {
+        if (!IsTerminal(record.State)) return;
+        var active = await _seriesCoordinator.GetActiveAsync(record.Identity, cancellationToken);
+        if (active is not null && string.Equals(active.OwnerKeyHash, record.KeyHash, StringComparison.Ordinal))
+            await _seriesCoordinator.ReleaseAsync(record.Identity, record.KeyHash, cancellationToken);
     }
 
     private async Task<(string ContextId, EmissionIdempotencyRecord? Record)> LocateAsync(
@@ -425,6 +475,9 @@ public sealed class McpOperationContractService
             ["operation"],
             null,
             null);
+
+    private static bool IsTerminal(EmissionIdempotencyState state)
+        => state is EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected;
 
     private static string[] AllowedActions(EmissionIdempotencyRecord record)
         => record.State switch
