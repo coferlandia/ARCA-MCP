@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace dcArca.McpServer;
@@ -39,6 +40,7 @@ public static class EmissionStoreBackupRecovery
             throw new IOException($"El destino de backup ya existe: {backup}");
         EnsureDirectoriesDoNotOverlap(source, backup);
 
+        await using var storeMaintenanceLease = AcquireStoreMaintenanceLease(source);
         await using var writerProof = AcquireWriterStoppedProof(source);
         var store = new FileSystemEmissionIdempotencyStore(source);
         var operations = await ReadOperationsAsync(store, source, cancellationToken);
@@ -102,10 +104,14 @@ public static class EmissionStoreBackupRecovery
         EnsureDirectoriesDoNotOverlap(backup, target);
         EnsureDirectoriesDoNotOverlap(target, recoveryGate.DirectoryPath);
 
+        // Serialize all administrative operations that can snapshot or replace this store.
+        // The lock is a sibling of the store, so it survives target directory rename/swap.
+        await using var storeMaintenanceLease = AcquireStoreMaintenanceLease(target);
+
         // This lease lives outside the store being swapped. Current server versions acquire a
         // shared runtime lease for their full lifetime, so restore cannot race a live host or a
         // host starting while the store path is being replaced.
-        await using var maintenanceLease = recoveryGate.AcquireMaintenanceLease();
+        await using var recoveryMaintenanceLease = recoveryGate.AcquireMaintenanceLease();
         var manifest = await ReadAndVerifyBackupAsync(backup, cancellationToken);
 
         FileStream? writerProof = null;
@@ -162,8 +168,8 @@ public static class EmissionStoreBackupRecovery
 
             // Keep the original store writer lock for all expensive work. Release it only after
             // staging has been fully verified, because Windows cannot rename a directory that
-            // contains our open handle. The recovery maintenance lease still prevents a current
-            // MCP host from starting in this narrow swap window.
+            // contains our open handle. Both maintenance leases still prevent a current host or
+            // another backup/restore command from entering this narrow swap window.
             writerProof?.Dispose();
             writerProof = null;
 
@@ -298,6 +304,31 @@ public static class EmissionStoreBackupRecovery
         catch (IOException exception)
         {
             throw new FiscalSeriesWriterBusyExceptionWithInner(exception);
+        }
+    }
+
+    private static FileStream AcquireStoreMaintenanceLease(string storeDirectory)
+    {
+        var fullPath = Path.GetFullPath(storeDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var parent = Path.GetDirectoryName(fullPath)
+            ?? throw new InvalidOperationException("No se pudo resolver el directorio padre del store.");
+        Directory.CreateDirectory(parent);
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fullPath))).ToLowerInvariant()[..16];
+        var lockPath = Path.Combine(parent, $".dcarca-store-{hash}.maintenance.lock");
+        try
+        {
+            return new FileStream(
+                lockPath,
+                FileMode.OpenOrCreate,
+                FileAccess.ReadWrite,
+                FileShare.None,
+                1,
+                FileOptions.None);
+        }
+        catch (IOException exception)
+        {
+            throw new IOException("STORE_MAINTENANCE_BUSY", exception);
         }
     }
 
