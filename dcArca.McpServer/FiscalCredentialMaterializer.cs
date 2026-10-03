@@ -4,11 +4,19 @@ using dcArca.Core.Services.Logging;
 
 namespace dcArca.McpServer;
 
+public sealed record FiscalEnvironmentEndpoints(
+    string WsaaUrl,
+    string WsfeUrl,
+    string PadronUrl);
+
 public sealed record FiscalCredentialMaterialization(
     dcArcaConfig Config,
     dcArcaAuthService WsfeAuth,
     dcArcaAuthService PadronAuth,
-    FiscalCredentialHostBinding HostBinding);
+    FiscalCredentialHostBinding HostBinding)
+{
+    public FiscalEnvironmentEndpoints Endpoints => new(Config.WsaaUrl, Config.WsfeUrl, Config.PadronUrl);
+}
 
 public interface IFiscalCredentialMaterializer
 {
