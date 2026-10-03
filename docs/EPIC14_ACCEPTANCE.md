@@ -14,9 +14,9 @@ Contrato MCP objetivo: `arca-mcp/1.0`.
 | #18 | multiemisor, grants, assignments y rotación | `FiscalContextRuntimeResolverTests`, tests de autorización/contextos/CLI | cubierto |
 | #19 | contrato de capacidades/query/reconcile/diagnóstico | `McpOperationContractServiceTests`, `McpOperationRecoveryTransportTests`, `McpContractScopeTests` | cubierto |
 | #20 | snapshot fiscal/PDF consistente y replay | `FiscalDocumentSnapshotTests`, `IdempotentInvoicePdfTests`, `ExistingInvoicePdfServiceTests`, `InvoicePdfServiceTests`, `PdfDocumentRendererTests` | cubierto |
-| #21 | backup/restore fail-closed, Docker Linux, handoff | `EmissionStoreBackupRecoveryTests` + CI Docker/smoke/restart | candidato; homologación real pendiente |
+| #21 | backup/restore fail-closed, Docker Linux, handoff y harness de homologación | `EmissionStoreBackupRecoveryTests` + CI Docker/smoke/restart + `scripts/homologacion/` | candidato; homologación real pendiente |
 
-El SHA exacto candidato debe tomarse del head final del PR #37 que complete CI; el SHA mergeado se registra como evidencia al entregar el handoff.
+La evidencia final debe identificar el SHA o digest exacto del artefacto realmente desplegado. No asumir que el último merge de `main` coincide con el binario/contenedor en ejecución: declararlo mediante `ARCA_MCP_BUILD_SHA` al correr el harness y cotejarlo con el despliegue.
 
 ## Escenarios obligatorios
 
@@ -70,6 +70,24 @@ y un smoke Linux real del contenedor:
 
 No se considera evidencia de homologación: sólo valida artefacto y lifecycle Linux.
 
+## Harness de homologación real
+
+El harness versionado está en `scripts/homologacion/epic14_homologacion.py` y su procedimiento en `scripts/homologacion/README.md`.
+
+Principios del harness:
+
+- endpoint, token y SHA/digest del build llegan por variables de entorno;
+- configuración fiscal local y reportes quedan ignorados por Git;
+- sin `--execute-emission` sólo hace health/capabilities/diagnóstico/preflight;
+- emisión, nota asociada y rechazo fiscal tienen opt-ins explícitos;
+- el replay reutiliza la misma idempotency key y comprueba mismo número/CAE/operationId cuando está disponible;
+- el rechazo sólo cuenta como evidencia si `EmissionOutcome=FiscalRejected`;
+- el escenario PDF conserva `status/errorCode`, redacta el blob y comprueba que el CAE fiscal permanezca igual;
+- CUIT, CAE, token, idempotency key, paths/referencias sensibles y contenido PDF se redactan antes de persistir evidencia;
+- el máximo estado automático es `CANDIDATE_COMPLETE_REQUIRES_HUMAN_REVIEW`.
+
+El reporte del harness no cierra issues automáticamente. Debe revisarse antes de resumirlo/adjuntarlo a #21.
+
 ## Criterios de operación
 
 Antes de habilitar un ambiente fiscal:
@@ -90,6 +108,6 @@ Antes de habilitar un ambiente fiscal:
 No hay en esta ejecución acceso autorizado a credenciales ARCA de homologación que permita producir evidencia fiscal real. Por lo tanto:
 
 - no se afirma que el gate de homologación esté aprobado;
-- #21 no debe cerrarse automáticamente sólo por mergear este PR;
-- la ejecución real debe registrar fecha, ambiente, SHA/imágen, contexto anonimizado, tipo de comprobante, resultado y referencia de evidencia;
+- #21 no debe cerrarse automáticamente sólo por mergear el harness;
+- la ejecución real debe registrar fecha, ambiente, SHA/imagen, contexto anonimizado, tipo de comprobante, resultado y referencia de evidencia;
 - nunca commitear CUIT reales, CAE, certificados, passwords, API keys, token/sign, XML/SOAP ni payloads con PII.
