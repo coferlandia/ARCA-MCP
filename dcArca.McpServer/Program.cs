@@ -39,11 +39,7 @@ if (string.IsNullOrWhiteSpace(recoveryDirectory))
     recoveryDirectory = Path.Combine(dataRoot, "recovery");
 }
 
-var arcaSettingsFile = builder.Environment.EnvironmentName == "Testing"
-    ? $"appsettings.{builder.Environment.EnvironmentName}.json"
-    : "appsettings.json";
-var arcaConfig = dcConfigurationHelper.LoadFromJson(
-    Path.Combine(builder.Environment.ContentRootPath, arcaSettingsFile));
+var arcaConfig = dcConfigurationHelper.LoadFromConfiguration(builder.Configuration);
 var fiscalContextOptions = SingleFiscalContextOptions.FromConfiguration(
     builder.Configuration.GetSection("FiscalContext"));
 
