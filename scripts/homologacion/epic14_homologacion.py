@@ -22,7 +22,7 @@ from typing import Any
 
 SENSITIVE_KEY_PARTS = (
     "authorization", "token", "password", "certificate", "credential",
-    "idempotencykey", "cuit", "cae", "sign", "base64", "pdf",
+    "idempotencykey", "cuit", "cae", "sign", "base64", "path", "secret",
 )
 
 
@@ -183,6 +183,28 @@ def step(report: dict[str, Any], name: str, status: int, envelope: Any, tool_res
     return tool_result
 
 
+def evaluate_overall_status(report: dict[str, Any], emission_requested: bool) -> str:
+    failed_steps = [item["name"] for item in report["steps"] if not item["ok"]]
+    false_checks: list[str] = []
+    if emission_requested:
+        critical_checks = (
+            "environmentVerified",
+            "preflightValid",
+            "emissionSucceeded",
+            "replaySameNumber",
+            "replaySameCae",
+            "pdfFiscalPreserved",
+            "pdfExpectedStatusObserved",
+            "controlledRejectionObserved",
+        )
+        false_checks = [name for name in critical_checks if name in report["checks"] and report["checks"][name] is False]
+    if failed_steps or false_checks:
+        return "FAILED"
+    if report["missingEvidence"]:
+        return "INCOMPLETE"
+    return "CANDIDATE_COMPLETE_REQUIRES_HUMAN_REVIEW"
+
+
 def load_json(path: str) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as handle:
         value = json.load(handle)
@@ -328,6 +350,9 @@ def main() -> int:
 
             pdf = config.get("pdf")
             if isinstance(pdf, dict) and pdf.get("enabled"):
+                expected_pdf_status = str(pdf.get("expectedStatus") or "").strip()
+                if not expected_pdf_status:
+                    report["missingEvidence"].append("PDF habilitado sin expectedStatus; no se puede validar el escenario esperado.")
                 status, envelope, result = client.tool("generar_pdf_comprobante", {
                     "contextId": context_id,
                     "numeroComprobante": number,
@@ -336,7 +361,16 @@ def main() -> int:
                     "templateVersion": pdf.get("templateVersion"),
                     "templateData": pdf.get("templateData") or {},
                 })
-                step(report, "generar_pdf_comprobante", status, envelope, result, known_secrets)
+                pdf_result = step(report, "generar_pdf_comprobante", status, envelope, result, known_secrets)
+                observed_pdf_status = str(find_key(pdf_result, "status") or "")
+                observed_pdf_error = find_key(pdf_result, "errorCode")
+                report["checks"]["pdfStatus"] = observed_pdf_status or "NO_DETECTADO"
+                report["checks"]["pdfErrorCode"] = observed_pdf_error or "NONE"
+                report["checks"]["pdfFiscalPreserved"] = bool(find_key(pdf_result, "success")) and find_key(pdf_result, "cae") == first_cae
+                if expected_pdf_status:
+                    report["checks"]["pdfExpectedStatusObserved"] = observed_pdf_status.lower() == expected_pdf_status.lower()
+                    if observed_pdf_status.lower() != expected_pdf_status.lower():
+                        report["missingEvidence"].append(f"PDF esperaba status={expected_pdf_status} y devolvió {observed_pdf_status or 'NO_DETECTADO'}.")
             else:
                 report["missingEvidence"].append("Escenario PDF/renderer no configurado.")
 
@@ -384,21 +418,7 @@ def main() -> int:
     if not build_sha:
         report["missingEvidence"].append("ARCA_MCP_BUILD_SHA no fue declarado; falta trazabilidad exacta del artefacto desplegado.")
 
-    failed_steps = [item["name"] for item in report["steps"] if not item["ok"]]
-    critical_checks = (
-        "environmentVerified",
-        "preflightValid",
-        "emissionSucceeded",
-        "replaySameNumber",
-        "replaySameCae",
-    )
-    false_checks = [name for name in critical_checks if name in report["checks"] and report["checks"][name] is False]
-    if failed_steps or false_checks:
-        report["overallStatus"] = "FAILED"
-    elif report["missingEvidence"]:
-        report["overallStatus"] = "INCOMPLETE"
-    else:
-        report["overallStatus"] = "CANDIDATE_COMPLETE_REQUIRES_HUMAN_REVIEW"
+    report["overallStatus"] = evaluate_overall_status(report, args.execute_emission)
 
     output_dir = pathlib.Path(config.get("outputDirectory") or ".homologation-evidence")
     json_path, md_path = write_report(report, output_dir)
