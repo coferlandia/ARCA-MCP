@@ -168,17 +168,67 @@ public class DurableSequencerSafetyTests
         Assert.Equal("SERIES_RESERVATION_BLOCKED", second.Codigo);
     }
 
+    [Fact]
+    public async Task PersistedAssignmentMismatch_BlocksBeforeWsfeAndRetryUsesWinner()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemEmissionIdempotencyStore(temp.Path);
+        using var coordinator = new FileSystemFiscalSeriesCoordinator(temp.Path);
+        var request = Request();
+        var config = Config();
+        var winningProvider = IdentityProvider(config, "cred-1");
+        var winningIdentity = winningProvider.For(dcTipoComprobante.FacturaB);
+        var keyHash = EmissionRequestFingerprint.OperationKeyHash(
+            winningIdentity.ConsumerId,
+            winningIdentity.ContextId,
+            "op-a");
+
+        await store.GetOrCreateAsync(
+            keyHash,
+            EmissionRequestFingerprint.RequestHash(request),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            winningIdentity,
+            StoredFiscalEvidence.FromRequest(request));
+        await coordinator.InitializeAsync(store);
+
+        var fake = new DurableFakeWsfeClient();
+        var losingSequencer = Sequencer(fake, store, coordinator, "cred-2");
+        var blocked = await losingSequencer.EmitAsync(Request(), "op-a");
+
+        Assert.False(blocked.Success);
+        Assert.Equal("CREDENTIAL_ASSIGNMENT_MISMATCH", blocked.Codigo);
+        Assert.Equal(dcEmissionOutcome.FailedBeforeSubmission, blocked.EmissionOutcome);
+        Assert.Equal(0, fake.LastNumberCalls);
+        Assert.Equal(0, fake.ConsultCalls);
+        Assert.Equal(0, fake.EmitCalls);
+
+        var retryWithWinner = await Sequencer(fake, store, coordinator, "cred-1")
+            .EmitAsync(Request(), "op-a");
+
+        Assert.True(retryWithWinner.Success);
+        Assert.Equal(1, fake.EmitCalls);
+        var persisted = await store.GetAsync(keyHash);
+        Assert.NotNull(persisted);
+        Assert.Equal("cred-1", persisted!.Identity.CredentialAssignmentRevision);
+    }
+
     private static McpInvoiceSequencer Sequencer(
         IdcWsfeClient fake,
         IEmissionIdempotencyStore store,
-        IFiscalSeriesCoordinator coordinator)
+        IFiscalSeriesCoordinator coordinator,
+        string credentialRevision = "cred-1")
     {
         var config = Config();
-        var provider = new SingleFiscalOperationIdentityProvider(
-            config,
-            new SingleFiscalContextOptions("consumer", "context", "homologacion", 1, "cred-1"));
+        var provider = IdentityProvider(config, credentialRevision);
         return new McpInvoiceSequencer(fake, config, store, provider, coordinator);
     }
+
+    private static SingleFiscalOperationIdentityProvider IdentityProvider(
+        dcArcaConfig config,
+        string credentialRevision)
+        => new(
+            config,
+            new SingleFiscalContextOptions("consumer", "context", "homologacion", 1, credentialRevision));
 
     private static dcArcaConfig Config() => new()
     {
@@ -215,10 +265,13 @@ public class DurableSequencerSafetyTests
         public bool ReturnRecoveredSuccessOnNextIssue { get; set; }
         public bool ConsultAuthorized { get; set; }
         public bool ReturnMismatchedConsult { get; set; }
+        public int LastNumberCalls { get; private set; }
+        public int ConsultCalls { get; private set; }
         public int EmitCalls { get; private set; }
 
         public Task<dcFacturaResponse> FECompUltimoAutorizadoAsync(dcTipoComprobante tipoComprobante, CancellationToken cancellationToken = default)
         {
+            LastNumberCalls++;
             var number = LastNumberResponses.Count > 0 ? LastNumberResponses.Dequeue() : _lastNumber;
             return Task.FromResult(new dcFacturaResponse { Success = true, NumeroComprobante = number });
         }
@@ -261,6 +314,7 @@ public class DurableSequencerSafetyTests
 
         public Task<dcFacturaResponse> FECompConsultarAsync(long numeroComprobante, dcTipoComprobante tipoComprobante, CancellationToken cancellationToken = default)
         {
+            ConsultCalls++;
             if (!ConsultAuthorized || _lastRequest is null)
                 return Task.FromResult(new dcFacturaResponse { Success = false, NumeroComprobante = numeroComprobante });
 
