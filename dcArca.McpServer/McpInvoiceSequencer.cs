@@ -10,22 +10,34 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
     private readonly dcArcaConfig _config;
     private readonly IEmissionIdempotencyStore _store;
     private readonly IFiscalOperationIdentityProvider _identityProvider;
+    private readonly IFiscalSeriesCoordinator _seriesCoordinator;
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Locks = new();
 
     public McpInvoiceSequencer(
         IdcWsfeClient wsfe,
         dcArcaConfig config,
         IEmissionIdempotencyStore store,
-        IFiscalOperationIdentityProvider identityProvider)
+        IFiscalOperationIdentityProvider identityProvider,
+        IFiscalSeriesCoordinator seriesCoordinator)
     {
         _wsfe = wsfe;
         _config = config;
         _store = store;
         _identityProvider = identityProvider;
+        _seriesCoordinator = seriesCoordinator;
     }
 
-    // Compatibility constructor used by direct consumers/tests. The hosted server always
-    // registers an explicit fiscal context and uses the four-argument constructor.
+    // Compatibility constructors remain in-process only. The hosted server always injects
+    // the durable FileSystemFiscalSeriesCoordinator through the five-argument constructor.
+    public McpInvoiceSequencer(
+        IdcWsfeClient wsfe,
+        dcArcaConfig config,
+        IEmissionIdempotencyStore store,
+        IFiscalOperationIdentityProvider identityProvider)
+        : this(wsfe, config, store, identityProvider, new InMemoryFiscalSeriesCoordinator())
+    {
+    }
+
     public McpInvoiceSequencer(
         IdcWsfeClient wsfe,
         dcArcaConfig config,
@@ -85,7 +97,11 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
             return IdempotencyConflict();
 
         var replay = ReplayTerminal(record);
-        if (replay is not null) return replay;
+        if (replay is not null)
+        {
+            await _seriesCoordinator.ReleaseAsync(identity, keyHash, cancellationToken);
+            return replay;
+        }
 
         var gate = Locks.GetOrAdd(identity.SeriesKey, _ => new SemaphoreSlim(1, 1));
 
@@ -103,17 +119,50 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
             }
 
             replay = ReplayTerminal(record);
-            if (replay is not null) return replay;
+            if (replay is not null)
+            {
+                await _seriesCoordinator.ReleaseAsync(identity, keyHash, cancellationToken);
+                return replay;
+            }
+
+            var activeReservation = await _seriesCoordinator.GetActiveAsync(identity, cancellationToken);
+            if (activeReservation is not null
+                && !string.Equals(activeReservation.OwnerKeyHash, keyHash, StringComparison.Ordinal))
+            {
+                return Error(
+                    "SERIES_RESERVATION_BLOCKED",
+                    "La serie fiscal tiene otra operación pendiente de resolución; no se asignará ni enviará un segundo comprobante.",
+                    dcEmissionOutcome.FailedBeforeSubmission);
+            }
+
+            // Recover the narrow crash window where the durable reservation was written but
+            // the operation record had not yet persisted NumberAssigned.
+            if (activeReservation is not null && !record.NumeroComprobante.HasValue)
+            {
+                record = record with
+                {
+                    NumeroComprobante = activeReservation.NumeroComprobante,
+                    State = EmissionIdempotencyState.NumberAssigned,
+                    UpdatedAt = DateTimeOffset.UtcNow
+                };
+                await _store.SaveAsync(record, cancellationToken);
+            }
 
             if (record.State is EmissionIdempotencyState.Submitting or EmissionIdempotencyState.Uncertain)
             {
+                if (!record.NumeroComprobante.HasValue)
+                    throw new InvalidDataException("Una operación enviada o incierta no tiene número reservado.");
+
+                if (activeReservation is null)
+                    await _seriesCoordinator.ReserveAsync(identity, keyHash, record.NumeroComprobante.Value, cancellationToken);
+
                 if (record.FiscalEvidence.State == FiscalEvidenceState.LegacyUnavailable)
                 {
                     return Error(
                         "LEGACY_RECONCILIATION_REQUIRED",
                         "La operación legacy quedó pendiente sin evidencia fiscal comparable y requiere resolución manual antes de continuar.",
                         dcEmissionOutcome.Uncertain,
-                        record.NumeroComprobante ?? 0);
+                        record.NumeroComprobante.Value);
                 }
 
                 return await ReconcileRecordedAttemptAsync(record, tipo, cancellationToken);
@@ -123,13 +172,11 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
             {
                 var ultimo = await _wsfe.FECompUltimoAutorizadoAsync(tipo, cancellationToken);
                 if (!ultimo.Success)
-                {
-                    if (ultimo.EmissionOutcome == dcEmissionOutcome.None)
-                        ultimo.EmissionOutcome = dcEmissionOutcome.FailedBeforeSubmission;
-                    return ultimo;
-                }
+                    return BeforeSubmissionFailure(ultimo);
 
                 var numero = ultimo.NumeroComprobante + 1;
+                await _seriesCoordinator.ReserveAsync(identity, keyHash, numero, cancellationToken);
+
                 factura.NumeroComprobante = numero;
                 record = record with
                 {
@@ -142,10 +189,27 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
             else
             {
                 factura.NumeroComprobante = record.NumeroComprobante.Value;
+                if (activeReservation is null)
+                    await _seriesCoordinator.ReserveAsync(identity, keyHash, record.NumeroComprobante.Value, cancellationToken);
             }
 
             if (record.State != EmissionIdempotencyState.NumberAssigned)
                 throw new InvalidDataException($"Estado de idempotencia inesperado antes de emitir: {record.State}.");
+
+            // Revalidate immediately before crossing the side-effect boundary. The reserved
+            // number is safe only while ARCA still reports its predecessor as the last authorized.
+            var revalidation = await _wsfe.FECompUltimoAutorizadoAsync(tipo, cancellationToken);
+            if (!revalidation.Success)
+                return BeforeSubmissionFailure(revalidation, record.NumeroComprobante.Value);
+
+            if (revalidation.NumeroComprobante != record.NumeroComprobante.Value - 1)
+            {
+                return Error(
+                    "SERIES_NUMBER_DRIFT",
+                    $"La serie cambió después de reservar el número {record.NumeroComprobante.Value}; se mantiene bloqueada para resolución manual.",
+                    dcEmissionOutcome.FailedBeforeSubmission,
+                    record.NumeroComprobante.Value);
+            }
 
             record = record with
             {
@@ -161,8 +225,7 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                // El intento ya quedó durablemente marcado como Submitting.
-                // Un retry posterior reconciliará este mismo número.
+                // Submitting + durable reservation survive the caller cancellation.
                 throw;
             }
             catch (Exception)
@@ -182,9 +245,6 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
                     ? EmissionIdempotencyState.FiscalRejected
                     : EmissionIdempotencyState.Uncertain;
 
-            // Una respuesta inesperada/None luego de cruzar el límite de envío es incierta.
-            // InvalidRequest debería haber sido eliminada por preflight; si un adapter la devuelve
-            // después de Submitting tampoco se usa como prueba para reenviar automáticamente.
             if (!result.Success
                 && result.EmissionOutcome is dcEmissionOutcome.None
                     or dcEmissionOutcome.InvalidRequest
@@ -196,7 +256,16 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
             }
 
             await SaveOutcomeAsync(record, state, result, cancellationToken);
+            if (state is EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected)
+                await _seriesCoordinator.ReleaseAsync(identity, keyHash, cancellationToken);
             return result;
+        }
+        catch (FiscalSeriesBlockedException)
+        {
+            return Error(
+                "SERIES_RESERVATION_BLOCKED",
+                "La serie fiscal está reservada por otra operación pendiente; no se realizará un segundo side effect.",
+                dcEmissionOutcome.FailedBeforeSubmission);
         }
         finally
         {
@@ -217,9 +286,22 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
         if (consulted.Success && !string.IsNullOrWhiteSpace(consulted.Cae))
         {
             consulted.NumeroComprobante = numero;
-            consulted.EmissionOutcome = dcEmissionOutcome.RecoveredSuccess;
-            await SaveOutcomeAsync(record, EmissionIdempotencyState.Authorized, consulted, cancellationToken);
-            return consulted;
+            var comparison = FiscalReconciliationComparer.Compare(record, consulted);
+            if (comparison.Match == FiscalReconciliationMatch.Equivalent)
+            {
+                consulted.EmissionOutcome = dcEmissionOutcome.RecoveredSuccess;
+                await SaveOutcomeAsync(record, EmissionIdempotencyState.Authorized, consulted, cancellationToken);
+                await _seriesCoordinator.ReleaseAsync(record.Identity, record.KeyHash, cancellationToken);
+                return consulted;
+            }
+
+            var blocked = Error(
+                comparison.Code,
+                comparison.Message,
+                dcEmissionOutcome.Uncertain,
+                numero);
+            await SaveOutcomeAsync(record, EmissionIdempotencyState.Uncertain, blocked, cancellationToken);
+            return blocked;
         }
 
         var uncertain = record.FiscalResult?.ToResponse() ?? Error(
@@ -249,6 +331,15 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
             UpdatedAt = DateTimeOffset.UtcNow
         };
         await _store.SaveAsync(updated, cancellationToken);
+    }
+
+    private static dcFacturaResponse BeforeSubmissionFailure(dcFacturaResponse response, long numero = 0)
+    {
+        response.Success = false;
+        response.NumeroComprobante = numero;
+        if (response.EmissionOutcome == dcEmissionOutcome.None)
+            response.EmissionOutcome = dcEmissionOutcome.FailedBeforeSubmission;
+        return response;
     }
 
     private static bool MatchesFiscalIdentity(
