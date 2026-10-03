@@ -23,14 +23,26 @@ printf '{"status":"Healthy"}\n'
 EOF
 chmod +x "$tmp/bin/curl"
 
+# Simulate Git Bash on Windows where python3 exists as a broken Microsoft Store alias.
 cat > "$tmp/bin/python3" <<'EOF'
 #!/usr/bin/env bash
+exit 127
+EOF
+chmod +x "$tmp/bin/python3"
+
+# Usable `python` must be selected after the broken python3 probe.
+cat > "$tmp/bin/python" <<'EOF'
+#!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" == "-c" ]]; then
+  exit 0
+fi
 printf '%s\n' "${ARCA_MCP_URL:-}" > "$SMOKE_CAPTURE/url"
 printf '%s\n' "${ARCA_MCP_TOKEN:-}" > "$SMOKE_CAPTURE/token"
 printf '%s\n' "$@" > "$SMOKE_CAPTURE/python.args"
+printf '%s\n' "python" > "$SMOKE_CAPTURE/python.launcher"
 EOF
-chmod +x "$tmp/bin/python3"
+chmod +x "$tmp/bin/python"
 
 export SMOKE_CAPTURE="$tmp/capture"
 export PATH="$tmp/bin:$PATH"
@@ -41,6 +53,7 @@ bash "$RUNNER" --config "$config" --execute --allow-production
 
 grep -q '^https://arca.example.test/base/$' "$tmp/capture/url"
 grep -q '^dummy-secret$' "$tmp/capture/token"
+grep -q '^python$' "$tmp/capture/python.launcher"
 grep -q 'health/live' "$tmp/capture/curl.log"
 grep -q 'health/ready' "$tmp/capture/curl.log"
 grep -q -- '--config' "$tmp/capture/python.args"
