@@ -94,9 +94,10 @@ public class CreadorPdfTemplateResolverTests
     {
         var handler = new DelegateHandler((_, _) => Task.FromResult(TemplatesResponse(new BlockingReadStream())));
         var resolver = CreateResolver(handler, TimeSpan.FromMilliseconds(200));
+        using var safetyCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
 
         var exception = await Assert.ThrowsAsync<CreadorPdfException>(() =>
-            resolver.ResolveAsync(new PdfTemplateReference("factura-ar", "3")));
+            resolver.ResolveAsync(new PdfTemplateReference("factura-ar", "3"), safetyCancellation.Token));
 
         Assert.Equal(PdfFailureKind.Timeout, exception.FailureKind);
     }
