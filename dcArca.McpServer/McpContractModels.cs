@@ -114,6 +114,7 @@ public sealed record EmissionOperationSummary(
 public interface IEmissionOperationInspector
 {
     Task<IReadOnlyList<EmissionOperationSummary>> ListByContextAsync(
+        string consumerId,
         string contextId,
         CancellationToken cancellationToken = default);
 }
@@ -126,10 +127,13 @@ public sealed class FileSystemEmissionOperationInspector : IEmissionOperationIns
         => _store = store;
 
     public async Task<IReadOnlyList<EmissionOperationSummary>> ListByContextAsync(
+        string consumerId,
         string contextId,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(contextId)) return Array.Empty<EmissionOperationSummary>();
+        if (string.IsNullOrWhiteSpace(consumerId) || string.IsNullOrWhiteSpace(contextId))
+            return Array.Empty<EmissionOperationSummary>();
+
         var results = new List<EmissionOperationSummary>();
         foreach (var path in Directory.EnumerateFiles(_store.DirectoryPath, "*.json", SearchOption.TopDirectoryOnly))
         {
@@ -137,7 +141,11 @@ public sealed class FileSystemEmissionOperationInspector : IEmissionOperationIns
             var name = Path.GetFileNameWithoutExtension(path);
             if (name.Length != 64 || !name.All(Uri.IsHexDigit)) continue;
             var record = await _store.GetAsync(name.ToLowerInvariant(), cancellationToken);
-            if (record is null || !string.Equals(record.Identity.ContextId, contextId, StringComparison.Ordinal)) continue;
+            if (record is null
+                || !string.Equals(record.Identity.ConsumerId, consumerId, StringComparison.Ordinal)
+                || !string.Equals(record.Identity.ContextId, contextId, StringComparison.Ordinal))
+                continue;
+
             results.Add(new EmissionOperationSummary(
                 record.KeyHash,
                 record.Identity.ContextId,
