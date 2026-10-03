@@ -268,7 +268,7 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
             record.Identity);
         if (existing.Identity != record.Identity)
             throw new InvalidDataException("La identidad congelada de la operación no puede modificarse.");
-        if (existing.FiscalEvidence != record.FiscalEvidence)
+        if (!FiscalEvidenceEquals(existing.FiscalEvidence, record.FiscalEvidence))
             throw new InvalidDataException("La evidencia fiscal congelada de la operación no puede modificarse.");
 
         WriteAtomic(path, record with
@@ -349,6 +349,12 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
             throw new EmissionIdempotencyConflictException();
         }
     }
+
+    private static bool FiscalEvidenceEquals(StoredFiscalEvidence left, StoredFiscalEvidence right)
+        => string.Equals(
+            JsonSerializer.Serialize(left),
+            JsonSerializer.Serialize(right),
+            StringComparison.Ordinal);
 
     public static void ValidateRecord(EmissionIdempotencyRecord record)
     {
