@@ -20,7 +20,7 @@ Completar el JSON y luego ejecutar:
 bash scripts/smoke/run-local.sh --execute
 ```
 
-Si `ARCA_MCP_TOKEN` no está exportado, el script pide la API key sin mostrarla. Por defecto usa `https://arca.cadencia.com.ar/`; se puede cambiar con `--url` o `ARCA_MCP_URL`.
+Si `ARCA_MCP_TOKEN` no está exportado, el script pide la API key sin mostrarla. Por defecto usa `https://arca.cadencia.com.ar/`; se puede cambiar con `--url` o `ARCA_MCP_URL`. Para evitar enviar la credencial en claro, los endpoints remotos deben usar HTTPS; `http://` sólo se admite para `localhost` o `127.0.0.1` durante desarrollo local.
 
 Ejemplo con otro endpoint:
 
