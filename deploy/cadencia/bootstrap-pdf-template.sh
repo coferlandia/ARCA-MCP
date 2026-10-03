@@ -33,21 +33,6 @@ runtime_api_key_available || {
   exit 1
 }
 
-runtime_request() {
-  local method="$1"
-  local path="$2"
-  docker exec -i "$ARCA_CONTAINER" sh -lc '
-    set -eu
-    key="$(printenv Pdf__ApiKey)"
-    method="$1"
-    url="$2"
-    exec curl -fsS -X "$method" "$url" \
-      -H "Authorization: Bearer $key" \
-      -H "Content-Type: application/json" \
-      --data-binary @-
-  ' sh "$method" "$PDF_BASE_URL$path"
-}
-
 template_request() {
   local method="$1"
   local path="$2"
