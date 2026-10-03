@@ -38,11 +38,13 @@ builder.Services.AddSingleton(arcaConfig);
 builder.Services.AddSingleton(fiscalContextOptions);
 builder.Services.AddSingleton<IAfipLogger>(sp =>
     new AfipLoggerAdapter(sp.GetRequiredService<ILoggerFactory>().CreateLogger("dcArca")));
-builder.Services.AddSingleton<IEmissionIdempotencyStore>(_ =>
-    new FileSystemEmissionIdempotencyStore(emissionIdempotencyDirectory));
+builder.Services.AddSingleton(_ => new FileSystemEmissionIdempotencyStore(emissionIdempotencyDirectory));
+builder.Services.AddSingleton<IEmissionIdempotencyStore>(sp =>
+    sp.GetRequiredService<FileSystemEmissionIdempotencyStore>());
+builder.Services.AddSingleton<IEmissionOperationInspector, FileSystemEmissionOperationInspector>();
 builder.Services.AddSingleton<IFiscalSeriesCoordinator>(sp =>
 {
-    var store = (FileSystemEmissionIdempotencyStore)sp.GetRequiredService<IEmissionIdempotencyStore>();
+    var store = sp.GetRequiredService<FileSystemEmissionIdempotencyStore>();
     return new FileSystemFiscalSeriesCoordinator(store.DirectoryPath);
 });
 builder.Services.AddSingleton<IRepresentedFiscalContextStore>(_ =>
@@ -50,6 +52,7 @@ builder.Services.AddSingleton<IRepresentedFiscalContextStore>(_ =>
 builder.Services.AddSingleton<IFiscalCredentialMaterializer, FiscalCredentialMaterializer>();
 builder.Services.AddSingleton<IFiscalContextRuntimeResolver, FiscalContextRuntimeResolver>();
 builder.Services.AddSingleton<IFiscalAssignmentAuthorizationValidator, FiscalAssignmentAuthorizationValidator>();
+builder.Services.AddSingleton<McpOperationContractService>();
 builder.Services.AddSingleton<IPdfDocumentRenderer, PdfDocumentRenderer>();
 builder.Services.AddSingleton<IApiKeyStore>(_ => new FileSystemApiKeyStore(apiKeysDirectory));
 builder.Services.AddHttpContextAccessor();

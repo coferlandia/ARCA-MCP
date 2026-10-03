@@ -32,8 +32,8 @@ public sealed class FiscalContextRuntime : IDisposable
     public RepresentedFiscalContextRecord Context { get; }
     public CredentialAssignmentRecord Assignment { get; }
     public dcArcaConfig Config { get; }
-    public dcWsfeClient Wsfe { get; }
-    public dcPadronClient Padron { get; }
+    public IdcWsfeClient Wsfe { get; }
+    public IdcPadronClient Padron { get; }
     public IFiscalOperationIdentityProvider IdentityProvider { get; }
 
     public FiscalContextRuntime(
@@ -41,8 +41,8 @@ public sealed class FiscalContextRuntime : IDisposable
         RepresentedFiscalContextRecord context,
         CredentialAssignmentRecord assignment,
         dcArcaConfig config,
-        dcWsfeClient wsfe,
-        dcPadronClient padron,
+        IdcWsfeClient wsfe,
+        IdcPadronClient padron,
         IFiscalOperationIdentityProvider identityProvider)
     {
         ConsumerId = consumerId;
@@ -56,8 +56,8 @@ public sealed class FiscalContextRuntime : IDisposable
 
     public void Dispose()
     {
-        Wsfe.Dispose();
-        Padron.Dispose();
+        if (Wsfe is IDisposable wsfeDisposable) wsfeDisposable.Dispose();
+        if (Padron is IDisposable padronDisposable) padronDisposable.Dispose();
     }
 }
 
@@ -79,6 +79,11 @@ public interface IFiscalContextRuntimeResolver
         string? requestedContextId,
         string idempotencyKey,
         dcTipoComprobante tipoComprobante,
+        CancellationToken cancellationToken = default);
+
+    Task<FiscalContextRuntime> ResolveForHistoricalOperationAsync(
+        ClaimsPrincipal principal,
+        EmissionIdempotencyRecord operation,
         CancellationToken cancellationToken = default);
 }
 
@@ -166,33 +171,8 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         CredentialAssignmentRecord assignment;
         if (existing is not null)
         {
-            if (!string.Equals(existing.Identity.ConsumerId, consumerId, StringComparison.Ordinal)
-                || !string.Equals(existing.Identity.ContextId, context.ContextId, StringComparison.Ordinal)
-                || !string.Equals(existing.Identity.Environment, context.Environment, StringComparison.Ordinal)
-                || existing.Identity.Cuit != context.RepresentedCuit
-                || existing.Identity.PuntoVenta != context.PointOfSale
-                || existing.Identity.TipoComprobante != (int)tipoComprobante)
-            {
-                throw new FiscalContextAccessException(
-                    "IDEMPOTENCY_CONTEXT_MISMATCH",
-                    "La operación persistida no pertenece al contexto fiscal solicitado.");
-            }
-
-            assignment = context.Assignments.SingleOrDefault(x =>
-                    string.Equals(
-                        x.AssignmentRevision,
-                        existing.Identity.CredentialAssignmentRevision,
-                        StringComparison.Ordinal))
-                ?? throw new FiscalContextAccessException(
-                    "HISTORICAL_ASSIGNMENT_MISSING",
-                    "La asignación de credencial histórica de la operación ya no está disponible.");
-
-            if (assignment.Status == CredentialAssignmentStatus.Disabled)
-            {
-                throw new FiscalContextAccessException(
-                    "HISTORICAL_ASSIGNMENT_INTERVENTION_REQUIRED",
-                    "La credencial original de la operación está deshabilitada; se requiere intervención explícita y no se hará fallback automático.");
-            }
+            EnsureOperationIdentity(existing, consumerId, context, (int)tipoComprobante);
+            assignment = ResolveHistoricalAssignment(context, existing);
         }
         else
         {
@@ -203,6 +183,73 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         }
 
         return CreateRuntime(consumerId, context, assignment);
+    }
+
+    public async Task<FiscalContextRuntime> ResolveForHistoricalOperationAsync(
+        ClaimsPrincipal principal,
+        EmissionIdempotencyRecord operation,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        var authorized = await AuthorizeAsync(
+            principal,
+            operation.Identity.ContextId,
+            "consultar",
+            cancellationToken);
+        var context = authorized.Context;
+        if (context.OperationalState == FiscalContextOperationalState.Disabled)
+            throw new FiscalContextAccessException(
+                "FISCAL_CONTEXT_DISABLED",
+                "El contexto fiscal está deshabilitado incluso para recuperación histórica.");
+
+        EnsureOperationIdentity(
+            operation,
+            authorized.ConsumerId,
+            context,
+            operation.Identity.TipoComprobante);
+        var assignment = ResolveHistoricalAssignment(context, operation);
+        return CreateRuntime(authorized.ConsumerId, context, assignment);
+    }
+
+    private static void EnsureOperationIdentity(
+        EmissionIdempotencyRecord existing,
+        string consumerId,
+        RepresentedFiscalContextRecord context,
+        int tipoComprobante)
+    {
+        if (!string.Equals(existing.Identity.ConsumerId, consumerId, StringComparison.Ordinal)
+            || !string.Equals(existing.Identity.ContextId, context.ContextId, StringComparison.Ordinal)
+            || !string.Equals(existing.Identity.Environment, context.Environment, StringComparison.Ordinal)
+            || existing.Identity.Cuit != context.RepresentedCuit
+            || existing.Identity.PuntoVenta != context.PointOfSale
+            || existing.Identity.TipoComprobante != tipoComprobante)
+        {
+            throw new FiscalContextAccessException(
+                "IDEMPOTENCY_CONTEXT_MISMATCH",
+                "La operación persistida no pertenece al contexto fiscal autorizado.");
+        }
+    }
+
+    private static CredentialAssignmentRecord ResolveHistoricalAssignment(
+        RepresentedFiscalContextRecord context,
+        EmissionIdempotencyRecord operation)
+    {
+        var assignment = context.Assignments.SingleOrDefault(x =>
+                string.Equals(
+                    x.AssignmentRevision,
+                    operation.Identity.CredentialAssignmentRevision,
+                    StringComparison.Ordinal))
+            ?? throw new FiscalContextAccessException(
+                "HISTORICAL_ASSIGNMENT_MISSING",
+                "La asignación de credencial histórica de la operación ya no está disponible.");
+
+        if (assignment.Status == CredentialAssignmentStatus.Disabled)
+        {
+            throw new FiscalContextAccessException(
+                "HISTORICAL_ASSIGNMENT_INTERVENTION_REQUIRED",
+                "La credencial original de la operación está deshabilitada; se requiere intervención explícita y no se hará fallback automático.");
+        }
+        return assignment;
     }
 
     private async Task<(string ConsumerId, RepresentedFiscalContextRecord Context)> ResolveAuthorizedContextAsync(
@@ -285,11 +332,11 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
                 "La asignación de credencial todavía no está activa para trabajo fiscal.");
 
         var materialized = _materializer.Materialize(context, assignment);
-        var wsfe = new dcWsfeClient(
+        IdcWsfeClient wsfe = new dcWsfeClient(
             materialized.Config,
             materialized.WsfeAuth,
             logger: null);
-        var padron = new dcPadronClient(
+        IdcPadronClient padron = new dcPadronClient(
             materialized.Config,
             materialized.PadronAuth,
             logger: null);
