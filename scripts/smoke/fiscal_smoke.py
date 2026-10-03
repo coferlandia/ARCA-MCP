@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Production-safe fiscal smoke runner for ARCA-MCP.
 
-The runner intentionally uses tiny ARS values and balances every successful
-invoice/debit-note chain with credit notes. It can run against homologation or
-production, but production requires an explicit double opt-in.
+The runner intentionally uses tiny ARS values and balances every confirmed
+fiscal authorization with compensating credit notes. It can run against
+homologation or production; production requires an explicit double opt-in.
 """
 
 from __future__ import annotations
@@ -29,6 +29,8 @@ if str(HOMOLOGACION_DIR) not in sys.path:
 from epic14_homologacion import McpClient, collect_sensitive_values, find_key, redact  # noqa: E402
 
 MAX_DOCUMENT_TOTAL = Decimal("1.00")
+HOMOLOGATION_ENVIRONMENTS = {"homologacion", "homologation", "homo"}
+PRODUCTION_ENVIRONMENTS = {"produccion", "production", "prod"}
 TYPE_MATRIX = {
     "A": {"invoice": "FacturaA", "debit": "NotaDebitoA", "credit": "NotaCreditoA"},
     "B": {"invoice": "FacturaB", "debit": "NotaDebitoB", "credit": "NotaCreditoB"},
@@ -103,10 +105,19 @@ def assert_safe_invoice(invoice: dict[str, Any]) -> None:
 
 def assert_execution_allowed(environment: str, *, execute: bool, allow_production: bool) -> None:
     env = environment.strip().lower()
+    if env not in HOMOLOGATION_ENVIRONMENTS | PRODUCTION_ENVIRONMENTS:
+        raise ValueError(f"Entorno fiscal no reconocido: {environment!r}.")
     if not execute:
         raise ValueError("La emisión requiere --execute.")
-    if env in {"produccion", "production", "prod"} and not allow_production:
+    if env in PRODUCTION_ENVIRONMENTS and not allow_production:
         raise ValueError("Producción requiere además --allow-production.")
+
+
+def must_compensate(result: dict[str, Any] | None) -> bool:
+    if not isinstance(result, dict) or not bool(result.get("fiscalAuthorized")):
+        return False
+    number = result.get("number")
+    return isinstance(number, int) and number > 0
 
 
 def _load_json(path: pathlib.Path) -> dict[str, Any]:
@@ -165,7 +176,12 @@ def _emit_document(*, client: McpClient, context_id: str, letter: str, label: st
                    invoice: dict[str, Any], pdf_cfg: dict[str, Any], output_dir: pathlib.Path,
                    run_key: str) -> dict[str, Any]:
     assert_safe_invoice(invoice)
-    result: dict[str, Any] = {"label": label, "type": invoice["tipoComprobante"], "status": "FAIL"}
+    result: dict[str, Any] = {
+        "label": label,
+        "type": invoice["tipoComprobante"],
+        "status": "FAIL",
+        "fiscalAuthorized": False,
+    }
     validation, validation_ok = _call(client, "validar_comprobante", {"contextId": context_id, "factura": invoice})
     is_valid = find_key(validation, "valid")
     result["preflightValid"] = bool(is_valid)
@@ -177,9 +193,20 @@ def _emit_document(*, client: McpClient, context_id: str, letter: str, label: st
     emission, emission_ok = _call(client, "emitir_comprobante_avanzado", emission_args)
     number = find_key(emission, "numeroComprobante")
     cae = find_key(emission, "cae")
-    if not emission_ok or not bool(find_key(emission, "success")) or not isinstance(number, int) or number <= 0:
+    fiscal_authorized = (
+        emission_ok
+        and bool(find_key(emission, "success"))
+        and isinstance(number, int)
+        and number > 0
+        and cae not in (None, "")
+    )
+    if not fiscal_authorized:
         result.update({"reason": "emission_failed", "emission": emission})
         return result
+
+    # From this point forward the fiscal side effect is confirmed. Any ancillary
+    # failure must preserve enough state for _run_letter to compensate it.
+    result.update({"fiscalAuthorized": True, "number": number})
 
     replay, replay_ok = _call(client, "emitir_comprobante_avanzado", emission_args)
     if not replay_ok or find_key(replay, "numeroComprobante") != number or find_key(replay, "cae") != cae:
@@ -219,7 +246,6 @@ def _emit_document(*, client: McpClient, context_id: str, letter: str, label: st
 
     result.update({
         "status": "PASS",
-        "number": number,
         "pdf": str(pdf_path),
         "operationIdPresent": bool(find_key(operation, "operationId")),
         "reconcileOutcome": find_key(reconciled, "emissionOutcome"),
@@ -240,38 +266,57 @@ def _run_letter(*, client: McpClient, context: dict[str, Any], letter: str, date
         label=f"factura-{letter.lower()}", invoice=invoice, pdf_cfg=pdf_cfg,
         output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-invoice")
     docs.append(invoice_result)
-    if invoice_result["status"] != "PASS":
-        return {"letter": letter, "status": invoice_result["status"], "documents": docs, "unbalanced": False}
+
+    if not must_compensate(invoice_result):
+        return {
+            "letter": letter,
+            "status": invoice_result["status"],
+            "documents": docs,
+            "fiscallyBalanced": True,
+            "unbalanced": False,
+            "netEffectArs": "0.00",
+        }
 
     invoice_assoc = {"tipo": type_name(letter, "invoice"), "puntoVenta": point_of_sale,
                      "numero": invoice_result["number"]}
-    debit = build_invoice(letter, "debit", receptor, date, invoice_assoc)
-    debit_result = _emit_document(client=client, context_id=context_id, letter=letter,
-        label=f"nota-debito-{letter.lower()}", invoice=debit, pdf_cfg=pdf_cfg,
-        output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-debit")
-    docs.append(debit_result)
 
+    debit_result: dict[str, Any] | None = None
     credit_debit_result: dict[str, Any] | None = None
-    if debit_result["status"] == "PASS":
-        debit_assoc = {"tipo": type_name(letter, "debit"), "puntoVenta": point_of_sale,
-                       "numero": debit_result["number"]}
-        credit_debit = build_invoice(letter, "credit", receptor, date, debit_assoc)
-        credit_debit_result = _emit_document(client=client, context_id=context_id, letter=letter,
-            label=f"nota-credito-{letter.lower()}-anula-nd", invoice=credit_debit, pdf_cfg=pdf_cfg,
-            output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-credit-debit")
-        docs.append(credit_debit_result)
+    # Only extend the functional smoke circuit when the invoice itself passed all
+    # checks. If an ancillary invoice check failed, prioritize compensation.
+    if invoice_result["status"] == "PASS":
+        debit = build_invoice(letter, "debit", receptor, date, invoice_assoc)
+        debit_result = _emit_document(client=client, context_id=context_id, letter=letter,
+            label=f"nota-debito-{letter.lower()}", invoice=debit, pdf_cfg=pdf_cfg,
+            output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-debit")
+        docs.append(debit_result)
 
-    # Once the invoice exists, always attempt its compensating credit note.
+        if must_compensate(debit_result):
+            debit_assoc = {"tipo": type_name(letter, "debit"), "puntoVenta": point_of_sale,
+                           "numero": debit_result["number"]}
+            credit_debit = build_invoice(letter, "credit", receptor, date, debit_assoc)
+            credit_debit_result = _emit_document(client=client, context_id=context_id, letter=letter,
+                label=f"nota-credito-{letter.lower()}-anula-nd", invoice=credit_debit, pdf_cfg=pdf_cfg,
+                output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-credit-debit")
+            docs.append(credit_debit_result)
+
+    # Once the invoice exists, always attempt its compensating credit note,
+    # regardless of replay/verification/PDF failures on the invoice itself.
     credit_invoice = build_invoice(letter, "credit", receptor, date, invoice_assoc)
     credit_invoice_result = _emit_document(client=client, context_id=context_id, letter=letter,
         label=f"nota-credito-{letter.lower()}-anula-factura", invoice=credit_invoice, pdf_cfg=pdf_cfg,
         output_dir=output_dir, run_key=f"{run_prefix}-{letter.lower()}-credit-invoice")
     docs.append(credit_invoice_result)
 
+    invoice_compensated = must_compensate(credit_invoice_result)
+    debit_needs_compensation = must_compensate(debit_result)
+    debit_compensated = not debit_needs_compensation or must_compensate(credit_debit_result)
+    fiscally_balanced = invoice_compensated and debit_compensated
+
     full_pass = (
-        debit_result["status"] == "PASS"
-        and credit_debit_result is not None
-        and credit_debit_result["status"] == "PASS"
+        invoice_result["status"] == "PASS"
+        and debit_result is not None and debit_result["status"] == "PASS"
+        and credit_debit_result is not None and credit_debit_result["status"] == "PASS"
         and credit_invoice_result["status"] == "PASS"
     )
     return {
@@ -279,8 +324,9 @@ def _run_letter(*, client: McpClient, context: dict[str, Any], letter: str, date
         "status": "PASS" if full_pass else "FAIL",
         "documents": docs,
         "compensationAttempted": True,
-        "unbalanced": not full_pass,
-        "netEffectArs": "0.00" if full_pass else "UNKNOWN",
+        "fiscallyBalanced": fiscally_balanced,
+        "unbalanced": not fiscally_balanced,
+        "netEffectArs": "0.00" if fiscally_balanced else "UNKNOWN",
     }
 
 
@@ -292,12 +338,28 @@ def _write_summary(report: dict[str, Any], output_dir: pathlib.Path, known_secre
     for ctx in safe["contexts"]:
         lines.append(f"### Context `{ctx['contextId']}`")
         for result in ctx["results"]:
-            lines.append(f"- {result['letter']}: `{result['status']}`")
+            balance = result.get("fiscallyBalanced")
+            lines.append(f"- {result['letter']}: `{result['status']}` — fiscallyBalanced=`{balance}`")
             for doc in result.get("documents", []):
                 suffix = f" → `{doc.get('pdf')}`" if doc.get("pdf") else ""
-                lines.append(f"  - {doc['label']}: `{doc['status']}`{suffix}")
+                lines.append(f"  - {doc['label']}: `{doc['status']}` fiscalAuthorized=`{doc.get('fiscalAuthorized')}`{suffix}")
         lines.append("")
     (output_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _add_receiver_secrets(known_secrets: set[str], contexts: list[Any]) -> None:
+    for context in contexts:
+        if not isinstance(context, dict):
+            continue
+        receivers: list[Any] = [context.get("receiver")]
+        overrides = context.get("receivers")
+        if isinstance(overrides, dict):
+            receivers.extend(overrides.values())
+        for receiver in receivers:
+            if isinstance(receiver, dict):
+                number = receiver.get("documentNumber")
+                if number not in (None, "", 0, "0"):
+                    known_secrets.add(str(number))
 
 
 def main() -> int:
@@ -327,6 +389,7 @@ def main() -> int:
     client = McpClient(endpoint, token, int(config.get("timeoutSeconds", 45)))
     known_secrets = {token, run_prefix}
     known_secrets.update(collect_sensitive_values(config))
+    _add_receiver_secrets(known_secrets, contexts)
     report: dict[str, Any] = {
         "schema": "arca-fiscal-smoke/1.0",
         "startedAt": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
