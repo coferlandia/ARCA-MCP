@@ -76,6 +76,30 @@ public class DurableSequencerSafetyTests
     }
 
     [Fact]
+    public async Task TerminalReplay_DoesNotReleaseNewOwnersReservation()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemEmissionIdempotencyStore(temp.Path);
+        using var coordinator = new FileSystemFiscalSeriesCoordinator(temp.Path);
+        await coordinator.InitializeAsync(store);
+        var fake = new DurableFakeWsfeClient();
+        var sequencer = Sequencer(fake, store, coordinator);
+
+        var oldAuthorized = await sequencer.EmitAsync(Request(), "op-old");
+        fake.ReturnUncertainOnNextIssue = true;
+        var pending = await sequencer.EmitAsync(Request(), "op-new");
+        var oldReplay = await sequencer.EmitAsync(Request(), "op-old");
+        var third = await sequencer.EmitAsync(Request(), "op-third");
+
+        Assert.True(oldAuthorized.Success);
+        Assert.Equal(dcEmissionOutcome.Uncertain, pending.EmissionOutcome);
+        Assert.True(oldReplay.Success);
+        Assert.Equal(oldAuthorized.NumeroComprobante, oldReplay.NumeroComprobante);
+        Assert.Equal("SERIES_RESERVATION_BLOCKED", third.Codigo);
+        Assert.Equal(2, fake.EmitCalls);
+    }
+
+    [Fact]
     public async Task ReconciliationMismatch_KeepsSeriesBlocked()
     {
         using var temp = new TempDirectory();
