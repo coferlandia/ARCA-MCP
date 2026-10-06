@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace dcArca.McpServer;
 
@@ -30,6 +31,7 @@ public sealed class PdfClient : IPdfClient
     {
     }
 
+    [ActivatorUtilitiesConstructor]
     public PdfClient(
         HttpClient httpClient,
         IConfiguration configuration,
