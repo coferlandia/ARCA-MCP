@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace dcArca.McpServer.Tests;
@@ -39,6 +40,14 @@ public class McpHealthTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         Assert.DoesNotContain("pfx", body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("token", body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("password", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Host_ResuelvePdfClientSinAmbiguedad()
+    {
+        var client = _factory.Services.GetRequiredService<IPdfClient>();
+
+        Assert.IsType<PdfClient>(client);
     }
 
     [Fact]
