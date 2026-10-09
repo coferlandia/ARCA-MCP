@@ -257,6 +257,61 @@ public class FiscalContextRuntimeResolverTests
         Assert.Equal("FISCAL_REPRESENTATION_REVERIFY_REQUIRED", staleProof.Code);
     }
 
+    [Fact]
+    public async Task V2_ReconciliacionHistoricaTrasRotacion_UsaCredencialOriginalSinHabilitarNuevasConsultas()
+    {
+        using var temp = new TempDirectory();
+        var catalog = new FileSystemFiscalTechnicalContextStore(temp.Contexts);
+        await catalog.AddContextAsync(new FiscalTechnicalContextRecord("operador-homo",
+            "homologacion", FiscalContextOperationalState.Disabled, 1, []));
+        await catalog.AddCandidateAssignmentAsync("operador-homo", "rev-1", "cred-original", "admin");
+        await catalog.MarkAssignmentValidatedAsync("operador-homo", "rev-1", "wsaa-ok", "admin");
+        await catalog.ActivateAssignmentAsync("operador-homo", "rev-1", "admin");
+        await catalog.SetContextStateAsync("operador-homo", FiscalContextOperationalState.Active, "admin");
+        await catalog.RegisterCandidateAsync("operador-homo", "consumer-a", 20123456786, "admin");
+        await catalog.SelectPointOfSaleAsync("operador-homo", "consumer-a", 20123456786, 7, "admin");
+        await catalog.MarkRepresentationVerifiedAsync("operador-homo", "consumer-a", 20123456786, 7,
+            "FEParamGetPtosVenta|context=operador-homo|env=homologacion|cuit=20123456786|pv=7|rev=rev-1|checked=2026-10-09", "admin");
+        await catalog.ActivateRepresentationAsync("operador-homo", "consumer-a", 20123456786, 7, "admin");
+
+        var operations = new FileSystemEmissionIdempotencyStore(temp.Operations);
+        var request = Request();
+        var operation = await operations.GetOrCreateAsync(
+            EmissionRequestFingerprint.OperationKeyHash("consumer-a", "operador-homo", 20123456786, 7, "payment-1"),
+            EmissionRequestFingerprint.RequestHash(request),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            new FiscalOperationIdentity("consumer-a", "operador-homo", "homologacion",
+                20123456786, 7, (int)dcTipoComprobante.FacturaB, 1, "rev-1"),
+            StoredFiscalEvidence.FromRequest(request));
+
+        await catalog.AddCandidateAssignmentAsync("operador-homo", "rev-2", "cred-new", "admin");
+        await catalog.MarkAssignmentValidatedAsync("operador-homo", "rev-2", "wsaa-new", "admin");
+        await catalog.ActivateAssignmentAsync("operador-homo", "rev-2", "admin");
+
+        var materializer = new FakeMaterializer();
+        var resolver = new FiscalContextRuntimeResolver(catalog, operations,
+            new SingleFiscalContextOptions("legacy", "legacy", "homologacion", 1, "old"),
+            materializer, OpenEmissionRecoveryGate.Instance);
+        var principal = Principal("consumer-a", ("operador-homo", "consultar"));
+
+        using (var runtime = await resolver.ResolveForHistoricalOperationAsync(principal, operation))
+            Assert.Equal("rev-1", runtime.Assignment.AssignmentRevision);
+
+        var fresh = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
+            resolver.ResolveForReadAsync(principal, "operador-homo", 20123456786, 7));
+        Assert.Equal("FISCAL_REPRESENTATION_REVERIFY_REQUIRED", fresh.Code);
+
+        var crossConsumer = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
+            resolver.ResolveForHistoricalOperationAsync(
+                Principal("consumer-b", ("operador-homo", "consultar")), operation));
+        Assert.Equal("FISCAL_REPRESENTATION_FORBIDDEN", crossConsumer.Code);
+
+        await catalog.RevokeRepresentationAsync("operador-homo", "consumer-a", 20123456786, 7, "admin");
+        var revoked = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
+            resolver.ResolveForHistoricalOperationAsync(principal, operation));
+        Assert.Equal("FISCAL_REPRESENTATION_FORBIDDEN", revoked.Code);
+    }
+
     private static FileSystemRepresentedFiscalContextStore ContextStore(
         TempDirectory temp,
         params RepresentedFiscalContextRecord[] contexts)
