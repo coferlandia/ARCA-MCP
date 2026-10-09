@@ -72,7 +72,7 @@ public sealed class FiscalRepresentationAdministration
             representedCuit, pointOfSale, cancellationToken)
             ?? throw new FiscalContextAccessException("FISCAL_REPRESENTATION_NOT_FOUND",
                 "La representación no está registrada.");
-        if (candidate.Status is not (FiscalRepresentationStatus.Pending or FiscalRepresentationStatus.Verified or FiscalRepresentationStatus.Active))
+        if (candidate.Status is not (FiscalRepresentationStatus.Pending or FiscalRepresentationStatus.Verified or FiscalRepresentationStatus.Active or FiscalRepresentationStatus.ActionRequired))
             throw new FiscalContextAccessException("FISCAL_REPRESENTATION_STATE_INVALID",
                 "La representación no está pendiente de verificación.");
         var (context, assignment) = await ActiveContextAsync(contextId, cancellationToken);

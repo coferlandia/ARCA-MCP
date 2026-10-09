@@ -86,6 +86,28 @@ public sealed class FiscalTechnicalContextStoreTests
     }
 
     [Fact]
+    public async Task WSFERevocado_BloqueaEmisionesHastaRevalidarLaRepresentacion()
+    {
+        using var temp = new TempStore();
+        var store = new FileSystemFiscalTechnicalContextStore(temp.Root);
+        await ProvisionContextAsync(store);
+        await store.RegisterCandidateAsync("operator-homo", "secretaria", 20123456786, "admin");
+        await ActivateAsync(store, 20123456786, 7);
+
+        await store.MarkRepresentationActionRequiredAsync(
+            "operator-homo", "secretaria", 20123456786, 7, "WSFE_601", "ARCA-WSFE");
+        var suspended = (await store.GetRepresentationAsync("operator-homo", "secretaria", 20123456786, 7))!;
+        Assert.False(suspended.CanReadOrEmit);
+        Assert.Equal(FiscalRepresentationStatus.ActionRequired, suspended.Status);
+        Assert.Equal("WSFE_601", suspended.ActionRequiredReasonCode);
+
+        await store.MarkRepresentationVerifiedAsync(
+            "operator-homo", "secretaria", 20123456786, 7, "new-remote-evidence", "admin");
+        await store.ActivateRepresentationAsync("operator-homo", "secretaria", 20123456786, 7, "admin");
+        Assert.True((await store.GetRepresentationAsync("operator-homo", "secretaria", 20123456786, 7))!.CanReadOrEmit);
+    }
+
+    [Fact]
     public async Task PersistenciaV1_ExigeResetExplicito_YNuncaBootstrapImplicito()
     {
         using var temp = new TempStore();
@@ -94,6 +116,21 @@ public sealed class FiscalTechnicalContextStoreTests
         var exception = await Assert.ThrowsAsync<InvalidDataException>(() => store.ListContextsAsync());
         Assert.Equal("FISCAL_CATALOG_V1_RESET_REQUIRED", exception.Message);
         Assert.False(File.Exists(Path.Combine(temp.Root, "fiscal-catalog-v2.json")));
+    }
+
+    [Fact]
+    public async Task CatalogoV2_PersisteConPermisosRestrictivosEnUnix()
+    {
+        using var temp = new TempStore();
+        var store = new FileSystemFiscalTechnicalContextStore(temp.Root);
+        await store.AddContextAsync(new FiscalTechnicalContextRecord("ctx-safe", "homologacion",
+            FiscalContextOperationalState.Disabled, 1, []));
+
+        if (OperatingSystem.IsWindows()) return;
+        var expectedDir = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        var expectedFile = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        Assert.Equal(expectedDir, File.GetUnixFileMode(temp.Root));
+        Assert.Equal(expectedFile, File.GetUnixFileMode(Path.Combine(temp.Root, "fiscal-catalog-v2.json")));
     }
 
     [Fact]

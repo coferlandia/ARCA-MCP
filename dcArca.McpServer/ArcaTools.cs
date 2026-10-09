@@ -20,6 +20,7 @@ public sealed class ArcaTools
     private readonly IPdfDocumentRenderer _pdfRenderer;
     private readonly McpOperationContractService _contract;
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IFiscalTechnicalContextStore? _representationStore;
 
     public ArcaTools(
         IFiscalContextRuntimeResolver runtimeResolver,
@@ -27,7 +28,8 @@ public sealed class ArcaTools
         IFiscalSeriesCoordinator seriesCoordinator,
         IPdfDocumentRenderer pdfRenderer,
         McpOperationContractService contract,
-        IHttpContextAccessor httpContextAccessor)
+        IHttpContextAccessor httpContextAccessor,
+        IFiscalTechnicalContextStore? representationStore = null)
     {
         _runtimeResolver = runtimeResolver;
         _operationStore = operationStore;
@@ -35,11 +37,36 @@ public sealed class ArcaTools
         _pdfRenderer = pdfRenderer;
         _contract = contract;
         _httpContextAccessor = httpContextAccessor;
+        _representationStore = representationStore;
     }
 
     private ClaimsPrincipal Principal
         => _httpContextAccessor.HttpContext?.User
             ?? throw new FiscalContextAccessException("AUTHENTICATED_PRINCIPAL_REQUIRED", "No hay una identidad autenticada disponible para resolver el contexto fiscal.");
+    public static string? DelegationFailureCode(dcFacturaResponse response)
+    {
+        if (response.Success) return null;
+        foreach (var code in new[] { "600", "601" })
+        {
+            if (string.Equals(response.Codigo, code, StringComparison.Ordinal) ||
+                string.Equals(response.Codigo, "WSFE_" + code, StringComparison.Ordinal) ||
+                (response.Errores?.Any(x =>
+                    x.StartsWith("[" + code + "]", StringComparison.Ordinal)) ?? false))
+                return "WSFE_" + code;
+        }
+        return null;
+    }
+
+    private async Task FlagRemoteAuthorizationFailureAsync(
+        FiscalContextRuntime runtime, dcFacturaResponse result, CancellationToken cancellationToken)
+    {
+        var code = DelegationFailureCode(result);
+        if (code is null || _representationStore is null) return;
+        await _representationStore.MarkRepresentationActionRequiredAsync(
+            runtime.Context.ContextId, runtime.ConsumerId, runtime.Context.RepresentedCuit,
+            runtime.Context.PointOfSale, code, "ARCA-WSFE", cancellationToken);
+    }
+
     private async Task CheckFiscalAuthorizationBeforeEmissionAsync(
         FiscalContextRuntime runtime, CancellationToken cancellationToken)
     {
@@ -136,6 +163,7 @@ public sealed class ArcaTools
             new PdfTemplateReference(templateId, templateVersion),
             templateData,
             cancellationToken);
+        await FlagRemoteAuthorizationFailureAsync(runtime, result.Fiscal, cancellationToken);
         await _contract.DecorateEmissionResponseAsync(
             runtime.ConsumerId,
             runtime.Context.ContextId,
@@ -256,12 +284,15 @@ public sealed class ArcaTools
             _seriesCoordinator,
             ct => CheckFiscalAuthorizationBeforeEmissionAsync(runtime, ct));
         var response = await sequencer.EmitAsync(factura, idempotencyKey, cancellationToken);
+        await FlagRemoteAuthorizationFailureAsync(runtime, response, cancellationToken);
         await _contract.DecorateEmissionResponseAsync(
             runtime.ConsumerId,
             runtime.Context.ContextId,
             idempotencyKey,
             response,
-            cancellationToken);
+            cancellationToken,
+            runtime.Context.RepresentedCuit,
+            runtime.Context.PointOfSale);
         return response;
     }
 
@@ -296,12 +327,15 @@ public sealed class ArcaTools
             _seriesCoordinator,
             ct => CheckFiscalAuthorizationBeforeEmissionAsync(runtime, ct));
         var response = await sequencer.EmitAsync(factura, idempotencyKey, cancellationToken);
+        await FlagRemoteAuthorizationFailureAsync(runtime, response, cancellationToken);
         await _contract.DecorateEmissionResponseAsync(
             runtime.ConsumerId,
             runtime.Context.ContextId,
             idempotencyKey,
             response,
-            cancellationToken);
+            cancellationToken,
+            runtime.Context.RepresentedCuit,
+            runtime.Context.PointOfSale);
         return response;
     }
 

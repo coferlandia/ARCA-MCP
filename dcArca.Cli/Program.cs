@@ -310,7 +310,7 @@ static async Task<int> ManageFiscalContextsAsync(string[] args, JsonSerializerOp
             }
             var candidate = await store.GetRepresentationAsync(contextId, consumer, cuit, pv)
                 ?? throw new InvalidOperationException("FISCAL_REPRESENTATION_NOT_FOUND");
-            if (candidate.Status is not (FiscalRepresentationStatus.Pending or FiscalRepresentationStatus.Verified or FiscalRepresentationStatus.Active))
+            if (candidate.Status is not (FiscalRepresentationStatus.Pending or FiscalRepresentationStatus.Verified or FiscalRepresentationStatus.Active or FiscalRepresentationStatus.ActionRequired))
                 throw new InvalidOperationException("FISCAL_REPRESENTATION_STATE_INVALID");
             var resultProbe = await probe.ProbeAsync(binding.Config, auth, httpClient);
             if (!resultProbe.Verified)
