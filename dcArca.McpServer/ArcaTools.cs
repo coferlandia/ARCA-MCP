@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Security.Claims;
 using System.Text.Json;
 using dcArca.Core.Models;
+using dcArca.Core.Services;
 using Microsoft.AspNetCore.Authorization;
 using ModelContextProtocol.Server;
 
