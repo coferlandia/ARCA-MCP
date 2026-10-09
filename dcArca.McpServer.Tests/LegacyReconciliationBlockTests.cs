@@ -22,7 +22,7 @@ public class LegacyReconciliationBlockTests
         var store = new FileSystemEmissionIdempotencyStore(temp.Path);
         var keyHash = EmissionRequestFingerprint.OperationKeyHash(
             identity.ConsumerId,
-            identity.ContextId,
+            identity.ContextId, identity.Cuit, identity.PuntoVenta,
             "legacy-key");
 
         var created = await store.GetOrCreateAsync(

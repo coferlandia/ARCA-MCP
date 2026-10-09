@@ -14,6 +14,8 @@
 
 `FiscalContexts:Directory/fiscal-catalog-v2.json` almacena el catálogo técnico y las representaciones con `schemaVersion=2` y escrituras atómicas bajo lock de archivo. No se migra ni reutiliza `contexts.json` V1: su presencia genera `FISCAL_CATALOG_V1_RESET_REQUIRED` y evita el arranque del host. El reset se hace sólo en el procedimiento de cutover controlado, **nunca** durante un upgrade automático.
 
+Una representación activa conserva evidencia remota vinculada al `assignmentRevision` y `environment`. Si rota la credencial técnica, las representaciones previamente activas quedan **bloqueadas para nuevas operaciones** con `FISCAL_REPRESENTATION_REVERIFY_REQUIRED` hasta volver a verificar remotamente el CUIT/PV contra la nueva revisión; no se heredan delegaciones por implicancia. La administración permite revalidar una representación activa mediante el mismo flujo de probe y activación sin duplicar identidad.
+
 Una misma revisión activa de credencial puede autenticar CUIT/PV diferentes, pero los grants de contexto y la representación activa asociada al `consumerId` son controles independientes. Un grant de contexto sin representación activa no habilita ninguna consulta/emisión. Las revocaciones afectan nuevas operaciones; el snapshot de intentos fiscales conserva CUIT/PV/ambiente/revisión para tratamiento explícito de incertidumbre.
 
 ## Provisionamiento

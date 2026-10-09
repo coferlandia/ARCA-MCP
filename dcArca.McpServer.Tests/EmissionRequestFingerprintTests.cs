@@ -6,6 +6,18 @@ namespace dcArca.McpServer.Tests;
 public class EmissionRequestFingerprintTests
 {
     [Fact]
+    public void NamespacedV2_SameKey_DifferentCuitOrPvNeverReusesOperation()
+    {
+        const string key = "shared-idempotency-key";
+        var a = EmissionRequestFingerprint.OperationKeyHash("consumer-a", "technical-ctx", 20123456786, 7, key);
+        Assert.Equal(a, EmissionRequestFingerprint.OperationKeyHash("consumer-a", "technical-ctx", 20123456786, 7, key));
+        Assert.NotEqual(a, EmissionRequestFingerprint.OperationKeyHash("consumer-a", "technical-ctx", 30712345678, 7, key));
+        Assert.NotEqual(a, EmissionRequestFingerprint.OperationKeyHash("consumer-a", "technical-ctx", 20123456786, 14, key));
+        Assert.NotEqual(a, EmissionRequestFingerprint.OperationKeyHash("consumer-b", "technical-ctx", 20123456786, 7, key));
+        Assert.NotEqual(a, EmissionRequestFingerprint.OperationKeyHash("consumer-a", "other-ctx", 20123456786, 7, key));
+    }
+
+    [Fact]
     public void NumeroAsignadoNoAfectaFingerprint()
     {
         var a = Request();

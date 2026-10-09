@@ -215,7 +215,7 @@ public class FiscalContextRuntimeResolverTests
         {
             await catalog.RegisterCandidateAsync("operador-homo", "consumer-a", cuit, "admin");
             await catalog.SelectPointOfSaleAsync("operador-homo", "consumer-a", cuit, pv, "admin");
-            await catalog.MarkRepresentationVerifiedAsync("operador-homo", "consumer-a", cuit, pv, "remote-pv-ok", "admin");
+            await catalog.MarkRepresentationVerifiedAsync("operador-homo", "consumer-a", cuit, pv, $"FEParamGetPtosVenta|context=operador-homo|env=homologacion|cuit={cuit}|pv={pv}|rev=rev-1|checked={DateTimeOffset.UtcNow:O}", "admin");
             await catalog.ActivateRepresentationAsync("operador-homo", "consumer-a", cuit, pv, "admin");
         }
 
@@ -248,6 +248,13 @@ public class FiscalContextRuntimeResolverTests
         var revoked = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
             resolver.ResolveForReadAsync(principal, "operador-homo", 20123456786, 7));
         Assert.Equal("FISCAL_REPRESENTATION_FORBIDDEN", revoked.Code);
+        // Rotating credentials never extends the previous certificate's fiscal delegation.
+        await catalog.AddCandidateAssignmentAsync("operador-homo", "rev-2", "cred-next", "admin");
+        await catalog.MarkAssignmentValidatedAsync("operador-homo", "rev-2", "wsaa-next-ok", "admin");
+        await catalog.ActivateAssignmentAsync("operador-homo", "rev-2", "admin");
+        var staleProof = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
+            resolver.ResolveForReadAsync(principal, "operador-homo", 30712345678, 14));
+        Assert.Equal("FISCAL_REPRESENTATION_REVERIFY_REQUIRED", staleProof.Code);
     }
 
     private static FileSystemRepresentedFiscalContextStore ContextStore(

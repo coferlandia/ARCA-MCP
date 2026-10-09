@@ -355,6 +355,17 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         if (reps.Length != 1)
             throw new FiscalContextAccessException("FISCAL_REPRESENTATION_REQUIRED", "Debe especificar CUIT representado y punto de venta.");
         var rep = reps[0];
+        // A representation proved against one certificate revision cannot authorize a
+        // replacement certificate by implication. A new authenticated WSFE probe is required.
+        var activeRevision = technical.ActiveAssignment?.AssignmentRevision;
+        if (activeRevision is null || rep.VerificationEvidence is null ||
+            !rep.VerificationEvidence.Contains(
+                $"|rev={activeRevision}|", StringComparison.Ordinal) ||
+            !rep.VerificationEvidence.Contains(
+                $"|env={technical.Environment}|", StringComparison.Ordinal))
+            throw new FiscalContextAccessException("FISCAL_REPRESENTATION_REVERIFY_REQUIRED",
+                "La representación debe revalidarse con la credencial y ambiente técnicos activos.");
+
         // Compatibility projection for the existing WSFE services. The persisted ContextId is technical:
         // CUIT/PV are resolved on every operation and NEVER stored as technical context identity.
         var projected = new RepresentedFiscalContextRecord(technical.ContextId,
