@@ -1,5 +1,10 @@
 # Decisions
 
+## 2026-10-09 — ContextId técnico compartido, representaciones fiscales por consumidor (#62)
+
+Un único certificado/assignment técnico de ARCA puede operar para múltiples CUIT delegados. `ContextId` es estable para `(operador técnico, ambiente fiscal)`, sin CUIT/PV persistidos en su identidad; un `FiscalRepresentationRecord` separado almacena por `consumerId+contextId+CUIT+PV` permisos, verificación remota, activación y revocación. La autorización exige simultáneamente API key con scopes, grant de contexto y representación activa de ese consumidor. Administración requiere scope `arca:administrar` distinto. WSAA cache sigue por ambiente+credencial+servicio, mientras WSFE crea request-config con `Auth.Cuit` del representado. El namespace idempotente incorpora `consumerId+contextId+CUIT+PV+key`; numeración sigue por `(ambiente,CUIT,PV,tipo)`. Las operaciones conservan `assignmentRevision` inmutable; retries inciertos sólo se reconcilian por número/evidencia históricos. Contrato MCP `arca-mcp/2.0` rompe semántica V1, sin migración de datos. Los stores V1 se resetearán exclusivamente durante un cutover aprobado, detenido y documentado. ARCA-MCP no introduce tenants comerciales; SecretarIA conserva la autoridad de tenant→CUIT/PV/READY.
+
+
 ## Active Records
 
 ## DECISION-20261003-001 - GitHub is the operational source of truth

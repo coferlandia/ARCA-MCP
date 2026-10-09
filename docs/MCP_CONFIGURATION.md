@@ -1,5 +1,8 @@
 # Configuración y operabilidad de dcArca.McpServer
 
+> **V2 (#62) prevalece sobre ejemplos históricos de contexto único:** `FiscalContexts:Directory/fiscal-catalog-v2.json`, `FiscalCredentials:{credentialId}:CertificatePath/CertificatePassword` y `FiscalEnvironments:{environment}:WsaaUrl/WsfeUrl/PadronUrl` son configuración autoritativa. `dcArcaConfig:Cuit`, `dcArcaConfig:PuntoVenta` y `FiscalContext:ConsumerId` NO seleccionan el emisor MCP: éste procede del grant y de la representación activa. La instalación V1 necesita cutover controlado; no hay bootstrap automático.
+
+
 ## Health
 
 El servidor expone dos señales livianas que no llaman a ARCA:

@@ -55,7 +55,7 @@ public class EmissionOutcomeSequencerTests
 
         var keyHash = EmissionRequestFingerprint.OperationKeyHash(
             "test-consumer",
-            "test-context",
+            "test-context", 20123456786, 7,
             "unexpected-adapter-result");
         var record = await new FileSystemEmissionIdempotencyStore(temp.Path).GetAsync(keyHash);
         Assert.NotNull(record);

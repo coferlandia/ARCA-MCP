@@ -219,16 +219,16 @@ public class EmissionIdempotencyStoreTests
     }
 
     [Fact]
-    public async Task ContextIdNoPuedeReasignarseAOtroCuit()
+    public async Task ContextIdTecnico_PermiteMultiplesIdentidadesSinConfundirManifiestos()
     {
         using var temp = new TempDirectory();
         var store = new FileSystemEmissionIdempotencyStore(temp.Path);
 
         await store.EnsureContextAsync(Identity().Context);
 
-        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
-            store.EnsureContextAsync(Identity(cuit: 30999999991).Context));
-        Assert.Equal("FISCAL_CONTEXT_IDENTITY_MISMATCH", exception.Message);
+        await store.EnsureContextAsync(Identity(cuit: 30999999991).Context);
+        var manifests = Directory.GetFiles(Path.Combine(temp.Path, ".contexts"), "*.json");
+        Assert.Equal(2, manifests.Length);
     }
 
     [Fact]

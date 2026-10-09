@@ -29,13 +29,13 @@ public sealed class McpOperationContractService
     public async Task<McpCapabilitiesResult> GetCapabilitiesAsync(
         ClaimsPrincipal principal,
         string? contextId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, long? representedCuit = null, int? pointOfSale = null)
     {
         var authorized = await _runtimeResolver.AuthorizeAsync(
             principal,
             contextId,
             "consultar",
-            cancellationToken);
+            representedCuit, pointOfSale, cancellationToken);
         var context = authorized.Context;
         var operations = new List<string>();
         if (HasScope(principal, "arca:consultar") && HasGrant(principal, context.ContextId, "consultar", allowLegacy: true))
@@ -65,13 +65,13 @@ public sealed class McpOperationContractService
         ClaimsPrincipal principal,
         string? contextId,
         dcFacturaRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, long? representedCuit = null, int? pointOfSale = null)
     {
         var authorized = await _runtimeResolver.AuthorizeAsync(
             principal,
             contextId,
             "facturar",
-            cancellationToken);
+            representedCuit, pointOfSale, cancellationToken);
         var issues = new List<McpValidationIssue>();
         if (authorized.Context.OperationalState != FiscalContextOperationalState.Active)
         {
@@ -104,13 +104,13 @@ public sealed class McpOperationContractService
     public async Task<McpFiscalDiagnosticResult> DiagnoseAsync(
         ClaimsPrincipal principal,
         string? contextId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, long? representedCuit = null, int? pointOfSale = null)
     {
         var authorized = await _runtimeResolver.AuthorizeAsync(
             principal,
             contextId,
             "consultar",
-            cancellationToken);
+            representedCuit, pointOfSale, cancellationToken);
         var context = authorized.Context;
         var operationSummaries = await _inspector.ListByContextAsync(
             authorized.ConsumerId,
@@ -128,10 +128,9 @@ public sealed class McpOperationContractService
                 or CredentialAssignmentStatus.Validated
                 or CredentialAssignmentStatus.Active)
             {
-                probe = await _assignmentValidator.ProbeAsync(
-                    context.ContextId,
-                    assignment.AssignmentRevision,
-                    cancellationToken);
+                probe = await _assignmentValidator.ProbeRepresentationAsync(
+                    context.ContextId, assignment.AssignmentRevision,
+                    context.RepresentedCuit, context.PointOfSale, cancellationToken);
                 if (assignment.Status == CredentialAssignmentStatus.Active)
                     activeProbe = probe;
                 if (probe.Status == FiscalAssignmentValidationStatus.InvalidConfiguration
@@ -189,9 +188,9 @@ public sealed class McpOperationContractService
         string? contextId,
         string? operationId,
         string? idempotencyKey,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, long? representedCuit = null, int? pointOfSale = null)
     {
-        var located = await LocateAsync(principal, contextId, operationId, idempotencyKey, cancellationToken);
+        var located = await LocateAsync(principal, contextId, operationId, idempotencyKey, cancellationToken, representedCuit, pointOfSale);
         return located.Record is null
             ? NotFound(located.ContextId)
             : Build(located.Record, officialRead: null);
@@ -202,9 +201,9 @@ public sealed class McpOperationContractService
         string? contextId,
         string? operationId,
         string? idempotencyKey,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, long? representedCuit = null, int? pointOfSale = null)
     {
-        var located = await LocateAsync(principal, contextId, operationId, idempotencyKey, cancellationToken);
+        var located = await LocateAsync(principal, contextId, operationId, idempotencyKey, cancellationToken, representedCuit, pointOfSale);
         var record = located.Record;
         if (record is null) return NotFound(located.ContextId);
 
@@ -319,10 +318,12 @@ public sealed class McpOperationContractService
         string contextId,
         string idempotencyKey,
         dcFacturaResponse response,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, long? representedCuit = null, int? pointOfSale = null)
     {
         if (string.IsNullOrWhiteSpace(idempotencyKey)) return;
-        var operationId = EmissionRequestFingerprint.OperationKeyHash(consumerId, contextId, idempotencyKey);
+        var operationId = representedCuit.HasValue && pointOfSale.HasValue
+            ? EmissionRequestFingerprint.OperationKeyHash(consumerId, contextId, representedCuit.Value, pointOfSale.Value, idempotencyKey)
+            : EmissionRequestFingerprint.OperationKeyHash(consumerId, contextId, idempotencyKey);
         var record = await _operations.GetAsync(operationId, cancellationToken);
         if (record is null) return;
         response.OperationId = record.KeyHash;
@@ -370,13 +371,12 @@ public sealed class McpOperationContractService
         string? requestedContextId,
         string? operationId,
         string? idempotencyKey,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long? representedCuit = null, int? pointOfSale = null)
     {
         var authorized = await _runtimeResolver.AuthorizeAsync(
-            principal,
-            requestedContextId,
-            "consultar",
-            cancellationToken);
+            principal, requestedContextId, "consultar",
+            representedCuit, pointOfSale, cancellationToken);
         if (string.IsNullOrWhiteSpace(operationId) == string.IsNullOrWhiteSpace(idempotencyKey))
             throw new FiscalContextAccessException(
                 "OPERATION_LOOKUP_INVALID",
@@ -392,15 +392,17 @@ public sealed class McpOperationContractService
         else
         {
             keyHash = EmissionRequestFingerprint.OperationKeyHash(
-                authorized.ConsumerId,
-                authorized.Context.ContextId,
-                idempotencyKey!);
+                authorized.ConsumerId, authorized.Context.ContextId,
+                authorized.Context.RepresentedCuit, authorized.Context.PointOfSale, idempotencyKey!);
         }
 
         var record = await _operations.GetAsync(keyHash, cancellationToken);
         if (record is null
             || !string.Equals(record.Identity.ConsumerId, authorized.ConsumerId, StringComparison.Ordinal)
-            || !string.Equals(record.Identity.ContextId, authorized.Context.ContextId, StringComparison.Ordinal))
+            || !string.Equals(record.Identity.ContextId, authorized.Context.ContextId, StringComparison.Ordinal)
+            || record.Identity.Cuit != authorized.Context.RepresentedCuit
+            || record.Identity.PuntoVenta != authorized.Context.PointOfSale
+            || !string.Equals(record.Identity.Environment, authorized.Context.Environment, StringComparison.Ordinal))
             return (authorized.Context.ContextId, null);
         return (authorized.Context.ContextId, record);
     }

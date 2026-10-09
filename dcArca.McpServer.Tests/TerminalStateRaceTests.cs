@@ -20,7 +20,7 @@ public class TerminalStateRaceTests
         var sequencer = new McpInvoiceSequencer(fake, config, store, provider, coordinator);
         var request = Request();
         var identity = provider.For(dcTipoComprobante.FacturaB);
-        var keyHash = EmissionRequestFingerprint.OperationKeyHash("consumer", "context", "op-race");
+        var keyHash = EmissionRequestFingerprint.OperationKeyHash("consumer", "context", 20123456786, 7, "op-race");
 
         var emission = sequencer.EmitAsync(request, "op-race");
         await fake.EmitEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));

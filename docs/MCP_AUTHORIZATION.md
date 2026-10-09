@@ -1,106 +1,32 @@
-# Autorización MCP por API key, scopes y grants
+# Autorización MCP — contrato V2
 
-`dcArca.McpServer` usa la API key directamente como Bearer token:
+ARCA-MCP autentica mediante `Authorization: Bearer sk-arca-...` y un hash persistido en el host. No ofrece OAuth de usuario. El consumidor es un `consumerId` estable, independiente del secreto y de la rotación de la API key.
 
-```http
-Authorization: Bearer sk-arca-...
-```
+## Capas de autorización
 
-Actualmente no existe un endpoint OAuth/login que intercambie credenciales por un access token de corta duración.
+1. Scope general de la key: `arca:consultar` (lectura, PDF, diagnóstico, reconciliación), `arca:facturar` (validar, emitir), o `arca:administrar` (provisionamiento y revocación).
+2. Grant explícito para el contexto y la operación: `operador-homo:consultar`, `operador-homo:facturar` o `operador-homo:administrar`.
+3. Representación `Active` registrada para ese `consumerId + contextId + representedCuit + pointOfSale`. Un grant de contexto no permite por implicancia todos los representados del mismo certificado.
 
-## Scopes
+`arca:facturar` no implica `arca:consultar` ni `arca:administrar`. Las tools administrativas requieren scope administrativo distinto y verifican en el servidor su grant. Una key legacy sin `consumerId` es incompatible con V2 (`LEGACY_KEY_UNSUPPORTED_V2`) y debe reaprovisionarse.
 
-Los scopes de lectura y escritura son capacidades independientes.
+Las keys se guardan con hash SHA-256 (no el secreto en claro) en `ApiKeys:Directory/api_keys.json`. Se crean/revocan con `dcArca.Cli` o `scripts/api-keys/manage-key.sh` sin editar el JSON a mano. Los operadores deben proteger el acceso local al CLI y a los stores. Nunca incluir secrets en Issues o PR.
 
-- `arca:consultar`: habilita las tools de consulta, diagnóstico, reconciliación y generación de PDF de comprobantes existentes.
-- `arca:facturar`: habilita validación y emisión.
-
-`arca:facturar` no implica `arca:consultar`. Un cliente que necesite ambas capacidades debe tener ambos scopes:
-
-```text
-arca:consultar,arca:facturar
-```
-
-## Consumer y grants de contexto
-
-Para clientes nuevos se recomienda crear keys ligadas a un `consumerId` estable y grants explícitos por contexto fiscal.
-
-Ejemplo conceptual:
-
-```text
-consumerId: cadencia
-scopes:
-  arca:consultar
-  arca:facturar
-grants:
-  cadencia-arca-homologacion:consultar
-  cadencia-arca-homologacion:facturar
-```
-
-El scope habilita la clase de operación MCP; el grant limita sobre qué contexto fiscal puede ejercerla. Ambos controles deben autorizar la operación.
-
-Las keys legacy sin `consumerId` se conservan por compatibilidad, pero no deben ser el patrón para nuevos consumidores multi-contexto.
-
-## Persistencia y secreto
-
-Cada API key se guarda en `ApiKeys__Directory/api_keys.json`. El secreto:
-
-- se genera aleatoriamente con prefijo `sk-arca-`;
-- se muestra una sola vez al crear la key;
-- nunca se persiste en claro;
-- se almacena únicamente como hash SHA-256;
-- no puede recuperarse mediante `list-keys`;
-- una revocación se aplica al request siguiente.
-
-No editar `api_keys.json` manualmente.
-
-## Administración recomendada
-
-Usar el wrapper operativo:
+## Ejemplos
 
 ```bash
-bash scripts/api-keys/manage-key.sh --help
+dcArca.Cli create-key --name secretaria --consumer secretaria --scope arca:consultar,arca:facturar --grant operador-homo:consultar,operador-homo:facturar
+dcArca.Cli create-key --name fiscal-admin --consumer fiscal-admin --scope arca:administrar --grant operador-homo:administrar
 ```
 
-Para una key de smoke ligada a un contexto:
+El backend de SecretarIA controla tenant→CUIT/PV, aceptación humana y estado READY; no existe un tenant comercial dentro de ARCA-MCP. Los CUIT/PV autorizados por representación se almacenan por `consumerId`. La selección del CUIT en requests ordinarios no crea permisos nuevos.
 
-```bash
-bash scripts/api-keys/manage-key.sh create \
-  --directory ./data \
-  --name local-smoke \
-  --consumer local-dev \
-  --context local-arca-homologacion \
-  --mode smoke
-```
+## Herramientas administrativas
 
-Listar:
+- `registrar_representacion_fiscal(contextId,consumerId,representedCuit)`: crea candidato, no habilita.
+- `listar_puntos_venta(contextId,consumerId,representedCuit)`: consulta remota NO emisora después de registrar candidato.
+- `seleccionar_punto_venta(contextId,consumerId,representedCuit,pointOfSale)`: conserva estado pendiente.
+- `activar_representacion_fiscal(contextId,consumerId,representedCuit,pointOfSale)`: revalida PV ante ARCA y activa con evidencia.
+- `revocar_representacion_fiscal(contextId,consumerId,representedCuit,pointOfSale)`: revocación local inmediata.
 
-```bash
-bash scripts/api-keys/manage-key.sh list --directory ./data
-```
-
-Revocar:
-
-```bash
-bash scripts/api-keys/manage-key.sh revoke --directory ./data --id key_ID
-```
-
-El wrapper delega en `dcArca.Cli`; no implementa otro formato de store ni otra generación de secretos.
-
-## CLI directo
-
-También puede usarse `dcArca.Cli` directamente:
-
-```bash
-ApiKeys__Directory=/data dotnet run --project dcArca.Cli -- \
-  create-key \
-  --name secretaria \
-  --scope arca:consultar,arca:facturar \
-  --consumer cadencia \
-  --grant cadencia-arca-homologacion:consultar,cadencia-arca-homologacion:facturar
-
-ApiKeys__Directory=/data dotnet run --project dcArca.Cli -- list-keys
-ApiKeys__Directory=/data dotnet run --project dcArca.Cli -- revoke-key key_ID
-```
-
-Para el procedimiento completo de local, Docker/Cadencia, rotación, revocación y uso desde `run-local.sh`, ver `API_KEYS_RUNBOOK.md`.
+Los errores devuelven códigos seguros y nunca rutas secretas, passwords o Token/Sign. `WSFE_600`, `WSFE_601` y `WSFE_602` permanecen distintos; 602 no demuestra por sí solo una revocación de delegación.

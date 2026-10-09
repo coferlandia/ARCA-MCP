@@ -1,5 +1,8 @@
 # Idempotencia durable de emisiones MCP
 
+> **V2 (#62) — identidad del replay:** `OperationKeyHash` de los nuevos requests MCP incluye `consumerId+contextId+representedCuit+pointOfSale+idempotencyKey`; CUIT/PV distintos nunca comparten resultado. `ContextId` es la credencial técnica compartida; los manifests del store de emisiones distinguen la identidad fiscal `(contextId,environment,CUIT,PV)`. La reserva de serie continúa global por `(ambiente,CUIT,PV,tipo)`, con snapshot histórico de `assignmentRevision`. No migrar estados V1: reset operacional posterior únicamente con el control descrito en `RUNBOOK.md`.
+
+
 Las tools recomendadas de emisión de ARCA-MCP requieren una `idempotencyKey` estable creada por el sistema consumidor.
 
 La idempotencia protege exclusivamente el side effect fiscal. No es un ledger comercial, no almacena PDFs y no reemplaza el estado de negocio que mantiene SecretarIA o un futuro FacturaMCP.

@@ -40,28 +40,45 @@ public sealed class ArcaTools
     private ClaimsPrincipal Principal
         => _httpContextAccessor.HttpContext?.User
             ?? throw new FiscalContextAccessException("AUTHENTICATED_PRINCIPAL_REQUIRED", "No hay una identidad autenticada disponible para resolver el contexto fiscal.");
+    private async Task CheckFiscalAuthorizationBeforeEmissionAsync(
+        FiscalContextRuntime runtime, CancellationToken cancellationToken)
+    {
+        var authorized = await _runtimeResolver.AuthorizeAsync(Principal, runtime.Context.ContextId,
+            "facturar", runtime.Context.RepresentedCuit, runtime.Context.PointOfSale, cancellationToken);
+        if (authorized.Context.ActiveAssignment?.AssignmentRevision != runtime.Assignment.AssignmentRevision ||
+            !string.Equals(authorized.Context.Environment, runtime.Context.Environment, StringComparison.Ordinal))
+            throw new FiscalContextAccessException("FISCAL_ASSIGNMENT_CHANGED",
+                "La credencial técnica o ambiente cambió antes de la emisión. La operación se mantiene protegida.");
+    }
+
 
     [McpServerTool, Description("Devuelve el contrato de capacidades realmente implementadas y autorizadas para un contexto fiscal. No verifica habilitación remota en ARCA.")]
     [Authorize(Policy = "ArcaConsultar")]
     public Task<McpCapabilitiesResult> ObtenerCapacidadesFiscales(
         [Description("Contexto fiscal autorizado. Puede omitirse si existe exactamente uno permitido para consulta.")] string? contextId = null,
+        [Description("CUIT del emisor representado. Obligatorio si hay más de una representación activa.")] long? representedCuit = null,
+        [Description("Punto de venta habilitado para el CUIT representado.")] int? pointOfSale = null,
         CancellationToken cancellationToken = default)
-        => _contract.GetCapabilitiesAsync(Principal, contextId, cancellationToken);
+        => _contract.GetCapabilitiesAsync(Principal, contextId, cancellationToken, representedCuit, pointOfSale);
 
     [McpServerTool, Description("Valida determinísticamente un request fiscal completo sin reservar número ni solicitar CAE. No garantiza autorización remota futura.")]
     [Authorize(Policy = "ArcaFacturar")]
     public Task<McpValidationResult> ValidarComprobante(
         [Description("Modelo fiscal completo a validar. NumeroComprobante no se utiliza para la validación server-side.")] dcFacturaRequest factura,
         [Description("Contexto fiscal autorizado. Puede omitirse si existe exactamente uno permitido para facturar.")] string? contextId = null,
+        [Description("CUIT del emisor representado. Obligatorio si hay más de una representación activa.")] long? representedCuit = null,
+        [Description("Punto de venta habilitado para el CUIT representado.")] int? pointOfSale = null,
         CancellationToken cancellationToken = default)
-        => _contract.ValidateRequestAsync(Principal, contextId, factura, cancellationToken);
+        => _contract.ValidateRequestAsync(Principal, contextId, factura, cancellationToken, representedCuit, pointOfSale);
 
     [McpServerTool, Description("Ejecuta diagnóstico fiscal explícito y no emisor: configuración local, assignments y verificación remota de autorización/PV. No modifica la assignment activa.")]
     [Authorize(Policy = "ArcaConsultar")]
     public Task<McpFiscalDiagnosticResult> DiagnosticarContextoFiscal(
         [Description("Contexto fiscal autorizado. Puede omitirse si existe exactamente uno permitido para consulta.")] string? contextId = null,
+        [Description("CUIT del emisor representado. Obligatorio si hay más de una representación activa.")] long? representedCuit = null,
+        [Description("Punto de venta habilitado para el CUIT representado.")] int? pointOfSale = null,
         CancellationToken cancellationToken = default)
-        => _contract.DiagnoseAsync(Principal, contextId, cancellationToken);
+        => _contract.DiagnoseAsync(Principal, contextId, cancellationToken, representedCuit, pointOfSale);
 
     [McpServerTool, Description("Consulta una operación durable por operationId o idempotencyKey dentro del consumer/contexto autorizado. No llama a emisión.")]
     [Authorize(Policy = "ArcaConsultar")]
@@ -69,8 +86,10 @@ public sealed class ArcaTools
         [Description("operationId opaco devuelto por una emisión previa. Informar exactamente éste o idempotencyKey.")] string? operationId = null,
         [Description("idempotencyKey original. Informar exactamente ésta u operationId; nunca se persiste ni devuelve en claro.")] string? idempotencyKey = null,
         [Description("Contexto fiscal autorizado. Puede omitirse si existe exactamente uno permitido para consulta.")] string? contextId = null,
+        [Description("CUIT del emisor representado. Obligatorio si hay más de una representación activa.")] long? representedCuit = null,
+        [Description("Punto de venta habilitado para el CUIT representado.")] int? pointOfSale = null,
         CancellationToken cancellationToken = default)
-        => _contract.GetOperationAsync(Principal, contextId, operationId, idempotencyKey, cancellationToken);
+        => _contract.GetOperationAsync(Principal, contextId, operationId, idempotencyKey, cancellationToken, representedCuit, pointOfSale);
 
     [McpServerTool, Description("Reconcilia explícitamente una operación ya existente mediante lectura fiscal y comparación de evidencia. Nunca crea operación, asigna número ni solicita CAE.")]
     [Authorize(Policy = "ArcaConsultar")]
@@ -78,8 +97,10 @@ public sealed class ArcaTools
         [Description("operationId opaco devuelto por una emisión previa. Informar exactamente éste o idempotencyKey.")] string? operationId = null,
         [Description("idempotencyKey original. Informar exactamente ésta u operationId.")] string? idempotencyKey = null,
         [Description("Contexto fiscal autorizado. Puede omitirse si existe exactamente uno permitido para consulta.")] string? contextId = null,
+        [Description("CUIT del emisor representado. Obligatorio si hay más de una representación activa.")] long? representedCuit = null,
+        [Description("Punto de venta habilitado para el CUIT representado.")] int? pointOfSale = null,
         CancellationToken cancellationToken = default)
-        => _contract.ReconcileAsync(Principal, contextId, operationId, idempotencyKey, cancellationToken);
+        => _contract.ReconcileAsync(Principal, contextId, operationId, idempotencyKey, cancellationToken, representedCuit, pointOfSale);
 
     [McpServerTool, Description("Emite un comprobante de forma idempotente, incorpora el resultado fiscal a una plantilla publicada y devuelve el PDF.")]
     [Authorize(Policy = "ArcaFacturar")]
@@ -90,6 +111,8 @@ public sealed class ArcaTools
         [Description("Versión inmutable de la plantilla lógica.")] string templateVersion,
         [Description("Datos visuales de la plantilla. No puede contener el campo reservado fiscal.")] JsonElement templateData,
         [Description("Contexto fiscal autorizado. Puede omitirse sólo si existe exactamente uno permitido para la operación.")] string? contextId = null,
+        [Description("CUIT del emisor representado. Obligatorio si hay más de una representación activa.")] long? representedCuit = null,
+        [Description("Punto de venta habilitado para el CUIT representado.")] int? pointOfSale = null,
         CancellationToken cancellationToken = default)
     {
         if (!factura.TipoComprobante.HasValue)
@@ -98,13 +121,14 @@ public sealed class ArcaTools
                 new PdfRenderResult(PdfRenderStatus.NotAttempted, null, null, null));
 
         using var runtime = await _runtimeResolver.ResolveForEmissionAsync(
-            Principal, contextId, idempotencyKey, factura.TipoComprobante.Value, cancellationToken);
+            Principal, contextId, idempotencyKey, factura.TipoComprobante.Value, representedCuit, pointOfSale, cancellationToken);
         var sequencer = new McpInvoiceSequencer(
             runtime.Wsfe,
             runtime.Config,
             _operationStore,
             runtime.IdentityProvider,
-            _seriesCoordinator);
+            _seriesCoordinator,
+            ct => CheckFiscalAuthorizationBeforeEmissionAsync(runtime, ct));
         var service = new InvoicePdfService(sequencer, _pdfRenderer, runtime.Config);
         var result = await service.EmitAsync(
             factura,
@@ -117,7 +141,9 @@ public sealed class ArcaTools
             runtime.Context.ContextId,
             idempotencyKey,
             result.Fiscal,
-            cancellationToken);
+            cancellationToken,
+            runtime.Context.RepresentedCuit,
+            runtime.Context.PointOfSale);
         return result;
     }
 
@@ -130,9 +156,11 @@ public sealed class ArcaTools
         [Description("Versión inmutable de la plantilla lógica.")] string templateVersion,
         [Description("Datos visuales originales de la plantilla. No puede contener el campo reservado fiscal.")] JsonElement templateData,
         [Description("Contexto fiscal autorizado. Puede omitirse sólo si existe exactamente uno permitido para la operación.")] string? contextId = null,
+        [Description("CUIT del emisor representado. Obligatorio si hay más de una representación activa.")] long? representedCuit = null,
+        [Description("Punto de venta habilitado para el CUIT representado.")] int? pointOfSale = null,
         CancellationToken cancellationToken = default)
     {
-        using var runtime = await _runtimeResolver.ResolveForReadAsync(Principal, contextId, cancellationToken);
+        using var runtime = await _runtimeResolver.ResolveForReadAsync(Principal, contextId, representedCuit, pointOfSale, cancellationToken);
         var service = new ExistingInvoicePdfService(runtime.Wsfe, _pdfRenderer, runtime.Config);
         return await service.RenderAsync(
             tipoComprobante,
@@ -147,9 +175,11 @@ public sealed class ArcaTools
     public async Task<dcFacturaResponse> ConsultarUltimoComprobante(
         [Description("Tipo de comprobante ARCA (ej: 1=Factura A, 6=Factura B, 11=Factura C).")] dcTipoComprobante tipoComprobante,
         [Description("Contexto fiscal autorizado. Puede omitirse sólo si existe exactamente uno permitido para la operación.")] string? contextId = null,
+        [Description("CUIT del emisor representado. Obligatorio si hay más de una representación activa.")] long? representedCuit = null,
+        [Description("Punto de venta habilitado para el CUIT representado.")] int? pointOfSale = null,
         CancellationToken cancellationToken = default)
     {
-        using var runtime = await _runtimeResolver.ResolveForReadAsync(Principal, contextId, cancellationToken);
+        using var runtime = await _runtimeResolver.ResolveForReadAsync(Principal, contextId, representedCuit, pointOfSale, cancellationToken);
         return await runtime.Wsfe.FECompUltimoAutorizadoAsync(tipoComprobante, cancellationToken);
     }
 
@@ -159,9 +189,11 @@ public sealed class ArcaTools
         [Description("Número del comprobante a consultar.")] long numeroComprobante,
         [Description("Tipo de comprobante ARCA (ej: 1=Factura A, 6=Factura B, 11=Factura C).")] dcTipoComprobante tipoComprobante,
         [Description("Contexto fiscal autorizado. Puede omitirse sólo si existe exactamente uno permitido para la operación.")] string? contextId = null,
+        [Description("CUIT del emisor representado. Obligatorio si hay más de una representación activa.")] long? representedCuit = null,
+        [Description("Punto de venta habilitado para el CUIT representado.")] int? pointOfSale = null,
         CancellationToken cancellationToken = default)
     {
-        using var runtime = await _runtimeResolver.ResolveForReadAsync(Principal, contextId, cancellationToken);
+        using var runtime = await _runtimeResolver.ResolveForReadAsync(Principal, contextId, representedCuit, pointOfSale, cancellationToken);
         return await runtime.Wsfe.FECompConsultarAsync(numeroComprobante, tipoComprobante, cancellationToken);
     }
 
@@ -188,6 +220,8 @@ public sealed class ArcaTools
         [Description("Período asociado desde YYYYMMDD.")] string? periodoAsociadoDesde,
         [Description("Período asociado hasta YYYYMMDD.")] string? periodoAsociadoHasta,
         [Description("Contexto fiscal autorizado. Puede omitirse sólo si existe exactamente uno permitido para la operación.")] string? contextId = null,
+        [Description("CUIT del emisor representado. Obligatorio si hay más de una representación activa.")] long? representedCuit = null,
+        [Description("Punto de venta habilitado para el CUIT representado.")] int? pointOfSale = null,
         CancellationToken cancellationToken = default)
     {
         var factura = new dcFacturaRequest
@@ -213,13 +247,14 @@ public sealed class ArcaTools
         };
 
         using var runtime = await _runtimeResolver.ResolveForEmissionAsync(
-            Principal, contextId, idempotencyKey, tipoComprobante, cancellationToken);
+            Principal, contextId, idempotencyKey, tipoComprobante, representedCuit, pointOfSale, cancellationToken);
         var sequencer = new McpInvoiceSequencer(
             runtime.Wsfe,
             runtime.Config,
             _operationStore,
             runtime.IdentityProvider,
-            _seriesCoordinator);
+            _seriesCoordinator,
+            ct => CheckFiscalAuthorizationBeforeEmissionAsync(runtime, ct));
         var response = await sequencer.EmitAsync(factura, idempotencyKey, cancellationToken);
         await _contract.DecorateEmissionResponseAsync(
             runtime.ConsumerId,
@@ -236,6 +271,8 @@ public sealed class ArcaTools
         [Description("Modelo completo del comprobante. NumeroComprobante se ignora y es asignado por el servidor.")] dcFacturaRequest factura,
         [Description("Clave idempotente estable para esta emisión fiscal.")] string idempotencyKey,
         [Description("Contexto fiscal autorizado. Puede omitirse sólo si existe exactamente uno permitido para la operación.")] string? contextId = null,
+        [Description("CUIT del emisor representado. Obligatorio si hay más de una representación activa.")] long? representedCuit = null,
+        [Description("Punto de venta habilitado para el CUIT representado.")] int? pointOfSale = null,
         CancellationToken cancellationToken = default)
     {
         if (!factura.TipoComprobante.HasValue)
@@ -250,13 +287,14 @@ public sealed class ArcaTools
 
         factura.NumeroComprobante = null;
         using var runtime = await _runtimeResolver.ResolveForEmissionAsync(
-            Principal, contextId, idempotencyKey, factura.TipoComprobante.Value, cancellationToken);
+            Principal, contextId, idempotencyKey, factura.TipoComprobante.Value, representedCuit, pointOfSale, cancellationToken);
         var sequencer = new McpInvoiceSequencer(
             runtime.Wsfe,
             runtime.Config,
             _operationStore,
             runtime.IdentityProvider,
-            _seriesCoordinator);
+            _seriesCoordinator,
+            ct => CheckFiscalAuthorizationBeforeEmissionAsync(runtime, ct));
         var response = await sequencer.EmitAsync(factura, idempotencyKey, cancellationToken);
         await _contract.DecorateEmissionResponseAsync(
             runtime.ConsumerId,
@@ -290,9 +328,11 @@ public sealed class ArcaTools
         [Description("Fecha desde del período asociado YYYYMMDD.")] string? periodoAsociadoDesde,
         [Description("Fecha hasta del período asociado YYYYMMDD.")] string? periodoAsociadoHasta,
         [Description("Contexto fiscal autorizado.")] string? contextId = null,
+        [Description("CUIT del emisor representado. Obligatorio si hay más de una representación activa.")] long? representedCuit = null,
+        [Description("Punto de venta habilitado para el CUIT representado.")] int? pointOfSale = null,
         CancellationToken cancellationToken = default)
     {
-        await _runtimeResolver.AuthorizeAsync(Principal, contextId, "facturar", cancellationToken);
+        await _runtimeResolver.AuthorizeAsync(Principal, contextId, "facturar", representedCuit, pointOfSale, cancellationToken);
         return new dcFacturaResponse
         {
             Success = false,
@@ -311,9 +351,11 @@ public sealed class ArcaTools
         [Description("Número de documento del receptor.")] long docNro,
         [Description("Tipo de comprobante ARCA a emitir.")] dcTipoComprobante tipoComprobante,
         [Description("Contexto fiscal autorizado. Puede omitirse sólo si existe exactamente uno permitido para la operación.")] string? contextId = null,
+        [Description("CUIT del emisor representado. Obligatorio si hay más de una representación activa.")] long? representedCuit = null,
+        [Description("Punto de venta habilitado para el CUIT representado.")] int? pointOfSale = null,
         CancellationToken cancellationToken = default)
     {
-        using var runtime = await _runtimeResolver.ResolveForReadAsync(Principal, contextId, cancellationToken);
+        using var runtime = await _runtimeResolver.ResolveForReadAsync(Principal, contextId, representedCuit, pointOfSale, cancellationToken);
         return await runtime.Wsfe.GetCondicionesIVAReceptorAsync((int)docTipo, docNro, tipoComprobante, cancellationToken);
     }
 
@@ -322,9 +364,11 @@ public sealed class ArcaTools
     public async Task<dcPadronPersonaResult> ConsultarPadron(
         [Description("CUIT a consultar (sin guiones).")] long cuit,
         [Description("Contexto fiscal autorizado. Puede omitirse sólo si existe exactamente uno permitido para la operación.")] string? contextId = null,
+        [Description("CUIT del emisor representado. Obligatorio si hay más de una representación activa.")] long? representedCuit = null,
+        [Description("Punto de venta habilitado para el CUIT representado.")] int? pointOfSale = null,
         CancellationToken cancellationToken = default)
     {
-        using var runtime = await _runtimeResolver.ResolveForReadAsync(Principal, contextId, cancellationToken);
+        using var runtime = await _runtimeResolver.ResolveForReadAsync(Principal, contextId, representedCuit, pointOfSale, cancellationToken);
         return await runtime.Padron.GetPersonaAsync(cuit, cancellationToken);
     }
 }

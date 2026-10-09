@@ -37,9 +37,12 @@ if (string.IsNullOrWhiteSpace(recoveryDirectory))
     recoveryDirectory = Path.Combine(dataRoot, "recovery");
 }
 
-var arcaConfig = dcConfigurationHelper.LoadFromConfiguration(builder.Configuration);
-var fiscalContextOptions = SingleFiscalContextOptions.FromConfiguration(
-    builder.Configuration.GetSection("FiscalContext"));
+// V2 derives CUIT/PV from authorized representations and credentials/endpoints
+// from server-owned FiscalCredentials/FiscalEnvironments, never from dcArcaConfig.
+var arcaConfig = new dcArcaConfig();
+builder.Configuration.GetSection("dcArcaConfig").Bind(arcaConfig);
+var fiscalContextOptions = new SingleFiscalContextOptions(
+    "legacy-disabled", "legacy-disabled", "__v2_no_fallback__", 1, "no-legacy");
 
 builder.Services.AddSingleton(arcaConfig);
 builder.Services.AddSingleton(fiscalContextOptions);
@@ -66,9 +69,20 @@ builder.Services.AddSingleton<IEmissionRecoveryGate>(sp =>
     sp.GetRequiredService<FileSystemEmissionRecoveryGate>());
 builder.Services.AddSingleton<IRepresentedFiscalContextStore>(_ =>
     new FileSystemRepresentedFiscalContextStore(fiscalContextsDirectory));
+builder.Services.AddSingleton<IFiscalTechnicalContextStore>(_ =>
+    new FileSystemFiscalTechnicalContextStore(fiscalContextsDirectory));
 builder.Services.AddSingleton<IFiscalCredentialMaterializer, FiscalCredentialMaterializer>();
-builder.Services.AddSingleton<IFiscalContextRuntimeResolver, FiscalContextRuntimeResolver>();
-builder.Services.AddSingleton<IFiscalAssignmentAuthorizationValidator, FiscalAssignmentAuthorizationValidator>();
+builder.Services.AddSingleton<IFiscalContextRuntimeResolver>(sp => new FiscalContextRuntimeResolver(
+    sp.GetRequiredService<IFiscalTechnicalContextStore>(),
+    sp.GetRequiredService<IEmissionIdempotencyStore>(),
+    sp.GetRequiredService<SingleFiscalContextOptions>(),
+    sp.GetRequiredService<IFiscalCredentialMaterializer>(),
+    sp.GetRequiredService<IEmissionRecoveryGate>()));
+builder.Services.AddSingleton<IFiscalAssignmentAuthorizationValidator>(sp => new FiscalAssignmentAuthorizationValidator(
+    sp.GetRequiredService<IFiscalTechnicalContextStore>(),
+    sp.GetRequiredService<IFiscalCredentialMaterializer>(),
+    sp.GetRequiredService<IHttpClientFactory>()));
+builder.Services.AddSingleton<FiscalRepresentationAdministration>();
 builder.Services.AddSingleton<McpOperationContractService>();
 
 builder.Services.AddSingleton<PdfDocumentRenderer>();
@@ -105,10 +119,13 @@ builder.Services.AddAuthorization(options =>
         ArcaScopeAuthorization.HasScope(context.User, "arca:consultar")));
     options.AddPolicy("ArcaFacturar", policy => policy.RequireAssertion(context =>
         ArcaScopeAuthorization.HasScope(context.User, "arca:facturar")));
+    options.AddPolicy("ArcaAdministrar", policy => policy.RequireAssertion(context =>
+        ArcaScopeAuthorization.HasScope(context.User, "arca:administrar")));
 });
 
 builder.Services.AddMcpServer()
     .WithTools<ArcaTools>()
+    .WithTools<ArcaAdministrationTools>()
     .WithHttpTransport(options =>
     {
         options.SessionMode = HttpServerSessionMode.Stateless;
@@ -120,30 +137,10 @@ var app = builder.Build();
 var recoveryGateService = app.Services.GetRequiredService<FileSystemEmissionRecoveryGate>();
 using var recoveryRuntimeLease = recoveryGateService.AcquireRuntimeLease();
 
-var contextStore = app.Services.GetRequiredService<IRepresentedFiscalContextStore>();
-if (!long.TryParse(arcaConfig.Cuit, out var legacyCuit) || legacyCuit <= 0)
-    throw new InvalidOperationException("dcArcaConfig:Cuit debe ser numérico para inicializar el contexto fiscal legacy.");
-var now = DateTimeOffset.UtcNow;
-await contextStore.InitializeLegacyAsync(new RepresentedFiscalContextRecord(
-    fiscalContextOptions.ContextId,
-    fiscalContextOptions.Environment,
-    legacyCuit,
-    arcaConfig.PuntoVenta,
-    FiscalContextOperationalState.Active,
-    fiscalContextOptions.ContextRevision,
-    LegacyDefault: true,
-    Assignments:
-    [
-        new CredentialAssignmentRecord(
-            fiscalContextOptions.CredentialAssignmentRevision,
-            "legacy-default",
-            CredentialAssignmentStatus.Active,
-            "legacy-config-bootstrap",
-            now,
-            now,
-            now,
-            "legacy-bootstrap")
-    ]));
+// The V2 fiscal catalog must be explicitly provisioned. Legacy identity data
+// is not auto-transformed and requires a separately authorized cutover/reset.
+await app.Services.GetRequiredService<IFiscalTechnicalContextStore>()
+    .ListContextsAsync();
 
 var concreteEmissionStore = app.Services.GetRequiredService<FileSystemEmissionIdempotencyStore>();
 var concreteSeriesCoordinator = app.Services.GetRequiredService<FileSystemFiscalSeriesCoordinator>();

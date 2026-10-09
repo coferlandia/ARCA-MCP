@@ -1,5 +1,8 @@
 # Handoff ARCA-MCP → SecretarIA
 
+> **Integración SecretarIA del Issue #1959 / ARCA-MCP #62:** SecretarIA configura un solo `ARCA_CONTEXT_ID` y ambiente por runtime; el tenant proporciona CUIT, el admin acepta delegación externa, el backend con scope administrativo registra candidato y ejecuta `listar_puntos_venta`, el tenant selecciona uno de los PV CAE devueltos, el admin revalida/activa la representación y recién entonces SecretarIA marca READY. Las emisiones/consultas pasan `representedCuit` y `pointOfSale` además de `contextId`. Contrato requerido `arca-mcp/2.0` y errores explícitos; no inferir READY de una respuesta 602. No se implementa SecretarIA desde ARCA-MCP.
+
+
 Contrato: `arca-mcp/1.0`  
 Tracking consumidor: https://github.com/coferlandia/secretarIA/issues/1736
 

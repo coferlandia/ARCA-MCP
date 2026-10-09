@@ -180,7 +180,7 @@ public class DurableSequencerSafetyTests
         var winningIdentity = winningProvider.For(dcTipoComprobante.FacturaB);
         var keyHash = EmissionRequestFingerprint.OperationKeyHash(
             winningIdentity.ConsumerId,
-            winningIdentity.ContextId,
+            winningIdentity.ContextId, winningIdentity.Cuit, winningIdentity.PuntoVenta,
             "op-a");
 
         await store.GetOrCreateAsync(
