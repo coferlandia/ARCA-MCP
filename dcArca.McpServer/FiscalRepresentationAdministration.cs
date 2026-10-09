@@ -80,7 +80,12 @@ public sealed class FiscalRepresentationAdministration
         var probe = await _probe.ProbeAsync(material.Config, material.WsfeAuth,
             _clients.CreateClient(nameof(FiscalAssignmentAuthorizationValidator)), cancellationToken);
         if (!probe.Verified)
+        {
+            if (probe.Code is "WSFE_600" or "WSFE_601")
+                await _catalog.MarkRepresentationActionRequiredAsync(contextId, consumerId,
+                    representedCuit, pointOfSale, probe.Code, Actor(principal), cancellationToken);
             throw new FiscalContextAccessException(probe.Code, probe.SafeMessage);
+        }
 
         // Evidence binds the concrete CUIT/PV/context/environment/credential revision.
         var evidence = $"FEParamGetPtosVenta|context={contextId}|env={context.Environment}|cuit={representedCuit}|pv={pointOfSale}|rev={assignment.AssignmentRevision}|checked={probe.CheckedAt:O}";
