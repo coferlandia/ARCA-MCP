@@ -135,7 +135,7 @@ static async Task<int> ManageApiKeysAsync(string[] args, JsonSerializerOptions j
         }
         case "list-keys":
         {
-            var records = await store.ListContextsAsync();
+            var records = await store.ListAsync();
             Console.WriteLine(JsonSerializer.Serialize(records.Select(record => new
             {
                 record.Id,
@@ -169,7 +169,7 @@ static async Task<int> ManageFiscalContextsAsync(string[] args, JsonSerializerOp
     {
         case "list-contexts":
         {
-            var contexts = await store.ListAsync();
+            var contexts = await store.ListContextsAsync();
             Console.WriteLine(JsonSerializer.Serialize(contexts, jsonOptions));
             return 0;
         }
