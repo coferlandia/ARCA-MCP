@@ -22,13 +22,30 @@ public sealed record dcPointOfSaleAccessProbeResult(
     public bool Verified => Status == dcPointOfSaleProbeStatus.Verified;
 }
 
+public sealed record dcWsfePointOfSale(
+    int Number,
+    string? EmissionType,
+    bool Blocked,
+    string? DisabledDate,
+    bool EligibleForCae);
+
+public sealed record dcPointOfSaleListingResult(
+    dcPointOfSaleProbeStatus Status,
+    string Code,
+    string SafeMessage,
+    DateTimeOffset CheckedAt,
+    IReadOnlyList<dcWsfePointOfSale> Points)
+{
+    public bool Verified => Status == dcPointOfSaleProbeStatus.Verified;
+}
+
 /// <summary>
-/// Executes the authenticated, non-emitting WSFE FEParamGetPtosVenta operation and verifies
-/// that the configured electronic point of sale exists, is not blocked and has no disabled date.
+/// Authenticated, non-emitting WSFE FEParamGetPtosVenta discovery and validation.
+/// Caller must have independent permission to discover this represented CUIT.
 /// </summary>
 public sealed class dcWsfePointOfSaleProbe
 {
-    public async Task<dcPointOfSaleAccessProbeResult> ProbeAsync(
+    public async Task<dcPointOfSaleListingResult> ListAsync(
         dcArcaConfig config,
         dcArcaAuthService authService,
         HttpClient httpClient,
@@ -38,16 +55,8 @@ public sealed class dcWsfePointOfSaleProbe
         ArgumentNullException.ThrowIfNull(authService);
         ArgumentNullException.ThrowIfNull(httpClient);
         var checkedAt = DateTimeOffset.UtcNow;
-
-        if (!long.TryParse(config.Cuit, out var representedCuit) || representedCuit <= 0 || config.PuntoVenta <= 0)
-        {
-            return Result(
-                dcPointOfSaleProbeStatus.NotVerified,
-                "FISCAL_CONTEXT_INVALID",
-                "El CUIT representado o el punto de venta configurado no son válidos.",
-                config.PuntoVenta,
-                checkedAt);
-        }
+        if (!long.TryParse(config.Cuit, out var representedCuit) || representedCuit <= 0)
+            return Failed("FISCAL_CONTEXT_INVALID", "El CUIT representado no es válido.", checkedAt);
 
         string token;
         string sign;
@@ -61,12 +70,7 @@ public sealed class dcWsfePointOfSaleProbe
         }
         catch
         {
-            return Result(
-                dcPointOfSaleProbeStatus.NotVerified,
-                "WSAA_AUTHORIZATION_NOT_VERIFIED",
-                "No se pudo validar la credencial contra WSAA.",
-                config.PuntoVenta,
-                checkedAt);
+            return Failed("WSAA_AUTHORIZATION_NOT_VERIFIED", "No se pudo validar la credencial contra WSAA.", checkedAt);
         }
 
         var soap = BuildRequest(token, sign, representedCuit);
@@ -76,23 +80,13 @@ public sealed class dcWsfePointOfSaleProbe
             {
                 Content = new StringContent(soap, Encoding.UTF8, "text/xml")
             };
-            request.Headers.TryAddWithoutValidation(
-                "SOAPAction",
-                "http://ar.gov.afip.dif.FEV1/FEParamGetPtosVenta");
-
+            request.Headers.TryAddWithoutValidation("SOAPAction", "http://ar.gov.afip.dif.FEV1/FEParamGetPtosVenta");
             using var response = await httpClient.SendAsync(request, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
-            {
-                return Result(
-                    dcPointOfSaleProbeStatus.NotVerified,
-                    "WSFE_ACCESS_NOT_VERIFIED",
-                    "WSFE no permitió verificar el acceso del contexto.",
-                    config.PuntoVenta,
-                    checkedAt);
-            }
+                return Failed("WSFE_ACCESS_NOT_VERIFIED", "WSFE no permitió verificar los puntos de venta de este CUIT.", checkedAt);
 
-            return ParseResponse(body, config.PuntoVenta, checkedAt);
+            return ParseListingResponse(body, checkedAt);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -100,13 +94,109 @@ public sealed class dcWsfePointOfSaleProbe
         }
         catch
         {
-            return Result(
-                dcPointOfSaleProbeStatus.NotVerified,
-                "WSFE_ACCESS_NOT_VERIFIED",
-                "No se pudo completar el diagnóstico remoto de WSFE.",
-                config.PuntoVenta,
-                checkedAt);
+            return Failed("WSFE_ACCESS_NOT_VERIFIED", "No se pudo completar el diagnóstico remoto de WSFE.", checkedAt);
         }
+    }
+
+    public async Task<dcPointOfSaleAccessProbeResult> ProbeAsync(
+        dcArcaConfig config,
+        dcArcaAuthService authService,
+        HttpClient httpClient,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        var checkedAt = DateTimeOffset.UtcNow;
+        if (config.PuntoVenta <= 0)
+            return new dcPointOfSaleAccessProbeResult(
+                dcPointOfSaleProbeStatus.NotVerified, "FISCAL_CONTEXT_INVALID",
+                "El punto de venta no es válido.", config.PuntoVenta, checkedAt);
+
+        var listing = await ListAsync(config, authService, httpClient, cancellationToken);
+        if (!listing.Verified)
+            return new dcPointOfSaleAccessProbeResult(listing.Status, listing.Code,
+                listing.SafeMessage, config.PuntoVenta, listing.CheckedAt);
+
+        var point = listing.Points.SingleOrDefault(x => x.Number == config.PuntoVenta);
+        if (point is null)
+            return new dcPointOfSaleAccessProbeResult(
+                dcPointOfSaleProbeStatus.NotVerified, "POINT_OF_SALE_NOT_AUTHORIZED",
+                "ARCA no informó el punto de venta para el CUIT representado.",
+                config.PuntoVenta, listing.CheckedAt);
+        if (point.Blocked)
+            return new dcPointOfSaleAccessProbeResult(
+                dcPointOfSaleProbeStatus.NotVerified, "POINT_OF_SALE_BLOCKED",
+                "ARCA informó que el punto de venta está bloqueado.",
+                config.PuntoVenta, listing.CheckedAt, point.EmissionType);
+        if (!string.IsNullOrWhiteSpace(point.DisabledDate))
+            return new dcPointOfSaleAccessProbeResult(
+                dcPointOfSaleProbeStatus.NotVerified, "POINT_OF_SALE_DISABLED",
+                "ARCA informó una fecha de baja para el punto de venta.",
+                config.PuntoVenta, listing.CheckedAt, point.EmissionType);
+        if (!point.EligibleForCae)
+            return new dcPointOfSaleAccessProbeResult(
+                dcPointOfSaleProbeStatus.NotVerified, "POINT_OF_SALE_NOT_CAE",
+                "El punto de venta no tiene modalidad CAE para WSFE.",
+                config.PuntoVenta, listing.CheckedAt, point.EmissionType);
+
+        return new dcPointOfSaleAccessProbeResult(
+            dcPointOfSaleProbeStatus.Verified, "POINT_OF_SALE_AUTHORIZATION_VERIFIED",
+            "ARCA confirmó acceso al CUIT representado y al punto de venta WSFE/CAE.",
+            config.PuntoVenta, listing.CheckedAt, point.EmissionType);
+    }
+
+    public static dcPointOfSaleListingResult ParseListingResponse(string xml, DateTimeOffset checkedAt)
+    {
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(xml, LoadOptions.None);
+        }
+        catch
+        {
+            return Failed("WSFE_RESPONSE_INVALID", "WSFE devolvió una respuesta que no pudo validarse.", checkedAt);
+        }
+
+        var error = document.Descendants().FirstOrDefault(x => x.Name.LocalName == "Err");
+        if (error is not null)
+        {
+            var raw = Value(error, "Code");
+            var code = string.IsNullOrWhiteSpace(raw) ? "WSFE_ACCESS_NOT_VERIFIED" : "WSFE_" + raw;
+            var safe = raw switch
+            {
+                "600" => "ARCA rechazó el token/firma o la autorización del usuario técnico.",
+                "601" => "El CUIT representado no está incluido en la autorización del token.",
+                "602" => "ARCA no informó datos o puntos de venta para este CUIT en el ambiente seleccionado.",
+                _ => "WSFE devolvió un error remoto y no se verificó el acceso al CUIT."
+            };
+            return Failed(code, safe, checkedAt);
+        }
+
+        if (!document.Descendants().Any(x => x.Name.LocalName == "FEParamGetPtosVentaResult"))
+            return Failed("WSFE_RESPONSE_INVALID", "WSFE no devolvió el resultado esperado de puntos de venta.", checkedAt);
+
+        var points = new List<dcWsfePointOfSale>();
+        foreach (var node in document.Descendants().Where(x => x.Name.LocalName == "PtoVenta"))
+        {
+            if (!int.TryParse(Value(node, "Nro"), out var number) || number <= 0)
+                return Failed("WSFE_RESPONSE_INVALID", "WSFE devolvió un punto de venta sin número válido.", checkedAt);
+            var emission = Value(node, "EmisionTipo");
+            var blockedText = Value(node, "Bloqueado");
+            if (blockedText is not ("S" or "N" or "s" or "n"))
+                return Failed("WSFE_RESPONSE_INVALID", "WSFE no informó un estado válido de bloqueo.", checkedAt);
+            var blocked = string.Equals(blockedText, "S", StringComparison.OrdinalIgnoreCase);
+            var disabledDate = Value(node, "FchBaja");
+            var eligible = !blocked && string.IsNullOrWhiteSpace(disabledDate)
+                && string.Equals(emission, "CAE", StringComparison.OrdinalIgnoreCase);
+            points.Add(new dcWsfePointOfSale(number, emission, blocked, disabledDate, eligible));
+        }
+
+        if (points.Select(x => x.Number).Distinct().Count() != points.Count)
+            return Failed("WSFE_RESPONSE_INVALID", "WSFE devolvió números de punto de venta duplicados.", checkedAt);
+
+        return new dcPointOfSaleListingResult(
+            dcPointOfSaleProbeStatus.Verified, "POINT_OF_SALE_LIST_VERIFIED",
+            "ARCA devolvió el listado de puntos de venta del CUIT representado.",
+            checkedAt, points);
     }
 
     private static string BuildRequest(string token, string sign, long representedCuit)
@@ -130,109 +220,9 @@ public sealed class dcWsfePointOfSaleProbe
             """;
     }
 
-    private static dcPointOfSaleAccessProbeResult ParseResponse(
-        string xml,
-        int pointOfSale,
-        DateTimeOffset checkedAt)
-    {
-        XDocument document;
-        try
-        {
-            document = XDocument.Parse(xml, LoadOptions.None);
-        }
-        catch
-        {
-            return Result(
-                dcPointOfSaleProbeStatus.NotVerified,
-                "WSFE_RESPONSE_INVALID",
-                "WSFE devolvió una respuesta que no pudo validarse.",
-                pointOfSale,
-                checkedAt);
-        }
-
-        var firstError = document.Descendants()
-            .Where(x => x.Name.LocalName == "Err")
-            .Select(err => new
-            {
-                Code = Value(err, "Code"),
-                Message = Value(err, "Msg")
-            })
-            .FirstOrDefault();
-        if (firstError is not null)
-        {
-            var code = string.IsNullOrWhiteSpace(firstError.Code)
-                ? "WSFE_AUTHORIZATION_NOT_VERIFIED"
-                : $"WSFE_{firstError.Code}";
-            return Result(
-                dcPointOfSaleProbeStatus.NotVerified,
-                code,
-                "ARCA no confirmó la autorización del CUIT representado con la credencial indicada.",
-                pointOfSale,
-                checkedAt);
-        }
-
-        var point = document.Descendants()
-            .Where(x => x.Name.LocalName == "PtoVenta")
-            .Select(node => new
-            {
-                Number = ParseInt(node, "Nro"),
-                EmissionType = Value(node, "EmisionTipo"),
-                Blocked = Value(node, "Bloqueado"),
-                DisabledDate = Value(node, "FchBaja")
-            })
-            .SingleOrDefault(x => x.Number == pointOfSale);
-
-        if (point is null)
-        {
-            return Result(
-                dcPointOfSaleProbeStatus.NotVerified,
-                "POINT_OF_SALE_NOT_AUTHORIZED",
-                "ARCA no informó el punto de venta entre los puntos electrónicos habilitados para el CUIT representado.",
-                pointOfSale,
-                checkedAt);
-        }
-        if (string.Equals(point.Blocked, "S", StringComparison.OrdinalIgnoreCase))
-        {
-            return Result(
-                dcPointOfSaleProbeStatus.NotVerified,
-                "POINT_OF_SALE_BLOCKED",
-                "ARCA informó que el punto de venta está bloqueado.",
-                pointOfSale,
-                checkedAt,
-                point.EmissionType);
-        }
-        if (!string.IsNullOrWhiteSpace(point.DisabledDate))
-        {
-            return Result(
-                dcPointOfSaleProbeStatus.NotVerified,
-                "POINT_OF_SALE_DISABLED",
-                "ARCA informó una fecha de baja para el punto de venta.",
-                pointOfSale,
-                checkedAt,
-                point.EmissionType);
-        }
-
-        return Result(
-            dcPointOfSaleProbeStatus.Verified,
-            "POINT_OF_SALE_AUTHORIZATION_VERIFIED",
-            "ARCA confirmó acceso autenticado al CUIT representado y al punto de venta configurado.",
-            pointOfSale,
-            checkedAt,
-            point.EmissionType);
-    }
-
-    private static int? ParseInt(XElement parent, string localName)
-        => int.TryParse(Value(parent, localName), out var value) ? value : null;
-
     private static string? Value(XElement parent, string localName)
         => parent.Elements().FirstOrDefault(x => x.Name.LocalName == localName)?.Value?.Trim();
 
-    private static dcPointOfSaleAccessProbeResult Result(
-        dcPointOfSaleProbeStatus status,
-        string code,
-        string message,
-        int pointOfSale,
-        DateTimeOffset checkedAt,
-        string? emissionType = null)
-        => new(status, code, message, pointOfSale, checkedAt, emissionType);
+    private static dcPointOfSaleListingResult Failed(string code, string message, DateTimeOffset checkedAt)
+        => new(dcPointOfSaleProbeStatus.NotVerified, code, message, checkedAt, []);
 }
