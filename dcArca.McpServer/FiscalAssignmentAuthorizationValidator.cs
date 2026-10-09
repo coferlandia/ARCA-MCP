@@ -104,10 +104,6 @@ public sealed class FiscalAssignmentAuthorizationValidator : IFiscalAssignmentAu
     private async Task<FiscalAssignmentValidationResult> ProbeCoreAsync(
         RepresentedFiscalContextRecord context, string assignmentRevision, CancellationToken cancellationToken)
     {
-        string contextId,
-        string assignmentRevision,
-        CancellationToken cancellationToken = default)
-    {
         var assignment = context.Assignments.SingleOrDefault(x =>
                 string.Equals(x.AssignmentRevision, assignmentRevision, StringComparison.Ordinal))
             ?? throw new FiscalContextAccessException("ASSIGNMENT_NOT_FOUND", "La revisión de asignación no existe en el contexto fiscal.");

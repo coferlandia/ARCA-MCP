@@ -44,7 +44,9 @@ public sealed record FiscalRepresentationRecord(
     DateTimeOffset? ActivatedAt = null,
     string? ActivatedBy = null,
     DateTimeOffset? RevokedAt = null,
-    string? RevokedBy = null)
+    string? RevokedBy = null,
+    DateTimeOffset? SelectedAt = null,
+    string? SelectedBy = null)
 {
     public bool CanReadOrEmit => Status == FiscalRepresentationStatus.Active;
 }
@@ -187,7 +189,8 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
         {
             RequireContext(cat, contextId);
             if (cat.Representations.Any(x => x.ContextId == contextId && x.ConsumerId == consumerId &&
-                x.RepresentedCuit == representedCuit && x.Status != FiscalRepresentationStatus.Revoked))
+                x.RepresentedCuit == representedCuit && x.PointOfSale == 0 &&
+                x.Status != FiscalRepresentationStatus.Revoked))
                 throw new InvalidOperationException("FISCAL_REPRESENTATION_ALREADY_EXISTS");
             var rep = new FiscalRepresentationRecord(contextId, consumerId, representedCuit, 0,
                 FiscalRepresentationStatus.Pending, DateTimeOffset.UtcNow, actor);
@@ -199,9 +202,11 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
         => (await ReadAsync(cancellationToken)).Representations.Where(x => x.ContextId == contextId).ToArray();
 
     public async Task<FiscalRepresentationRecord?> GetRepresentationAsync(string contextId, string consumerId, long representedCuit, int pointOfSale, CancellationToken cancellationToken = default)
-        => (await ReadAsync(cancellationToken)).Representations.SingleOrDefault(x =>
-            x.ContextId == contextId && x.ConsumerId == consumerId &&
-            x.RepresentedCuit == representedCuit && x.PointOfSale == pointOfSale);
+        => (await ReadAsync(cancellationToken)).Representations
+            .Where(x => x.ContextId == contextId && x.ConsumerId == consumerId &&
+                x.RepresentedCuit == representedCuit && x.PointOfSale == pointOfSale)
+            .OrderBy(x => x.Status == FiscalRepresentationStatus.Revoked ? 1 : 0)
+            .ThenByDescending(x => x.CreatedAt).FirstOrDefault();
 
     public Task SelectPointOfSaleAsync(string contextId, string consumerId, long representedCuit, int pointOfSale, string actor, CancellationToken cancellationToken = default)
     {
@@ -211,7 +216,7 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
         {
             if (rep.Status != FiscalRepresentationStatus.Pending)
                 throw new InvalidOperationException("FISCAL_REPRESENTATION_STATE_INVALID");
-            return rep with { PointOfSale = pointOfSale, CreatedBy = actor };
+            return rep with { PointOfSale = pointOfSale, SelectedBy = actor, SelectedAt = DateTimeOffset.UtcNow };
         }, cancellationToken);
     }
 
@@ -248,7 +253,9 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
     {
         Require(actor, nameof(actor));
         return UpdateRepresentationAsync(contextId, consumerId, representedCuit, pointOfSale,
-            rep => rep with { Status = FiscalRepresentationStatus.Revoked, RevokedAt = DateTimeOffset.UtcNow, RevokedBy = actor }, cancellationToken);
+            rep => rep.Status == FiscalRepresentationStatus.Revoked
+                ? throw new InvalidOperationException("FISCAL_REPRESENTATION_ALREADY_REVOKED")
+                : rep with { Status = FiscalRepresentationStatus.Revoked, RevokedAt = DateTimeOffset.UtcNow, RevokedBy = actor }, cancellationToken);
     }
 
     private Task UpdateContextAsync(string id, Func<FiscalTechnicalContextRecord, FiscalTechnicalContextRecord> action, CancellationToken ct)
@@ -269,8 +276,11 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
     private static FiscalTechnicalCatalog ChangeRepresentation(FiscalTechnicalCatalog cat, string contextId, string consumerId,
         long cuit, int pv, Func<FiscalRepresentationRecord, FiscalRepresentationRecord> action)
     {
-        var original = cat.Representations.SingleOrDefault(x =>
-            x.ContextId == contextId && x.ConsumerId == consumerId && x.RepresentedCuit == cuit && x.PointOfSale == pv)
+        var original = cat.Representations
+            .Where(x => x.ContextId == contextId && x.ConsumerId == consumerId &&
+                x.RepresentedCuit == cuit && x.PointOfSale == pv)
+            .OrderBy(x => x.Status == FiscalRepresentationStatus.Revoked ? 1 : 0)
+            .ThenByDescending(x => x.CreatedAt).FirstOrDefault()
             ?? throw new InvalidOperationException("FISCAL_REPRESENTATION_NOT_FOUND");
         var updated = action(original);
         if (updated.ContextId != original.ContextId || updated.ConsumerId != original.ConsumerId ||
@@ -278,7 +288,8 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
             throw new InvalidOperationException("FISCAL_REPRESENTATION_IMMUTABLE_IDENTITY_CHANGED");
         if (cat.Representations.Any(x => !ReferenceEquals(x, original) &&
             x.ContextId == updated.ContextId && x.ConsumerId == updated.ConsumerId &&
-            x.RepresentedCuit == updated.RepresentedCuit && x.PointOfSale == updated.PointOfSale))
+            x.RepresentedCuit == updated.RepresentedCuit && x.PointOfSale == updated.PointOfSale &&
+            x.Status != FiscalRepresentationStatus.Revoked && updated.Status != FiscalRepresentationStatus.Revoked))
             throw new InvalidOperationException("FISCAL_REPRESENTATION_ALREADY_EXISTS");
         return cat with { Representations = cat.Representations.Select(x => ReferenceEquals(x, original) ? updated : x).ToArray() };
     }
@@ -344,7 +355,9 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
                 !catalog.Contexts.Any(x => x.ContextId == rep.ContextId))
                 throw new InvalidDataException("FISCAL_REPRESENTATION_INVALID");
         }
-        if (catalog.Representations.GroupBy(x => (x.ContextId, x.ConsumerId, x.RepresentedCuit, x.PointOfSale)).Any(g => g.Count() > 1))
+        if (catalog.Representations.Where(x => x.Status != FiscalRepresentationStatus.Revoked)
+            .GroupBy(x => (x.ContextId, x.ConsumerId, x.RepresentedCuit, x.PointOfSale))
+            .Any(g => g.Count() > 1))
             throw new InvalidDataException("FISCAL_REPRESENTATION_DUPLICATE");
     }
 

@@ -66,6 +66,26 @@ public sealed class FiscalTechnicalContextStoreTests
     }
 
     [Fact]
+    public async Task UnMismoCuitPuedeTenerVariosPvYReautorizarUnoRevocado()
+    {
+        using var temp = new TempStore();
+        var store = new FileSystemFiscalTechnicalContextStore(temp.Root);
+        await ProvisionContextAsync(store);
+        await store.RegisterCandidateAsync("operator-homo", "secretaria", 20123456786, "admin");
+        await ActivateAsync(store, 20123456786, 7);
+        await store.RegisterCandidateAsync("operator-homo", "secretaria", 20123456786, "admin");
+        await ActivateAsync(store, 20123456786, 14);
+        Assert.Equal(2, (await store.ListRepresentationsAsync("operator-homo")).Count(x => x.CanReadOrEmit));
+
+        await store.RevokeRepresentationAsync("operator-homo", "secretaria", 20123456786, 7, "admin");
+        await store.RegisterCandidateAsync("operator-homo", "secretaria", 20123456786, "admin");
+        await ActivateAsync(store, 20123456786, 7);
+        Assert.True((await store.GetRepresentationAsync("operator-homo", "secretaria", 20123456786, 7))!.CanReadOrEmit);
+        Assert.Contains(await store.ListRepresentationsAsync("operator-homo"), x =>
+            x.RepresentedCuit == 20123456786 && x.PointOfSale == 7 && x.Status == FiscalRepresentationStatus.Revoked);
+    }
+
+    [Fact]
     public async Task PersistenciaV1_ExigeResetExplicito_YNuncaBootstrapImplicito()
     {
         using var temp = new TempStore();

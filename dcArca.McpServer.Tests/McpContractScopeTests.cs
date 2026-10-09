@@ -66,6 +66,24 @@ public class McpContractScopeTests : IClassFixture<WebApplicationFactory<Program
         Assert.DoesNotContain("\"name\":\"reconciliar_operacion\"", body);
     }
 
+    [Fact]
+    public async Task ToolsAdministrativas_RequierenScopeSeparado()
+    {
+        using var client = _factory.CreateClient();
+
+        var ordinary = await client.SendAsync(Request("arca:consultar arca:facturar"));
+        var ordinaryBody = await ordinary.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("\"name\":\"listar_puntos_venta\"", ordinaryBody);
+        Assert.DoesNotContain("\"name\":\"activar_representacion_fiscal\"", ordinaryBody);
+
+        var admin = await client.SendAsync(Request("arca:administrar"));
+        var adminBody = await admin.Content.ReadAsStringAsync();
+        Assert.Equal(System.Net.HttpStatusCode.OK, admin.StatusCode);
+        Assert.Contains("\"name\":\"listar_puntos_venta\"", adminBody);
+        Assert.Contains("\"name\":\"activar_representacion_fiscal\"", adminBody);
+        Assert.DoesNotContain("\"name\":\"emitir_comprobante\"", adminBody);
+    }
+
     private static HttpRequestMessage Request(string scope)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/")
