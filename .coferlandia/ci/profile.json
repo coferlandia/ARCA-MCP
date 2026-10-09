@@ -21,7 +21,9 @@
         "id": "ci-build-and-test",
         "kind": "check_run",
         "name": "CI / build-and-test",
-        "allowed_conclusions": ["success"]
+        "allowed_conclusions": [
+          "success"
+        ]
       }
     ],
     "merge_group": {
@@ -33,5 +35,6 @@
     "base_sensitive": true,
     "profile_sensitive": true
   },
-  "exceptions": []
+  "exceptions": [],
+  "fingerprint": "4b62c4de3a34bda40667baee5c7cb28e85211e6cefc5945a2dd56ea4fd4e1cad"
 }
