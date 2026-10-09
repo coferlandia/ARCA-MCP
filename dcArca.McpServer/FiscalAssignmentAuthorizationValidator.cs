@@ -218,7 +218,8 @@ public sealed class FiscalAssignmentAuthorizationValidator : IFiscalAssignmentAu
                 ? new RepresentedFiscalContextRecord(technical.ContextId, technical.Environment, 1, 1,
                     technical.OperationalState, technical.ContextRevision, false, technical.Assignments)
                 : null;
-        context ??= throw new FiscalContextAccessException("FISCAL_CONTEXT_NOT_FOUND", "El contexto fiscal no existe.");
+        if (context is null)
+            throw new FiscalContextAccessException("FISCAL_CONTEXT_NOT_FOUND", "El contexto fiscal no existe.");
         var assignment = context.Assignments.SingleOrDefault(x =>
                 string.Equals(x.AssignmentRevision, assignmentRevision, StringComparison.Ordinal))
             ?? throw new FiscalContextAccessException("ASSIGNMENT_NOT_FOUND", "La revisión de asignación no existe en el contexto fiscal.");
