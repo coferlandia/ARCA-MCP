@@ -6,6 +6,7 @@
  */
 
 using System.Text.Json;
+using System.Security.Cryptography.X509Certificates;
 using dcArca.Core.Models;
 using dcArca.Core.Services;
 using Microsoft.Extensions.Configuration;
@@ -24,7 +25,9 @@ try
         return await ManageApiKeysAsync(args, jsonOptions);
 
     if (args[0] is "list-contexts" or "add-context" or "add-assignment" or "validate-assignment"
-        or "activate-assignment" or "disable-assignment" or "set-context-state")
+        or "activate-assignment" or "disable-assignment" or "set-context-state"
+        or "list-representations" or "register-representation" or "select-representation-pv"
+        or "list-points-of-sale" or "activate-representation" or "revoke-representation")
         return await ManageFiscalContextsAsync(args, jsonOptions);
 
     var config = LoadArcaConfig(LoadConfiguration());
@@ -160,26 +163,23 @@ static async Task<int> ManageApiKeysAsync(string[] args, JsonSerializerOptions j
 static async Task<int> ManageFiscalContextsAsync(string[] args, JsonSerializerOptions jsonOptions)
 {
     var configuration = LoadConfiguration();
-    var store = new FileSystemRepresentedFiscalContextStore(configuration["FiscalContexts:Directory"]);
+    var store = new FileSystemFiscalTechnicalContextStore(configuration["FiscalContexts:Directory"]);
 
     switch (args[0])
     {
         case "list-contexts":
         {
-            var contexts = await store.ListAsync();
+            var contexts = await store.ListContextsAsync();
             Console.WriteLine(JsonSerializer.Serialize(contexts, jsonOptions));
             return 0;
         }
         case "add-context":
         {
-            var context = new RepresentedFiscalContextRecord(
+            var context = new FiscalTechnicalContextRecord(
                 RequiredOption(args, "--id"),
                 RequiredOption(args, "--environment"),
-                ParseLong(RequiredOption(args, "--cuit"), "--cuit"),
-                ParseInt(RequiredOption(args, "--point-of-sale"), "--point-of-sale"),
                 FiscalContextOperationalState.Disabled,
                 ParseInt(Option(args, "--context-revision") ?? "1", "--context-revision"),
-                ParseBool(Option(args, "--legacy-default") ?? "false", "--legacy-default"),
                 Array.Empty<CredentialAssignmentRecord>());
             await store.AddContextAsync(context);
             Console.WriteLine(JsonSerializer.Serialize(context, jsonOptions));
@@ -200,45 +200,33 @@ static async Task<int> ManageFiscalContextsAsync(string[] args, JsonSerializerOp
             var contextId = RequiredOption(args, "--context");
             var revision = RequiredOption(args, "--revision");
             var actor = RequiredOption(args, "--actor");
-            var context = await store.GetAsync(contextId)
+            var context = await store.GetContextAsync(contextId)
                 ?? throw new InvalidOperationException("FISCAL_CONTEXT_NOT_FOUND");
-            var assignment = context.Assignments.SingleOrDefault(x => string.Equals(x.AssignmentRevision, revision, StringComparison.Ordinal))
+            var assignment = context.Assignments.SingleOrDefault(x => x.AssignmentRevision == revision)
                 ?? throw new InvalidOperationException("ASSIGNMENT_NOT_FOUND");
-            if (assignment.Status is not (CredentialAssignmentStatus.Candidate or CredentialAssignmentStatus.Validated))
-                throw new InvalidOperationException("ASSIGNMENT_VALIDATION_STATE_INVALID");
-
-            var legacyConfig = LoadArcaConfig(configuration);
-            var legacyEnvironment = configuration["FiscalContext:Environment"]
-                ?? (legacyConfig.WsfeUrl.Contains("homo", StringComparison.OrdinalIgnoreCase) ? "homologacion" : "produccion");
-            var binding = new FiscalCredentialHostBindingResolver(configuration, legacyConfig, legacyEnvironment)
-                .Resolve(context, assignment);
-            var auth = new dcArcaAuthService(
-                binding.Config.WsaaUrl,
-                binding.Config.CertificatePath,
-                binding.Config.CertificatePassword,
-                binding.CacheIdentity,
-                serviceName: "wsfe");
-            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-            var probe = await new dcWsfePointOfSaleProbe().ProbeAsync(binding.Config, auth, httpClient);
-            var evidence = probe.Verified
-                ? $"FEParamGetPtosVenta|context={context.ContextId}|assignment={assignment.AssignmentRevision}|pv={probe.PointOfSale}|emission={probe.EmissionType}|checked={probe.CheckedAt:O}"
-                : null;
-            if (probe.Verified && evidence is not null)
-                await store.MarkAssignmentValidatedAsync(contextId, revision, evidence, actor);
-
-            Console.WriteLine(JsonSerializer.Serialize(new
+            var projected = new RepresentedFiscalContextRecord(context.ContextId, context.Environment,
+                1, 1, context.OperationalState, context.ContextRevision, false, context.Assignments);
+            var binding = HostBinding(configuration, projected, assignment);
+            try
             {
-                probe.Status,
-                probe.Code,
-                probe.SafeMessage,
-                ContextId = contextId,
-                AssignmentRevision = revision,
-                assignment.CredentialId,
-                probe.PointOfSale,
-                probe.CheckedAt,
-                Evidence = evidence
-            }, jsonOptions));
-            return probe.Verified ? 0 : 2;
+                using var certificate = X509CertificateLoader.LoadPkcs12FromFile(
+                    binding.Config.CertificatePath, binding.Config.CertificatePassword);
+                var now = DateTime.UtcNow;
+                if (certificate.NotAfter.ToUniversalTime() <= now || certificate.NotBefore.ToUniversalTime() > now)
+                    throw new InvalidOperationException("CERTIFICATE_NOT_VALID");
+                var auth = CreateWsfeAuth(binding);
+                await auth.GetTokenAsync();
+                var evidence = $"WSAA|context={contextId}|rev={revision}|checked={DateTimeOffset.UtcNow:O}";
+                await store.MarkAssignmentValidatedAsync(contextId, revision, evidence, actor);
+                Console.WriteLine(JsonSerializer.Serialize(new { ContextId = contextId, Revision = revision,
+                    Verified = true, Evidence = evidence }, jsonOptions));
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("TECHNICAL_CREDENTIAL_NOT_VERIFIED: " + ex.GetType().Name);
+                return 2;
+            }
         }
         case "activate-assignment":
         {
@@ -265,14 +253,105 @@ static async Task<int> ManageFiscalContextsAsync(string[] args, JsonSerializerOp
             var actor = RequiredOption(args, "--actor");
             if (!Enum.TryParse<FiscalContextOperationalState>(stateText, ignoreCase: true, out var state))
                 throw new ArgumentException("--state debe ser Active, ReadOnly o Disabled.");
-            await store.SetOperationalStateAsync(contextId, state, actor);
+            await store.SetContextStateAsync(contextId, state, actor);
             Console.WriteLine(JsonSerializer.Serialize(new { ContextId = contextId, State = state }, jsonOptions));
+            return 0;
+        }
+        case "list-representations":
+        {
+            var records = await store.ListRepresentationsAsync(RequiredOption(args, "--context"));
+            Console.WriteLine(JsonSerializer.Serialize(records, jsonOptions));
+            return 0;
+        }
+        case "register-representation":
+        {
+            await store.RegisterCandidateAsync(RequiredOption(args, "--context"),
+                RequiredOption(args, "--consumer"), ParseLong(RequiredOption(args, "--cuit"), "--cuit"),
+                RequiredOption(args, "--actor"));
+            Console.WriteLine(JsonSerializer.Serialize(new { Status = "Pending" }, jsonOptions));
+            return 0;
+        }
+        case "select-representation-pv":
+        {
+            await store.SelectPointOfSaleAsync(RequiredOption(args, "--context"),
+                RequiredOption(args, "--consumer"), ParseLong(RequiredOption(args, "--cuit"), "--cuit"),
+                ParseInt(RequiredOption(args, "--point-of-sale"), "--point-of-sale"),
+                RequiredOption(args, "--actor"));
+            Console.WriteLine(JsonSerializer.Serialize(new { Status = "Pending", PvSelected = true }, jsonOptions));
+            return 0;
+        }
+        case "list-points-of-sale":
+        case "activate-representation":
+        {
+            var contextId = RequiredOption(args, "--context");
+            var consumer = RequiredOption(args, "--consumer");
+            var cuit = ParseLong(RequiredOption(args, "--cuit"), "--cuit");
+            var context = await store.GetContextAsync(contextId)
+                ?? throw new InvalidOperationException("FISCAL_CONTEXT_NOT_FOUND");
+            var assignment = context.ActiveAssignment
+                ?? throw new InvalidOperationException("ACTIVE_ASSIGNMENT_REQUIRED");
+            var representations = await store.ListRepresentationsAsync(contextId);
+            if (!representations.Any(x => x.ConsumerId == consumer && x.RepresentedCuit == cuit
+                && x.Status != FiscalRepresentationStatus.Revoked))
+                throw new InvalidOperationException("FISCAL_REPRESENTATION_CANDIDATE_REQUIRED");
+            var pv = args[0] == "activate-representation"
+                ? ParseInt(RequiredOption(args, "--point-of-sale"), "--point-of-sale") : 1;
+            var projected = new RepresentedFiscalContextRecord(contextId, context.Environment, cuit,
+                pv, context.OperationalState, context.ContextRevision, false, context.Assignments);
+            var binding = HostBinding(configuration, projected, assignment);
+            var probe = new dcWsfePointOfSaleProbe();
+            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            var auth = CreateWsfeAuth(binding);
+            if (args[0] == "list-points-of-sale")
+            {
+                var result = await probe.ListAsync(binding.Config, auth, httpClient);
+                Console.WriteLine(JsonSerializer.Serialize(result, jsonOptions));
+                return result.Verified ? 0 : 2;
+            }
+            var candidate = await store.GetRepresentationAsync(contextId, consumer, cuit, pv)
+                ?? throw new InvalidOperationException("FISCAL_REPRESENTATION_NOT_FOUND");
+            if (candidate.Status is not (FiscalRepresentationStatus.Pending or FiscalRepresentationStatus.Verified or FiscalRepresentationStatus.Active or FiscalRepresentationStatus.ActionRequired))
+                throw new InvalidOperationException("FISCAL_REPRESENTATION_STATE_INVALID");
+            var resultProbe = await probe.ProbeAsync(binding.Config, auth, httpClient);
+            if (!resultProbe.Verified)
+            {
+                Console.WriteLine(JsonSerializer.Serialize(resultProbe, jsonOptions));
+                return 2;
+            }
+            var actor = RequiredOption(args, "--actor");
+            var evidence = $"FEParamGetPtosVenta|context={contextId}|env={context.Environment}|cuit={cuit}|pv={pv}|rev={assignment.AssignmentRevision}|checked={resultProbe.CheckedAt:O}";
+            await store.MarkRepresentationVerifiedAsync(contextId, consumer, cuit, pv, evidence, actor);
+            await store.ActivateRepresentationAsync(contextId, consumer, cuit, pv, actor);
+            Console.WriteLine(JsonSerializer.Serialize(new { Status = "Active", ContextId = contextId,
+                ConsumerId = consumer, Cuit = cuit, PointOfSale = pv }, jsonOptions));
+            return 0;
+        }
+        case "revoke-representation":
+        {
+            await store.RevokeRepresentationAsync(RequiredOption(args, "--context"),
+                RequiredOption(args, "--consumer"), ParseLong(RequiredOption(args, "--cuit"), "--cuit"),
+                ParseInt(RequiredOption(args, "--point-of-sale"), "--point-of-sale"),
+                RequiredOption(args, "--actor"));
+            Console.WriteLine(JsonSerializer.Serialize(new { Status = "Revoked" }, jsonOptions));
             return 0;
         }
         default:
             throw new ArgumentException($"Comando desconocido: {args[0]}");
     }
 }
+
+static FiscalCredentialHostBinding HostBinding(
+    IConfiguration configuration, RepresentedFiscalContextRecord context, CredentialAssignmentRecord assignment)
+{
+    var legacyConfig = LoadArcaConfig(configuration);
+    var legacyEnvironment = configuration["FiscalContext:Environment"] ?? context.Environment;
+    return new FiscalCredentialHostBindingResolver(configuration, legacyConfig, legacyEnvironment)
+        .Resolve(context, assignment);
+}
+
+static dcArcaAuthService CreateWsfeAuth(FiscalCredentialHostBinding binding)
+    => new(binding.Config.WsaaUrl, binding.Config.CertificatePath,
+        binding.Config.CertificatePassword, binding.CacheIdentity, serviceName: "wsfe");
 
 static ApiKeyContextGrant[] ParseGrants(string? value)
 {
@@ -341,10 +420,16 @@ static void PrintUsage()
         "  list-keys\n" +
         "  revoke-key <id>\n" +
         "  list-contexts\n" +
-        "  add-context --id <contextId> --environment <ambiente> --cuit <representado> --point-of-sale <pv> [--context-revision <n>]\n" +
+        "  add-context --id <contextId> --environment <ambiente> [--context-revision <n>]\n" +
         "  add-assignment --context <contextId> --revision <rev> --credential <credentialId> --actor <actor>\n" +
         "  validate-assignment --context <contextId> --revision <rev> --actor <actor>\n" +
         "  activate-assignment --context <contextId> --revision <rev> --actor <actor>\n" +
         "  disable-assignment --context <contextId> --revision <rev> --actor <actor>\n" +
-        "  set-context-state --context <contextId> --state <Active|ReadOnly|Disabled> --actor <actor>");
+        "  set-context-state --context <contextId> --state <Active|ReadOnly|Disabled> --actor <actor>\n" +
+    "  register-representation --context <ctx> --consumer <consumer> --cuit <cuit> --actor <actor>\n" +
+    "  list-points-of-sale --context <ctx> --consumer <consumer> --cuit <cuit>\n" +
+    "  select-representation-pv --context <ctx> --consumer <consumer> --cuit <cuit> --point-of-sale <pv> --actor <actor>\n" +
+    "  activate-representation --context <ctx> --consumer <consumer> --cuit <cuit> --point-of-sale <pv> --actor <actor>\n" +
+    "  revoke-representation --context <ctx> --consumer <consumer> --cuit <cuit> --point-of-sale <pv> --actor <actor>\n" +
+    "  list-representations --context <ctx>");
 }

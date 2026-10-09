@@ -1,5 +1,8 @@
 # dcArca.McpServer
 
+> **V2 (#62):** un contexto técnico compartido puede operar múltiples CUIT/PV, cada uno con permiso de representación por `consumerId`. Las tools ordinarias aceptan `representedCuit` y `pointOfSale`; las administrativas están protegidas por `arca:administrar` + grant. Contrato actual `arca-mcp/2.0`. Ver `MCP_FISCAL_CONTEXTS.md`, `MCP_AUTHORIZATION.md` y `MCP_OPERATION_CONTRACT.md`; los ejemplos V1 de contexto fiscal único más abajo son históricos.
+
+
 `dcArca.McpServer` expone facturación electrónica ARCA como tools MCP HTTP stateless, protegidas por API keys Bearer, scopes y grants de contexto.
 
 Contrato actual: `arca-mcp/1.0`.

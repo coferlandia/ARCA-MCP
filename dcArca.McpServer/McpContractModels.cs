@@ -5,7 +5,7 @@ namespace dcArca.McpServer;
 
 public static class ArcaMcpContract
 {
-    public const string Version = "arca-mcp/1.0";
+    public const string Version = "arca-mcp/2.0";
     public static readonly string[] ImplementedCurrenciesContract = ["caller-supplied-arca-code"];
 }
 

@@ -134,7 +134,7 @@ public class McpInvoiceSequencerTests
         var first = await sequencer.EmitAsync(Request(dcTipoComprobante.FacturaB), "technical-failure-key");
         var keyHash = EmissionRequestFingerprint.OperationKeyHash(
             "test-consumer",
-            "test-context",
+            "test-context", 20123456786, 1,
             "technical-failure-key");
         var stored = await store.GetAsync(keyHash);
 

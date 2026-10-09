@@ -1,5 +1,18 @@
 # Runbook
 
+## Cutover controlado de contextos fiscales V1 → V2 (#62)
+
+**No ejecutado por este PR.** El titular autorizó descartar el **estado actual** únicamente, condicionado a verificar que no existan emisiones reales a preservar. Se requiere aprobación operacional independiente inmediatamente antes del cambio.
+
+1. Coordinar versión de contrato V2 con cada consumidor y detener tráfico, HTTP MCP y **todo writer** que comparta el filesystem. Confirmar sin operaciones fiscales reales a preservar ni pendientes inciertos (`Submitting`/`Uncertain`). Nunca resetear un store que contenga actividad fiscal real.
+2. Inventariar las rutas efectivas del host, sin publicar nombres internos ni secretos: `FiscalContexts:Directory` (`contexts.json`, `fiscal-catalog-v2.json`), `ApiKeys:Directory` (`api_keys.json`), `EmissionIdempotency:Directory` (operaciones `*.json`, `.contexts/`, reservas de serie), `Recovery:Directory` (evidencia/recovery), caché WSAA y respaldos locales. Confirmar que no haya otros procesos usando los directorios.
+3. Realizar backup coherente **fuera** del repositorio público; almacenar en destino privado con accesos restringidos. No incluir material del PFX/password, secrets del host ni tokens/sign en logs o Issues. Mantener intactos certificados, PFX y credenciales de host.
+4. Con servicios detenidos y verificación humana de alcance, eliminar/reinicializar **sólo** los stores de datos operativos autorizados (contextos V1, API keys/grants, operaciones idempotentes/series/recovery antiguos). No ejecutar una limpieza automática al iniciar ni tratar los archivos JSON uno por uno con writers vivos. No mover el archivo `contexts.json` como migración implícita: V2 lo rechaza con `FISCAL_CATALOG_V1_RESET_REQUIRED`.
+5. Configurar `FiscalCredentials:{credentialId}:CertificatePath/CertificatePassword` y `FiscalEnvironments:{environment}:WsaaUrl/WsfeUrl/PadronUrl` desde secretos del host. Crear contexto técnico, asignación validada con WSAA, estado Active, API keys/grants por consumidor y representaciones candidatas → PV descubierto → revalidación remota → Active; ver `docs/MCP_FISCAL_CONTEXTS.md` y `docs/MCP_AUTHORIZATION.md`.
+6. Arrancar un solo writer; validar `/health/live`, `/health/ready`, scopes y denegaciones cruzadas antes de habilitar tráfico. Realizar smoke de homologación con aprobación operativa, comprobar `Auth.Cuit`, PV, errores 600/601/602, idempotencia, reconciliación y PDF. **No afirmar smoke real si sólo se corrió CI.**
+7. Si no se completa el cutover, detener nuevamente el tráfico y hacer rollback por redeploy + reaprovisionamiento consistente sobre stores V2 vacíos, sin reintroducir registros V1 parcialmente transformados ni automatizar repetición de comprobantes. Documentar el incidente y comprobar cualquier operación incierta contra ARCA antes de volver a emitir.
+
+
 ## Proposito
 
 Procedimientos repetibles para compilar, validar y operar dcARCA/ARCA-MCP sin incorporar secretos ni topología privada al repositorio público. Los contratos técnicos detallados siguen viviendo bajo `docs/`; este runbook concentra el camino operativo seguro.

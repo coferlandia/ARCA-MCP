@@ -1,3 +1,5 @@
+> **Contrato fiscal MCP V2 (Issue #62):** el `contextId` identifica el contexto **técnico** de la credencial, no un CUIT/PV. Las representaciones CUIT/PV se activan por consumidor y se seleccionan en cada operación. Consultar [contextos V2](docs/MCP_FISCAL_CONTEXTS.md), [autorización](docs/MCP_AUTHORIZATION.md) y [operaciones](docs/MCP_OPERATION_CONTRACT.md). Los comandos/bootstrap V1 descriptos históricamente más abajo quedan reemplazados por el CLI V2. Requiere reaprovisionamiento explícito, sin migración automática de datos V1. **No ejecutar reset en build, test ni despliegue automático.**
+
 # dcARCA - Facturación Electrónica Argentina
 
 **dcARCA** es un componente .NET 10 para implementar facturación electrónica Argentina utilizando el web service **WSFEv1 de AFIP (ARCA)** y consultar el padrón oficial **ws_sr_constancia_inscripcion** (antes ws_sr_padron_a5) para validar CUIT. 

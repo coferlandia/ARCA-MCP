@@ -1,168 +1,52 @@
-# Contextos fiscales representados y asignaciones de credencial
+# Contextos técnicos y representaciones fiscales — contrato V2
 
-ARCA-MCP separa cuatro identidades que no deben confundirse:
+**Contrato de ARCA-MCP 2.0.** El ContextId ya no identifica un CUIT ni un punto de venta. Un contexto técnico identifica una credencial de operador (con revisión) y el ambiente fiscal. Su identidad es `contextId + environment`. La identidad fiscal y los permisos se registran aparte.
 
-1. `consumerId`: identidad estable del sistema consumidor. No es una API key.
-2. `contextId`: identidad administrativa estable de un contexto fiscal representado.
-3. identidad fiscal: `(ambiente, CUIT representado, punto de venta)` y, por operación, tipo de comprobante.
-4. `credentialId`: referencia opaca server-owned a una credencial capaz de operar para ese contexto.
+## Modelo y estados
 
-El titular técnico del certificado puede ser distinto del CUIT representado. La autorización real se valida contra ARCA antes de activar una nueva asignación.
+- `FiscalTechnicalContextRecord`: `contextId`, `environment`, `contextRevision`, `operationalState`, assignments de `credentialId` con `assignmentRevision` histórica.
+- `FiscalRepresentationRecord`: `contextId`, `consumerId`, `representedCuit`, `pointOfSale`, `status`, evidencia de `FEParamGetPtosVenta`, actores y fechas de alta, verificación, activación y revocación.
+- Los estados son `Pending`, `Verified`, `Active`, `Revoked` y `ActionRequired`. La selección inicial tiene `pointOfSale=0`; **nunca** autoriza emitir o consultar.
+- Las credenciales son server-owned mediante `FiscalCredentials:{credentialId}` y `FiscalEnvironments:{environment}`. No se devuelven PFX, passwords, Token/Sign, rutas secretas ni endpoints configurables.
+- WSAA autentica al operador técnico; cada request WSFE configura `Auth.Cuit` y `PtoVta` para **la representación concreta**. El material de autenticación y configuración se crea por operación; nunca se muta globalmente.
 
-## Contexto fiscal
+## Persistencia
 
-Un contexto persiste:
+`FiscalContexts:Directory/fiscal-catalog-v2.json` almacena el catálogo técnico y las representaciones con `schemaVersion=2` y escrituras atómicas bajo lock de archivo. No se migra ni reutiliza `contexts.json` V1: su presencia genera `FISCAL_CATALOG_V1_RESET_REQUIRED` y evita el arranque del host. El reset se hace sólo en el procedimiento de cutover controlado, **nunca** durante un upgrade automático.
 
-- `contextId`;
-- `environment`;
-- `representedCuit`;
-- `pointOfSale`;
-- `contextRevision`;
-- `operationalState`: `Active`, `ReadOnly` o `Disabled`;
-- historial de asignaciones de credencial.
+Una representación activa conserva evidencia remota vinculada al `assignmentRevision` y `environment`. Si rota la credencial técnica, las representaciones previamente activas quedan **bloqueadas para nuevas operaciones** con `FISCAL_REPRESENTATION_REVERIFY_REQUIRED` hasta volver a verificar remotamente el CUIT/PV contra la nueva revisión; no se heredan delegaciones por implicancia. La administración permite revalidar una representación activa mediante el mismo flujo de probe y activación sin duplicar identidad.
 
-`contextId`, ambiente, CUIT representado, punto de venta y revisión son identidad inmutable del contexto. Para otra identidad fiscal se crea otro contexto.
+Una misma revisión activa de credencial puede autenticar CUIT/PV diferentes, pero los grants de contexto y la representación activa asociada al `consumerId` son controles independientes. Un grant de contexto sin representación activa no habilita ninguna consulta/emisión. Las revocaciones afectan nuevas operaciones; el snapshot de intentos fiscales conserva CUIT/PV/ambiente/revisión para tratamiento explícito de incertidumbre. Cuando un rechazo WSFE muestra explícitamente `600` o `601`, la representación se marca `ActionRequired` y se bloquea su uso hasta revalidación administrativa remota. `602` conserva su semántica de ausencia de datos y no implica automáticamente revocación de la delegación.
 
-Dos contextos administrativos pueden representar la misma serie fiscal. Eso no crea dos numeradores: la reserva de #17 sigue usando `(ambiente, CUIT representado, PV, tipo)` y por lo tanto ambos contextos comparten la misma autoridad de serie.
+## Provisionamiento
 
-## Asignación de credencial
-
-Una asignación contiene:
-
-- `assignmentRevision` estable;
-- `credentialId` opaco;
-- estado `Candidate`, `Validated`, `Active`, `Historical` o `Disabled`;
-- evidencia de validación no emisora;
-- timestamps y actor de las transiciones.
-
-Sólo puede existir una asignación `Active` por contexto. Una nueva asignación nace `Candidate` y no puede activarse sin pasar primero a `Validated`.
-
-La validación usa `FEParamGetPtosVenta`, autenticado con la credencial candidata y enviando el CUIT representado. Para considerarla válida, ARCA debe devolver el punto de venta configurado, no bloqueado y sin fecha de baja. El probe no emite comprobantes ni solicita CAE.
-
-## Credenciales y secretos
-
-`credentialId` nunca contiene el PFX, password ni ruta secreta. El host resuelve referencias como:
-
-```text
-FiscalCredentials__empresa-2026__CertificatePath=/run/secrets/empresa-2026.pfx
-FiscalCredentials__empresa-2026__CertificatePassword=...
-```
-
-Los ambientes también son server-owned:
-
-```text
-FiscalEnvironments__homologacion__WsaaUrl=...
-FiscalEnvironments__homologacion__WsfeUrl=...
-FiscalEnvironments__homologacion__PadronUrl=...
-```
-
-El caller MCP sólo puede enviar `contextId`. Nunca puede elegir `credentialId`, ruta de certificado, password, endpoint ni CUIT representado.
-
-El cache WSAA queda namespaced por `ambiente + credentialId + servicio`, por lo que dos certificados que representen el mismo CUIT no comparten token/sign.
-
-## Consumers, API keys y grants
-
-Una API key moderna contiene:
-
-- un `consumerId` estable;
-- scopes generales (`arca:consultar`, `arca:facturar`);
-- grants de contexto por operación, por ejemplo `ctx-a:consultar` y `ctx-a:facturar`.
-
-Rotar la API key no cambia `consumerId`. Por ello, la idempotencia sigue perteneciendo al mismo consumidor aun cuando cambie el secreto de autenticación.
-
-Agregar un contexto al catálogo no modifica grants existentes. Una key sólo accede a los contextos que se le asignaron explícitamente.
-
-Si una operación tiene exactamente un contexto autorizado, `contextId` puede omitirse. Si tiene más de uno, omitirlo falla con `FISCAL_CONTEXT_REQUIRED`; el servidor nunca elige uno arbitrariamente.
-
-## Compatibilidad single-context
-
-En una instalación existente, si todavía no existe el catálogo de contextos, el servidor bootstrappea una única entrada desde `FiscalContext` + `dcArcaConfig`:
-
-- conserva el `consumerId` y `contextId` actuales;
-- usa el CUIT/PV actuales;
-- crea una asignación activa `legacy-default` con la revisión configurada;
-- las API keys antiguas sin `consumerId` ni grants sólo reciben acceso a ese contexto legacy.
-
-Una vez creado el catálogo, el bootstrap no agrega nuevos contextos implícitos. Esto evita que una actualización de configuración expanda permisos accidentalmente.
-
-## Migración certificado personal → certificado empresa
-
-Para migrar un contexto ya existente:
+Con el host detenido o en mantenimiento, crear primero contexto y assignment técnico:
 
 ```bash
-dcArca.Cli add-assignment \
-  --context tenant-fiscal \
-  --revision empresa-v2 \
-  --credential empresa-2026 \
-  --actor diego
-
-dcArca.Cli validate-assignment \
-  --context tenant-fiscal \
-  --revision empresa-v2 \
-  --actor diego
-
-dcArca.Cli activate-assignment \
-  --context tenant-fiscal \
-  --revision empresa-v2 \
-  --actor diego
+dcArca.Cli add-context --id operador-homo --environment homologacion
+dcArca.Cli add-assignment --context operador-homo --revision v1 --credential certificado-operador --actor admin
+dcArca.Cli validate-assignment --context operador-homo --revision v1 --actor admin
+dcArca.Cli activate-assignment --context operador-homo --revision v1 --actor admin
+dcArca.Cli set-context-state --context operador-homo --state Active --actor admin
 ```
 
-La activación transforma la asignación anterior en `Historical`. Las operaciones nuevas usan `empresa-v2`.
-
-Una operación idempotente creada antes del cambio conserva para siempre su `assignmentRevision` original. Si se reintenta después de la migración, el runtime vuelve a resolver esa revisión histórica. No hace fallback a la credencial nueva.
-
-Si la credencial histórica se deshabilita durante una operación pendiente, el retry falla con `HISTORICAL_ASSIGNMENT_INTERVENTION_REQUIRED`; hace falta una resolución explícita del incidente.
-
-## Alta gradual de un contexto nuevo
-
-Un contexto nuevo nace `Disabled` y sin credencial activa:
+Registrar el CUIT candidato, descubrir los PV sin emitir, seleccionar uno y verificarlo/activarlo:
 
 ```bash
-dcArca.Cli add-context \
-  --id tenant-b \
-  --environment homologacion \
-  --cuit 30XXXXXXXXX \
-  --point-of-sale 4
+dcArca.Cli register-representation --context operador-homo --consumer secretaria --cuit 20XXXXXXXXX --actor admin
+dcArca.Cli list-points-of-sale --context operador-homo --consumer secretaria --cuit 20XXXXXXXXX
+dcArca.Cli select-representation-pv --context operador-homo --consumer secretaria --cuit 20XXXXXXXXX --point-of-sale 4 --actor admin
+dcArca.Cli activate-representation --context operador-homo --consumer secretaria --cuit 20XXXXXXXXX --point-of-sale 4 --actor admin
 ```
 
-Luego se agrega, valida y activa su assignment. Finalmente se habilita el contexto:
+Los endpoints administrativos MCP cumplen las mismas etapas y exigen `arca:administrar` más grant `{contextId}:administrar`. El listado no autoriza ni activa. El paso de activación repite el probe del CUIT/PV elegido y bloquea 600/601/602, PV bloqueado, de baja o no CAE.
 
-```bash
-dcArca.Cli set-context-state \
-  --context tenant-b \
-  --state Active \
-  --actor diego
-```
+## Emisión, aislamiento y recuperación
 
-Los grants se agregan aparte a cada API key:
+Los contratos de emisión y consulta aceptan `contextId`, `representedCuit` y `pointOfSale`. Si el consumidor tiene una única representación activa, CUIT/PV pueden inferirse; si tiene varias, especificarlos es obligatorio. Se revalida la representación antes del side effect de CAE, con aislamiento por consumidor.
 
-```bash
-dcArca.Cli set-key-grants key_xxx \
-  --consumer secretaria \
-  --grant tenant-a:consultar,tenant-a:facturar,tenant-b:consultar,tenant-b:facturar
-```
+La identidad durable es `consumerId + contextId + environment + representedCuit + pointOfSale + tipoComprobante` y snapshot de `assignmentRevision`. La clave idempotente incorpora consumidor, contexto, CUIT y PV. La serie fiscal continúa siendo `environment + representedCuit + pointOfSale + tipoComprobante`, incluso si varios contextos comparten identidad fiscal.
 
-No existe propagación automática de grants.
+Consultar/reconciliar una operación usa siempre la representación de su snapshot histórico. Una revocación local o credencial histórica deshabilitada falla cerrada, requiriendo intervención autorizada si la operación quedó incierta. Nunca se pide un nuevo CAE por una respuesta incierta.
 
-## Estados operativos
-
-- `Active`: consultas y emisiones nuevas permitidas según grants.
-- `ReadOnly`: consultas permitidas, emisiones nuevas bloqueadas.
-- `Disabled`: consultas y emisiones nuevas bloqueadas.
-
-La identidad idempotente histórica y el historial de assignments no se borran al cambiar de estado.
-
-## Comandos administrativos
-
-El CLI soporta:
-
-- `create-key` y `set-key-grants` con `consumerId`/grants;
-- `list-contexts`;
-- `add-context`;
-- `add-assignment`;
-- `validate-assignment`;
-- `activate-assignment`;
-- `disable-assignment`;
-- `set-context-state`.
-
-`validate-assignment` puede devolver código de salida `2` cuando la comprobación remota no queda verificada. En ese caso `activate-assignment` continúa bloqueado.
+**Cutover:** ver `RUNBOOK.md`; no ejecutar limpieza automática ni conservar JSON V1.

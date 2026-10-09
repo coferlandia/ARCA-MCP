@@ -11,6 +11,7 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
     private readonly IEmissionIdempotencyStore _store;
     private readonly IFiscalOperationIdentityProvider _identityProvider;
     private readonly IFiscalSeriesCoordinator _seriesCoordinator;
+    private readonly Func<CancellationToken, Task>? _beforeFiscalSubmission;
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Locks = new();
 
     public McpInvoiceSequencer(
@@ -18,13 +19,15 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
         dcArcaConfig config,
         IEmissionIdempotencyStore store,
         IFiscalOperationIdentityProvider identityProvider,
-        IFiscalSeriesCoordinator seriesCoordinator)
+        IFiscalSeriesCoordinator seriesCoordinator,
+        Func<CancellationToken, Task>? beforeFiscalSubmission = null)
     {
         _wsfe = wsfe;
         _config = config;
         _store = store;
         _identityProvider = identityProvider;
         _seriesCoordinator = seriesCoordinator;
+        _beforeFiscalSubmission = beforeFiscalSubmission;
     }
 
     // Compatibility constructors remain in-process only. The hosted server always injects
@@ -72,9 +75,8 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
         var identity = _identityProvider.For(tipo);
         var requestHash = EmissionRequestFingerprint.RequestHash(factura);
         var keyHash = EmissionRequestFingerprint.OperationKeyHash(
-            identity.ConsumerId,
-            identity.ContextId,
-            idempotencyKey);
+            identity.ConsumerId, identity.ContextId,
+            identity.Cuit, identity.PuntoVenta, idempotencyKey);
         var evidence = StoredFiscalEvidence.FromRequest(factura);
 
         EmissionIdempotencyRecord record;
@@ -212,6 +214,11 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
                     dcEmissionOutcome.FailedBeforeSubmission,
                     record.NumeroComprobante.Value);
             }
+
+            // A grant or representation can be revoked after numbering was reserved.
+            // Read the authorization catalog again at the last safe pre-submission boundary.
+            if (_beforeFiscalSubmission is not null)
+                await _beforeFiscalSubmission(cancellationToken);
 
             record = record with
             {

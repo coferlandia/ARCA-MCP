@@ -33,6 +33,11 @@ public interface IFiscalAssignmentAuthorizationValidator
         string assignmentRevision,
         CancellationToken cancellationToken = default);
 
+    Task<FiscalAssignmentValidationResult> ProbeRepresentationAsync(
+        string contextId, string assignmentRevision, long representedCuit,
+        int pointOfSale, CancellationToken cancellationToken = default)
+        => ProbeAsync(contextId, assignmentRevision, cancellationToken);
+
     Task<FiscalAssignmentValidationResult> ValidateCandidateAsync(
         string contextId,
         string assignmentRevision,
@@ -42,7 +47,8 @@ public interface IFiscalAssignmentAuthorizationValidator
 
 public sealed class FiscalAssignmentAuthorizationValidator : IFiscalAssignmentAuthorizationValidator
 {
-    private readonly IRepresentedFiscalContextStore _contexts;
+    private readonly IRepresentedFiscalContextStore? _contexts;
+    private readonly IFiscalTechnicalContextStore? _catalog;
     private readonly IFiscalCredentialMaterializer _materializer;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly dcWsfePointOfSaleProbe _probe = new();
@@ -57,13 +63,47 @@ public sealed class FiscalAssignmentAuthorizationValidator : IFiscalAssignmentAu
         _httpClientFactory = httpClientFactory;
     }
 
-    public async Task<FiscalAssignmentValidationResult> ProbeAsync(
-        string contextId,
-        string assignmentRevision,
+    public FiscalAssignmentAuthorizationValidator(
+        IFiscalTechnicalContextStore catalog,
+        IFiscalCredentialMaterializer materializer,
+        IHttpClientFactory httpClientFactory)
+    {
+        _catalog = catalog;
+        _materializer = materializer;
+        _httpClientFactory = httpClientFactory;
+    }
+
+    public Task<FiscalAssignmentValidationResult> ProbeAsync(
+        string contextId, string assignmentRevision, CancellationToken cancellationToken = default)
+        => ProbeRepresentationAsync(contextId, assignmentRevision, 0, 0, cancellationToken);
+
+    public async Task<FiscalAssignmentValidationResult> ProbeRepresentationAsync(
+        string contextId, string assignmentRevision, long representedCuit, int pointOfSale,
         CancellationToken cancellationToken = default)
     {
-        var context = await _contexts.GetAsync(contextId, cancellationToken)
-            ?? throw new FiscalContextAccessException("FISCAL_CONTEXT_NOT_FOUND", "El contexto fiscal no existe.");
+        RepresentedFiscalContextRecord context;
+        if (_catalog is null)
+        {
+            context = await (_contexts ?? throw new InvalidOperationException("CONTEXT_STORE_MISSING"))
+                .GetAsync(contextId, cancellationToken)
+                ?? throw new FiscalContextAccessException("FISCAL_CONTEXT_NOT_FOUND", "El contexto fiscal no existe.");
+        }
+        else
+        {
+            var technical = await _catalog.GetContextAsync(contextId, cancellationToken)
+                ?? throw new FiscalContextAccessException("FISCAL_CONTEXT_NOT_FOUND", "El contexto técnico no existe.");
+            if (representedCuit <= 0 || pointOfSale <= 0)
+                throw new FiscalContextAccessException("FISCAL_REPRESENTATION_REQUIRED", "El diagnóstico remoto requiere CUIT y PV.");
+            context = new RepresentedFiscalContextRecord(technical.ContextId, technical.Environment,
+                representedCuit, pointOfSale, technical.OperationalState, technical.ContextRevision, false, technical.Assignments);
+        }
+
+        return await ProbeCoreAsync(context, assignmentRevision, cancellationToken);
+    }
+
+    private async Task<FiscalAssignmentValidationResult> ProbeCoreAsync(
+        RepresentedFiscalContextRecord context, string assignmentRevision, CancellationToken cancellationToken)
+    {
         var assignment = context.Assignments.SingleOrDefault(x =>
                 string.Equals(x.AssignmentRevision, assignmentRevision, StringComparison.Ordinal))
             ?? throw new FiscalContextAccessException("ASSIGNMENT_NOT_FOUND", "La revisión de asignación no existe en el contexto fiscal.");
@@ -172,23 +212,56 @@ public sealed class FiscalAssignmentAuthorizationValidator : IFiscalAssignmentAu
         if (string.IsNullOrWhiteSpace(actor))
             throw new ArgumentException("actor es obligatorio.", nameof(actor));
 
-        var context = await _contexts.GetAsync(contextId, cancellationToken)
-            ?? throw new FiscalContextAccessException("FISCAL_CONTEXT_NOT_FOUND", "El contexto fiscal no existe.");
+        var context = _catalog is null
+            ? await (_contexts ?? throw new InvalidOperationException("CONTEXT_STORE_MISSING")).GetAsync(contextId, cancellationToken)
+            : (await _catalog.GetContextAsync(contextId, cancellationToken)) is { } technical
+                ? new RepresentedFiscalContextRecord(technical.ContextId, technical.Environment, 1, 1,
+                    technical.OperationalState, technical.ContextRevision, false, technical.Assignments)
+                : null;
+        if (context is null)
+            throw new FiscalContextAccessException("FISCAL_CONTEXT_NOT_FOUND", "El contexto fiscal no existe.");
         var assignment = context.Assignments.SingleOrDefault(x =>
                 string.Equals(x.AssignmentRevision, assignmentRevision, StringComparison.Ordinal))
             ?? throw new FiscalContextAccessException("ASSIGNMENT_NOT_FOUND", "La revisión de asignación no existe en el contexto fiscal.");
         if (assignment.Status is not (CredentialAssignmentStatus.Candidate or CredentialAssignmentStatus.Validated))
             throw new FiscalContextAccessException("ASSIGNMENT_VALIDATION_STATE_INVALID", "La asignación no está en un estado validable.");
 
+        if (_catalog is not null)
+        {
+            // A technical certificate has no represented CUIT/PV. Validate PKCS#12 and
+            // authenticate WSAA without invoking any fiscal PV probe.
+            try
+            {
+                var material = _materializer.Materialize(context, assignment);
+                using var certificate = X509CertificateLoader.LoadPkcs12FromFile(
+                    material.Config.CertificatePath, material.Config.CertificatePassword);
+                var now = DateTimeOffset.UtcNow;
+                if (certificate.NotAfter.ToUniversalTime() <= now.UtcDateTime ||
+                    certificate.NotBefore.ToUniversalTime() > now.UtcDateTime)
+                    return new FiscalAssignmentValidationResult(FiscalAssignmentValidationStatus.InvalidConfiguration,
+                        "CERTIFICATE_NOT_VALID", "El certificado no está vigente.", contextId,
+                        assignmentRevision, assignment.CredentialId, 0, now);
+                await material.WsfeAuth.GetTokenAsync(cancellationToken);
+                var evidence = $"WSAA|context={contextId}|revision={assignmentRevision}|checked={now:O}";
+                await _catalog.MarkAssignmentValidatedAsync(contextId, assignmentRevision, evidence, actor, cancellationToken);
+                return new FiscalAssignmentValidationResult(FiscalAssignmentValidationStatus.Verified,
+                    "TECHNICAL_CREDENTIAL_VERIFIED", "Credencial técnica validada ante WSAA.",
+                    contextId, assignmentRevision, assignment.CredentialId, 0, now, evidence);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch
+            {
+                return new FiscalAssignmentValidationResult(FiscalAssignmentValidationStatus.NotVerified,
+                    "WSAA_AUTHORIZATION_NOT_VERIFIED", "La credencial técnica no pudo validarse ante WSAA.",
+                    contextId, assignmentRevision, assignment.CredentialId, 0, DateTimeOffset.UtcNow);
+            }
+        }
+
         var result = await ProbeAsync(contextId, assignmentRevision, cancellationToken);
         if (result.Verified && !string.IsNullOrWhiteSpace(result.Evidence))
         {
-            await _contexts.MarkAssignmentValidatedAsync(
-                contextId,
-                assignmentRevision,
-                result.Evidence,
-                actor,
-                cancellationToken);
+            await (_contexts ?? throw new InvalidOperationException("CONTEXT_STORE_MISSING")).MarkAssignmentValidatedAsync(
+                contextId, assignmentRevision, result.Evidence, actor, cancellationToken);
         }
         return result;
     }

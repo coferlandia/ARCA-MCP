@@ -199,6 +199,64 @@ public class FiscalContextRuntimeResolverTests
         Assert.Equal("legacy", runtime.Context.ContextId);
     }
 
+    [Fact]
+    public async Task V2_DosRepresentadosMismoContexto_YConsumerAjenoFailClosed()
+    {
+        using var temp = new TempDirectory();
+        var catalog = new FileSystemFiscalTechnicalContextStore(temp.Contexts);
+        await catalog.AddContextAsync(new FiscalTechnicalContextRecord("operador-homo",
+            "homologacion", FiscalContextOperationalState.Disabled, 1, []));
+        await catalog.AddCandidateAssignmentAsync("operador-homo", "rev-1", "cred-shared", "admin");
+        await catalog.MarkAssignmentValidatedAsync("operador-homo", "rev-1", "wsaa-ok", "admin");
+        await catalog.ActivateAssignmentAsync("operador-homo", "rev-1", "admin");
+        await catalog.SetContextStateAsync("operador-homo", FiscalContextOperationalState.Active, "admin");
+
+        foreach (var (cuit, pv) in new[] { (20123456786L, 7), (30712345678L, 14) })
+        {
+            await catalog.RegisterCandidateAsync("operador-homo", "consumer-a", cuit, "admin");
+            await catalog.SelectPointOfSaleAsync("operador-homo", "consumer-a", cuit, pv, "admin");
+            await catalog.MarkRepresentationVerifiedAsync("operador-homo", "consumer-a", cuit, pv, $"FEParamGetPtosVenta|context=operador-homo|env=homologacion|cuit={cuit}|pv={pv}|rev=rev-1|checked={DateTimeOffset.UtcNow:O}", "admin");
+            await catalog.ActivateRepresentationAsync("operador-homo", "consumer-a", cuit, pv, "admin");
+        }
+
+        var materializer = new FakeMaterializer();
+        var resolver = new FiscalContextRuntimeResolver(catalog,
+            new FileSystemEmissionIdempotencyStore(temp.Operations),
+            new SingleFiscalContextOptions("legacy", "legacy", "homologacion", 1, "old"),
+            materializer, OpenEmissionRecoveryGate.Instance);
+        var principal = Principal("consumer-a", ("operador-homo", "consultar"));
+        var runtimes = await Task.WhenAll(
+            resolver.ResolveForReadAsync(principal, "operador-homo", 20123456786, 7),
+            resolver.ResolveForReadAsync(principal, "operador-homo", 30712345678, 14));
+        using var first = runtimes[0];
+        using var second = runtimes[1];
+
+        Assert.Equal(first.Context.ContextId, second.Context.ContextId);
+        Assert.Equal("cred-shared", first.Assignment.CredentialId);
+        Assert.Equal("cred-shared", second.Assignment.CredentialId);
+        Assert.Equal("20123456786", first.Config.Cuit);
+        Assert.Equal("30712345678", second.Config.Cuit);
+        Assert.Equal(7, first.Config.PuntoVenta);
+        Assert.Equal(14, second.Config.PuntoVenta);
+
+        var wrong = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
+            resolver.ResolveForReadAsync(Principal("consumer-b", ("operador-homo", "consultar")),
+                "operador-homo", 30712345678, 14));
+        Assert.Equal("FISCAL_REPRESENTATION_FORBIDDEN", wrong.Code);
+
+        await catalog.RevokeRepresentationAsync("operador-homo", "consumer-a", 20123456786, 7, "admin");
+        var revoked = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
+            resolver.ResolveForReadAsync(principal, "operador-homo", 20123456786, 7));
+        Assert.Equal("FISCAL_REPRESENTATION_FORBIDDEN", revoked.Code);
+        // Rotating credentials never extends the previous certificate's fiscal delegation.
+        await catalog.AddCandidateAssignmentAsync("operador-homo", "rev-2", "cred-next", "admin");
+        await catalog.MarkAssignmentValidatedAsync("operador-homo", "rev-2", "wsaa-next-ok", "admin");
+        await catalog.ActivateAssignmentAsync("operador-homo", "rev-2", "admin");
+        var staleProof = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
+            resolver.ResolveForReadAsync(principal, "operador-homo", 30712345678, 14));
+        Assert.Equal("FISCAL_REPRESENTATION_REVERIFY_REQUIRED", staleProof.Code);
+    }
+
     private static FileSystemRepresentedFiscalContextStore ContextStore(
         TempDirectory temp,
         params RepresentedFiscalContextRecord[] contexts)

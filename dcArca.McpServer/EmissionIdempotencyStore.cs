@@ -165,7 +165,9 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
         CancellationToken cancellationToken = default)
     {
         ValidateContext(context);
-        var path = ContextPath(context.ContextId);
+        // V2 technical contexts may represent multiple CUIT/PV. Protect each immutable
+        // fiscal identity separately rather than permanently binding a ContextId to one CUIT/PV.
+        var path = ContextPath($"{context.ContextId}:{context.Environment}:{context.Cuit}:{context.PuntoVenta}");
         await using var handle = await AcquireAsync(path, cancellationToken);
         var now = DateTimeOffset.UtcNow;
 

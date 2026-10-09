@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "profile_version": "1.0.0",
+  "repository": "coferlandia/ARCA-MCP",
+  "documentation": [
+    "AGENTS.md",
+    ".github/workflows/ci.yml"
+  ],
+  "local": {
+    "working_directory": ".",
+    "qualification_commands": [],
+    "required_services": [],
+    "environment": []
+  },
+  "github": {
+    "submission": {
+      "mode": "existing-pr-events"
+    },
+    "gates": [
+      {
+        "id": "ci-build-and-test",
+        "kind": "check_run",
+        "name": "CI / build-and-test",
+        "allowed_conclusions": [
+          "success"
+        ]
+      }
+    ],
+    "merge_group": {
+      "supported": false,
+      "authoritative_when_present": false
+    }
+  },
+  "identity": {
+    "base_sensitive": true,
+    "profile_sensitive": true
+  },
+  "exceptions": [],
+  "fingerprint": "4b62c4de3a34bda40667baee5c7cb28e85211e6cefc5945a2dd56ea4fd4e1cad"
+}

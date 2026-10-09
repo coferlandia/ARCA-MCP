@@ -53,6 +53,15 @@ public static class EmissionRequestFingerprint
     public static string OperationKeyHash(string consumerId, string contextId, string idempotencyKey)
         => OperationKeyHashFromLegacyKeyHash(consumerId, contextId, KeyHash(idempotencyKey));
 
+    public static string OperationKeyHash(string consumerId, string contextId,
+        long representedCuit, int pointOfSale, string idempotencyKey)
+    {
+        if (representedCuit <= 0 || pointOfSale <= 0)
+            throw new ArgumentOutOfRangeException(nameof(representedCuit));
+        var key = OperationKeyHash(consumerId, contextId, idempotencyKey);
+        return HexSha256($"arca-mcp/2|{consumerId.Trim()}|{contextId.Trim()}|{representedCuit}|{pointOfSale}|{key}");
+    }
+
     public static string OperationKeyHashFromLegacyKeyHash(string consumerId, string contextId, string legacyKeyHash)
     {
         if (string.IsNullOrWhiteSpace(consumerId))
