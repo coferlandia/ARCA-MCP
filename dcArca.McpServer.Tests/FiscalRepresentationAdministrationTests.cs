@@ -52,6 +52,109 @@ public sealed class FiscalRepresentationAdministrationTests
         Assert.Equal("FISCAL_REPRESENTATION_CANDIDATE_REQUIRED", forbidden.Code);
     }
 
+
+    [Theory]
+    [InlineData("600", false)]
+    [InlineData("601", false)]
+    [InlineData("600", true)]
+    [InlineData("601", true)]
+    public async Task RechazoWsfeEnVerificacion_PersisteActionRequiredAntesDePropagarError(
+        string wsfeCode, bool alreadyActive)
+    {
+        using var temp = new TempCatalog();
+        var catalog = new FileSystemFiscalTechnicalContextStore(temp.Path);
+        const string contextId = "operator-homo";
+        const string consumerId = "consumer-a";
+        const long cuit = 20123456786;
+        const int pointOfSale = 7;
+
+        await catalog.AddContextAsync(new FiscalTechnicalContextRecord(
+            contextId, "homologacion", FiscalContextOperationalState.Disabled, 1, []));
+        await catalog.AddCandidateAssignmentAsync(contextId, "rev-1", "cred-1", "admin");
+        await catalog.MarkAssignmentValidatedAsync(contextId, "rev-1", "wsaa-validated", "admin");
+        await catalog.ActivateAssignmentAsync(contextId, "rev-1", "admin");
+        await catalog.SetContextStateAsync(contextId, FiscalContextOperationalState.Active, "admin");
+        await catalog.RegisterCandidateAsync(contextId, consumerId, cuit, "admin");
+        await catalog.SelectPointOfSaleAsync(contextId, consumerId, cuit, pointOfSale, "admin");
+
+        if (alreadyActive)
+        {
+            await catalog.MarkRepresentationVerifiedAsync(
+                contextId, consumerId, cuit, pointOfSale,
+                "FEParamGetPtosVenta|context=operator-homo|env=homologacion|cuit=20123456786|pv=7|rev=rev-1|checked=test",
+                "admin");
+            await catalog.ActivateRepresentationAsync(contextId, consumerId, cuit, pointOfSale, "admin");
+        }
+
+        var cacheKey = "arca-probe-test-" + Guid.NewGuid().ToString("N");
+        var tokenStore = new MemoryWsaaTokenStore();
+        await tokenStore.WriteAsync(cacheKey + "_wsfe",
+            new WsaaTokenEntry("test-token", "test-sign", DateTime.UtcNow.AddHours(1)));
+        var administration = new FiscalRepresentationAdministration(
+            catalog, new ProbeMaterializer(cacheKey, tokenStore), new ErrorWsfeClientFactory(wsfeCode));
+
+        var exception = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
+            administration.VerifyAndActivateAsync(
+                Principal("admin", "arca:administrar", true),
+                contextId, consumerId, cuit, pointOfSale, default));
+
+        Assert.Equal("WSFE_" + wsfeCode, exception.Code);
+        var record = await catalog.GetRepresentationAsync(contextId, consumerId, cuit, pointOfSale);
+        Assert.NotNull(record);
+        Assert.Equal(FiscalRepresentationStatus.ActionRequired, record!.Status);
+        Assert.Equal("WSFE_" + wsfeCode, record.ActionRequiredReasonCode);
+        Assert.Equal("admin", record.ActionRequiredBy);
+        Assert.NotNull(record.ActionRequiredAt);
+    }
+
+    private sealed class ProbeMaterializer(string cacheKey, IWsaaTokenStore tokenStore)
+        : IFiscalCredentialMaterializer
+    {
+        public FiscalCredentialMaterialization Materialize(
+            RepresentedFiscalContextRecord context, CredentialAssignmentRecord assignment)
+        {
+            var config = new dcArca.Core.Models.dcArcaConfig
+            {
+                Cuit = context.RepresentedCuit.ToString(),
+                PuntoVenta = context.PointOfSale,
+                CertificatePath = "unused.pfx",
+                CertificatePassword = "",
+                WsaaUrl = "https://example.invalid/wsaa",
+                WsfeUrl = "https://example.invalid/wsfe",
+                PadronUrl = "https://example.invalid/padron"
+            };
+            var binding = new FiscalCredentialHostBinding(
+                assignment.CredentialId, cacheKey, config);
+            return new FiscalCredentialMaterialization(
+                config,
+                new dcArcaAuthService(
+                    config.WsaaUrl, config.CertificatePath, config.CertificatePassword,
+                    cacheKey, tokenStore: tokenStore),
+                new dcArcaAuthService(
+                    config.WsaaUrl, config.CertificatePath, config.CertificatePassword,
+                    cacheKey, "ws_sr_constancia_inscripcion", tokenStore: tokenStore),
+                binding);
+        }
+    }
+
+    private sealed class ErrorWsfeClientFactory(string code) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name)
+            => new(new ErrorWsfeHandler(code));
+    }
+
+    private sealed class ErrorWsfeHandler(string code) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "<FEParamGetPtosVentaResult><Errors><Err><Code>" + code +
+                    "</Code><Msg>Remote authorization failure</Msg></Err></Errors></FEParamGetPtosVentaResult>")
+            });
+    }
+
     private static ClaimsPrincipal Principal(string consumer, string scope, bool grant)
     {
         var claims = new List<Claim>

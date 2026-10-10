@@ -279,7 +279,7 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
         Require(actor, nameof(actor));
         return UpdateRepresentationAsync(contextId, consumerId, representedCuit, pointOfSale, rep =>
         {
-            if (rep.Status is not (FiscalRepresentationStatus.Active or FiscalRepresentationStatus.ActionRequired))
+            if (rep.Status == FiscalRepresentationStatus.Revoked)
                 throw new InvalidOperationException("FISCAL_REPRESENTATION_STATE_INVALID");
             return rep with
             {

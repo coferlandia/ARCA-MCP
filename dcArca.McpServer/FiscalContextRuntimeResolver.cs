@@ -250,10 +250,9 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(operation);
-        var authorized = await AuthorizeAsync(
-            principal, operation.Identity.ContextId, "consultar",
-            _catalog is null ? null : operation.Identity.Cuit,
-            _catalog is null ? null : operation.Identity.PuntoVenta, cancellationToken);
+        var authorized = _catalog is null
+            ? await AuthorizeAsync(principal, operation.Identity.ContextId, "consultar", cancellationToken)
+            : await AuthorizeHistoricalAsync(principal, operation, cancellationToken);
         var context = authorized.Context;
         if (context.OperationalState == FiscalContextOperationalState.Disabled)
             throw new FiscalContextAccessException(
@@ -267,6 +266,16 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
             operation.Identity.TipoComprobante);
         var assignment = ResolveHistoricalAssignment(context, operation);
         return CreateRuntime(authorized.ConsumerId, context, assignment);
+    }
+
+    private async Task<AuthorizedFiscalContext> AuthorizeHistoricalAsync(
+        ClaimsPrincipal principal, EmissionIdempotencyRecord operation, CancellationToken cancellationToken)
+    {
+        var (consumerId, context) = await ResolveTechnicalRepresentationAsync(
+            principal, operation.Identity.ContextId, "consultar", operation.Identity.Cuit,
+            operation.Identity.PuntoVenta, cancellationToken,
+            operation.Identity.CredentialAssignmentRevision);
+        return new AuthorizedFiscalContext(consumerId, context);
     }
 
     private static void EnsureOperationIdentity(
@@ -312,7 +321,8 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
 
     private async Task<(string ConsumerId, RepresentedFiscalContextRecord Context)> ResolveTechnicalRepresentationAsync(
         ClaimsPrincipal principal, string? requestedContextId, string operation,
-        long? requestedCuit, int? requestedPointOfSale, CancellationToken cancellationToken)
+        long? requestedCuit, int? requestedPointOfSale, CancellationToken cancellationToken,
+        string? evidenceAssignmentRevision = null)
     {
         var consumerId = principal.FindFirstValue(ArcaClaimTypes.ConsumerId);
         if (string.IsNullOrWhiteSpace(consumerId))
@@ -357,7 +367,7 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         var rep = reps[0];
         // A representation proved against one certificate revision cannot authorize a
         // replacement certificate by implication. A new authenticated WSFE probe is required.
-        var activeRevision = technical.ActiveAssignment?.AssignmentRevision;
+        var activeRevision = evidenceAssignmentRevision ?? technical.ActiveAssignment?.AssignmentRevision;
         if (activeRevision is null || rep.VerificationEvidence is null ||
             !rep.VerificationEvidence.Contains(
                 $"|rev={activeRevision}|", StringComparison.Ordinal) ||

@@ -73,6 +73,9 @@ public sealed class ArcaTools
     {
         var authorized = await _runtimeResolver.AuthorizeAsync(Principal, runtime.Context.ContextId,
             "facturar", runtime.Context.RepresentedCuit, runtime.Context.PointOfSale, cancellationToken);
+        if (authorized.Context.OperationalState != FiscalContextOperationalState.Active)
+            throw new FiscalContextAccessException("FISCAL_CONTEXT_NOT_ACTIVE",
+                "El contexto fiscal dejó de estar activo antes de solicitar CAE.");
         if (authorized.Context.ActiveAssignment?.AssignmentRevision != runtime.Assignment.AssignmentRevision ||
             !string.Equals(authorized.Context.Environment, runtime.Context.Environment, StringComparison.Ordinal))
             throw new FiscalContextAccessException("FISCAL_ASSIGNMENT_CHANGED",
