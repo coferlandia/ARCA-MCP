@@ -8,7 +8,8 @@ namespace dcArca.Core.Services;
 public enum dcPointOfSaleProbeStatus
 {
     Verified,
-    NotVerified
+    NotVerified,
+    ManualUnverified
 }
 
 public sealed record dcPointOfSaleAccessProbeResult(
@@ -20,6 +21,7 @@ public sealed record dcPointOfSaleAccessProbeResult(
     string? EmissionType = null)
 {
     public bool Verified => Status == dcPointOfSaleProbeStatus.Verified;
+    public bool CanActivate => Status is dcPointOfSaleProbeStatus.Verified or dcPointOfSaleProbeStatus.ManualUnverified;
 }
 
 public sealed record dcWsfePointOfSale(
@@ -112,36 +114,55 @@ public sealed class dcWsfePointOfSaleProbe
                 "El punto de venta no es válido.", config.PuntoVenta, checkedAt);
 
         var listing = await ListAsync(config, authService, httpClient, cancellationToken);
-        if (!listing.Verified)
-            return new dcPointOfSaleAccessProbeResult(listing.Status, listing.Code,
-                listing.SafeMessage, config.PuntoVenta, listing.CheckedAt);
+        return EvaluatePointOfSale(config.PuntoVenta, listing);
+    }
 
-        var point = listing.Points.SingleOrDefault(x => x.Number == config.PuntoVenta);
+    // The remote directory is advisory: a 602 "Sin Resultados" is not proof that
+    // a manually selected PV is invalid. All other errors remain blocking.
+    public static dcPointOfSaleAccessProbeResult EvaluatePointOfSale(
+        int pointOfSale, dcPointOfSaleListingResult listing)
+    {
+        if (pointOfSale <= 0)
+            return new dcPointOfSaleAccessProbeResult(dcPointOfSaleProbeStatus.NotVerified,
+                "FISCAL_CONTEXT_INVALID", "El punto de venta no es válido.", pointOfSale, listing.CheckedAt);
+        if (!listing.Verified)
+        {
+            if (listing.Code == "WSFE_602" &&
+                listing.SafeMessage.Contains("Sin Resultados", StringComparison.OrdinalIgnoreCase))
+                return new dcPointOfSaleAccessProbeResult(dcPointOfSaleProbeStatus.ManualUnverified,
+                    "POINT_OF_SALE_MANUAL_UNVERIFIED",
+                    "ARCA no informó puntos de venta; se acepta el PV indicado manualmente, sin validación remota de habilitación.",
+                    pointOfSale, listing.CheckedAt);
+            return new dcPointOfSaleAccessProbeResult(listing.Status, listing.Code,
+                listing.SafeMessage, pointOfSale, listing.CheckedAt);
+        }
+
+        var point = listing.Points.SingleOrDefault(x => x.Number == pointOfSale);
         if (point is null)
             return new dcPointOfSaleAccessProbeResult(
                 dcPointOfSaleProbeStatus.NotVerified, "POINT_OF_SALE_NOT_AUTHORIZED",
                 "ARCA no informó el punto de venta para el CUIT representado.",
-                config.PuntoVenta, listing.CheckedAt);
+                pointOfSale, listing.CheckedAt);
         if (point.Blocked)
             return new dcPointOfSaleAccessProbeResult(
                 dcPointOfSaleProbeStatus.NotVerified, "POINT_OF_SALE_BLOCKED",
                 "ARCA informó que el punto de venta está bloqueado.",
-                config.PuntoVenta, listing.CheckedAt, point.EmissionType);
+                pointOfSale, listing.CheckedAt, point.EmissionType);
         if (!string.IsNullOrWhiteSpace(point.DisabledDate))
             return new dcPointOfSaleAccessProbeResult(
                 dcPointOfSaleProbeStatus.NotVerified, "POINT_OF_SALE_DISABLED",
                 "ARCA informó una fecha de baja para el punto de venta.",
-                config.PuntoVenta, listing.CheckedAt, point.EmissionType);
+                pointOfSale, listing.CheckedAt, point.EmissionType);
         if (!point.EligibleForCae)
             return new dcPointOfSaleAccessProbeResult(
                 dcPointOfSaleProbeStatus.NotVerified, "POINT_OF_SALE_NOT_CAE",
                 "El punto de venta no tiene modalidad CAE para WSFE.",
-                config.PuntoVenta, listing.CheckedAt, point.EmissionType);
+                pointOfSale, listing.CheckedAt, point.EmissionType);
 
         return new dcPointOfSaleAccessProbeResult(
             dcPointOfSaleProbeStatus.Verified, "POINT_OF_SALE_AUTHORIZATION_VERIFIED",
             "ARCA confirmó acceso al CUIT representado y al punto de venta WSFE/CAE.",
-            config.PuntoVenta, listing.CheckedAt, point.EmissionType);
+            pointOfSale, listing.CheckedAt, point.EmissionType);
     }
 
     public static dcPointOfSaleListingResult ParseListingResponse(string xml, DateTimeOffset checkedAt)
@@ -168,6 +189,12 @@ public sealed class dcWsfePointOfSaleProbe
                 "602" => "ARCA no informó datos o puntos de venta para este CUIT en el ambiente seleccionado.",
                 _ => "WSFE devolvió un error remoto y no se verificó el acceso al CUIT."
             };
+            if (raw == "602")
+            {
+                // El 602 puede tener distintos motivos; conservar sólo texto diagnóstico seguro.
+                var remote = SafeDiagnosticText(Value(error, "Msg"));
+                if (!string.IsNullOrEmpty(remote)) safe += $" Detalle ARCA: {remote}";
+            }
             return Failed(code, safe, checkedAt);
         }
 
@@ -197,6 +224,17 @@ public sealed class dcWsfePointOfSaleProbe
             dcPointOfSaleProbeStatus.Verified, "POINT_OF_SALE_LIST_VERIFIED",
             "ARCA devolvió el listado de puntos de venta del CUIT representado.",
             checkedAt, points);
+    }
+
+    private static string SafeDiagnosticText(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return string.Empty;
+        // Whitelist estricta: nunca propagar XML, tokens, firmas ni IDs numéricos extensos.
+        var safe = System.Text.RegularExpressions.Regex.Replace(message,
+            @"[^\p{L}\p{N} .,;:()_\-/]", " ");
+        safe = System.Text.RegularExpressions.Regex.Replace(safe, @"\d{8,}", "[id]");
+        safe = System.Text.RegularExpressions.Regex.Replace(safe, @"\S{48,}", "[redacted]");
+        return safe.Length <= 180 ? safe.Trim() : safe[..180].Trim();
     }
 
     private static string BuildRequest(string token, string sign, long representedCuit)

@@ -28,6 +28,25 @@ public sealed class FiscalTechnicalContextStoreTests
     }
 
     [Fact]
+    public async Task PvManual602_PuedeActivarseSinRegistrarVerificacionRemota()
+    {
+        using var temp = new TempStore();
+        var store = new FileSystemFiscalTechnicalContextStore(temp.Root);
+        await ProvisionContextAsync(store);
+        await store.RegisterCandidateAsync("operator-homo", "secretaria", 20123456786, "admin");
+        await store.SelectPointOfSaleAsync("operator-homo", "secretaria", 20123456786, 77, "admin");
+        await store.MarkRepresentationVerifiedAsync("operator-homo", "secretaria", 20123456786, 77,
+            "MANUAL_PV_UNVERIFIED_602|context=operator-homo|env=homologacion|cuit=20123456786|pv=77|rev=rev-1|checked=2026-10-10", "admin");
+        await store.ActivateRepresentationAsync("operator-homo", "secretaria", 20123456786, 77, "admin");
+
+        var active = await store.GetRepresentationAsync("operator-homo", "secretaria", 20123456786, 77);
+        Assert.True(active!.CanReadOrEmit);
+        Assert.StartsWith("MANUAL_PV_UNVERIFIED_602|", active.VerificationEvidence);
+        Assert.Null(active.VerifiedAt);
+        Assert.Null(active.VerifiedBy);
+    }
+
+    [Fact]
     public async Task RepresentacionSinProbeValidado_NoPuedeActivarse()
     {
         using var temp = new TempStore();

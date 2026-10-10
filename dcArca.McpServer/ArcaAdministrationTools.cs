@@ -40,7 +40,7 @@ public sealed class ArcaAdministrationTools
         CancellationToken cancellationToken = default)
         => _admin.SelectPointOfSaleAsync(Principal, contextId, consumerId, representedCuit, pointOfSale, cancellationToken);
 
-    [McpServerTool, Description("Verifica remotamente CUIT y PV, y activa sólo si ARCA confirma CAE.")]
+    [McpServerTool, Description("Activa una representación con PV seleccionado: usa verificación remota cuando hay listado o permite PV manual no verificado ante WSFE 602 Sin Resultados; rechazos explícitos siguen bloqueando.")]
     [Authorize(Policy = "ArcaAdministrar")]
     public Task<FiscalRepresentationRecord> ActivarRepresentacionFiscal(
         string contextId, string consumerId, long representedCuit, int pointOfSale,

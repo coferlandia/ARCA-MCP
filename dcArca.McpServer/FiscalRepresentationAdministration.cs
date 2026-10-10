@@ -79,7 +79,7 @@ public sealed class FiscalRepresentationAdministration
         var material = _materializer.Materialize(Project(context, representedCuit, pointOfSale), assignment);
         var probe = await _probe.ProbeAsync(material.Config, material.WsfeAuth,
             _clients.CreateClient(nameof(FiscalAssignmentAuthorizationValidator)), cancellationToken);
-        if (!probe.Verified)
+        if (!probe.CanActivate)
         {
             if (probe.Code is "WSFE_600" or "WSFE_601")
                 await _catalog.MarkRepresentationActionRequiredAsync(contextId, consumerId,
@@ -88,7 +88,7 @@ public sealed class FiscalRepresentationAdministration
         }
 
         // Evidence binds the concrete CUIT/PV/context/environment/credential revision.
-        var evidence = $"FEParamGetPtosVenta|context={contextId}|env={context.Environment}|cuit={representedCuit}|pv={pointOfSale}|rev={assignment.AssignmentRevision}|checked={probe.CheckedAt:O}";
+        var evidence = $"{(probe.Verified ? "FEParamGetPtosVenta" : "MANUAL_PV_UNVERIFIED_602")}|context={contextId}|env={context.Environment}|cuit={representedCuit}|pv={pointOfSale}|rev={assignment.AssignmentRevision}|checked={probe.CheckedAt:O}";
         await _catalog.MarkRepresentationVerifiedAsync(contextId, consumerId,
             representedCuit, pointOfSale, evidence, Actor(principal), cancellationToken);
         await _catalog.ActivateRepresentationAsync(contextId, consumerId,
