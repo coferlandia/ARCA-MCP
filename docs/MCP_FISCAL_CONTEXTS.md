@@ -39,7 +39,7 @@ dcArca.Cli select-representation-pv --context operador-homo --consumer secretari
 dcArca.Cli activate-representation --context operador-homo --consumer secretaria --cuit 20XXXXXXXXX --point-of-sale 4 --actor admin
 ```
 
-Los endpoints administrativos MCP cumplen las mismas etapas y exigen `arca:administrar` más grant `{contextId}:administrar`. El listado no autoriza ni activa. El paso de activación repite el probe del CUIT/PV elegido y bloquea 600/601/602, PV bloqueado, de baja o no CAE.
+Los endpoints administrativos MCP cumplen las mismas etapas y exigen `arca:administrar` más grant `{contextId}:administrar`. El listado no autoriza ni activa. La selección manual de un PV está permitida. La activación repite el probe del CUIT/PV elegido: si ARCA devuelve un listado, exige PV CAE sin bloqueo ni baja; ante `WSFE_602` con mensaje explícito `Sin Resultados` permite activar el PV manual con evidencia `MANUAL_PV_UNVERIFIED_602`, que **no constituye validación remota del PV**. Otros errores 602, 600/601, fallos de conexión, bloqueo/baja o modalidad distinta de CAE siguen bloqueando. La autorización fiscal definitiva sigue siendo decisión de WSFE al operar.
 
 ## Emisión, aislamiento y recuperación
 

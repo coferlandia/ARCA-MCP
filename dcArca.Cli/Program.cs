@@ -316,13 +316,13 @@ static async Task<int> ManageFiscalContextsAsync(string[] args, JsonSerializerOp
             if (candidate.Status is not (FiscalRepresentationStatus.Pending or FiscalRepresentationStatus.Verified or FiscalRepresentationStatus.Active or FiscalRepresentationStatus.ActionRequired))
                 throw new InvalidOperationException("FISCAL_REPRESENTATION_STATE_INVALID");
             var resultProbe = await probe.ProbeAsync(binding.Config, auth, httpClient);
-            if (!resultProbe.Verified)
+            if (!resultProbe.CanActivate)
             {
                 Console.WriteLine(JsonSerializer.Serialize(resultProbe, jsonOptions));
                 return 2;
             }
             var actor = RequiredOption(args, "--actor");
-            var evidence = $"FEParamGetPtosVenta|context={contextId}|env={context.Environment}|cuit={cuit}|pv={pv}|rev={assignment.AssignmentRevision}|checked={resultProbe.CheckedAt:O}";
+            var evidence = $"{(resultProbe.Verified ? "FEParamGetPtosVenta" : "MANUAL_PV_UNVERIFIED_602")}|context={contextId}|env={context.Environment}|cuit={cuit}|pv={pv}|rev={assignment.AssignmentRevision}|checked={resultProbe.CheckedAt:O}";
             await store.MarkRepresentationVerifiedAsync(contextId, consumer, cuit, pv, evidence, actor);
             await store.ActivateRepresentationAsync(contextId, consumer, cuit, pv, actor);
             Console.WriteLine(JsonSerializer.Serialize(new { Status = "Active", ContextId = contextId,

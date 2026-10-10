@@ -51,6 +51,45 @@ public class WsfePointOfSaleDiscoveryTests
         Assert.Equal("WSFE_RESPONSE_INVALID", result.Code);
     }
 
+    [Fact]
+    public void PvManual_EsPermitidoSoloPara602SinResultados()
+    {
+        var listing = dcWsfePointOfSaleProbe.ParseListingResponse(
+            Envelope("<Errors><Err><Code>602</Code><Msg>Sin Resultados: - Metodo FEParamGetPtosVenta</Msg></Err></Errors>"),
+            DateTimeOffset.UtcNow);
+        Assert.False(listing.Verified);
+        var result = dcWsfePointOfSaleProbe.EvaluatePointOfSale(77, listing);
+        Assert.False(result.Verified);
+        Assert.True(result.CanActivate);
+        Assert.Equal("POINT_OF_SALE_MANUAL_UNVERIFIED", result.Code);
+        Assert.Equal(77, result.PointOfSale);
+    }
+
+    [Theory]
+    [InlineData("600", "Acceso denegado")]
+    [InlineData("601", "CUIT sin autorización")]
+    [InlineData("602", "Otro error")]
+    [InlineData("999", "Sin Resultados")]
+    public void PvManual_NoPermiteRechazosNi602Distinto(string code, string message)
+    {
+        var listing = dcWsfePointOfSaleProbe.ParseListingResponse(
+            Envelope($"<Errors><Err><Code>{code}</Code><Msg>{message}</Msg></Err></Errors>"),
+            DateTimeOffset.UtcNow);
+        var result = dcWsfePointOfSaleProbe.EvaluatePointOfSale(77, listing);
+        Assert.False(result.CanActivate);
+    }
+
+    [Fact]
+    public void PvRemotoBloqueado_SigueRechazado()
+    {
+        var listing = dcWsfePointOfSaleProbe.ParseListingResponse(
+            Envelope("<ResultGet><PtoVenta><Nro>77</Nro><EmisionTipo>CAE</EmisionTipo><Bloqueado>S</Bloqueado></PtoVenta></ResultGet>"),
+            DateTimeOffset.UtcNow);
+        var result = dcWsfePointOfSaleProbe.EvaluatePointOfSale(77, listing);
+        Assert.False(result.CanActivate);
+        Assert.Equal("POINT_OF_SALE_BLOCKED", result.Code);
+    }
+
     private static string Envelope(string body) =>
         "<FEParamGetPtosVentaResult>" + body + "</FEParamGetPtosVentaResult>";
 }
