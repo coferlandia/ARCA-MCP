@@ -168,6 +168,12 @@ public sealed class dcWsfePointOfSaleProbe
                 "602" => "ARCA no informó datos o puntos de venta para este CUIT en el ambiente seleccionado.",
                 _ => "WSFE devolvió un error remoto y no se verificó el acceso al CUIT."
             };
+            if (raw == "602")
+            {
+                // El 602 puede tener distintos motivos; conservar sólo texto diagnóstico seguro.
+                var remote = SafeDiagnosticText(Value(error, "Msg"));
+                if (!string.IsNullOrEmpty(remote)) safe += $" Detalle ARCA: {remote}";
+            }
             return Failed(code, safe, checkedAt);
         }
 
@@ -197,6 +203,17 @@ public sealed class dcWsfePointOfSaleProbe
             dcPointOfSaleProbeStatus.Verified, "POINT_OF_SALE_LIST_VERIFIED",
             "ARCA devolvió el listado de puntos de venta del CUIT representado.",
             checkedAt, points);
+    }
+
+    private static string SafeDiagnosticText(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return string.Empty;
+        // Whitelist estricta: nunca propagar XML, tokens, firmas ni IDs numéricos extensos.
+        var safe = System.Text.RegularExpressions.Regex.Replace(message,
+            @"[^\p{L}\p{N} .,;:()_\-/]", " ");
+        safe = System.Text.RegularExpressions.Regex.Replace(safe, @"\d{8,}", "[id]");
+        safe = System.Text.RegularExpressions.Regex.Replace(safe, @"\S{48,}", "[redacted]");
+        return safe.Length <= 180 ? safe.Trim() : safe[..180].Trim();
     }
 
     private static string BuildRequest(string token, string sign, long representedCuit)
