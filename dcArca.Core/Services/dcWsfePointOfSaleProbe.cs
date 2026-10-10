@@ -147,22 +147,22 @@ public sealed class dcWsfePointOfSaleProbe
             return new dcPointOfSaleAccessProbeResult(
                 dcPointOfSaleProbeStatus.NotVerified, "POINT_OF_SALE_BLOCKED",
                 "ARCA informó que el punto de venta está bloqueado.",
-                config.PuntoVenta, listing.CheckedAt, point.EmissionType);
+                pointOfSale, listing.CheckedAt, point.EmissionType);
         if (!string.IsNullOrWhiteSpace(point.DisabledDate))
             return new dcPointOfSaleAccessProbeResult(
                 dcPointOfSaleProbeStatus.NotVerified, "POINT_OF_SALE_DISABLED",
                 "ARCA informó una fecha de baja para el punto de venta.",
-                config.PuntoVenta, listing.CheckedAt, point.EmissionType);
+                pointOfSale, listing.CheckedAt, point.EmissionType);
         if (!point.EligibleForCae)
             return new dcPointOfSaleAccessProbeResult(
                 dcPointOfSaleProbeStatus.NotVerified, "POINT_OF_SALE_NOT_CAE",
                 "El punto de venta no tiene modalidad CAE para WSFE.",
-                config.PuntoVenta, listing.CheckedAt, point.EmissionType);
+                pointOfSale, listing.CheckedAt, point.EmissionType);
 
         return new dcPointOfSaleAccessProbeResult(
             dcPointOfSaleProbeStatus.Verified, "POINT_OF_SALE_AUTHORIZATION_VERIFIED",
             "ARCA confirmó acceso al CUIT representado y al punto de venta WSFE/CAE.",
-            config.PuntoVenta, listing.CheckedAt, point.EmissionType);
+            pointOfSale, listing.CheckedAt, point.EmissionType);
     }
 
     public static dcPointOfSaleListingResult ParseListingResponse(string xml, DateTimeOffset checkedAt)
