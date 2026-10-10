@@ -8,7 +8,8 @@ namespace dcArca.Core.Services;
 public enum dcPointOfSaleProbeStatus
 {
     Verified,
-    NotVerified
+    NotVerified,
+    ManualUnverified
 }
 
 public sealed record dcPointOfSaleAccessProbeResult(
@@ -20,6 +21,7 @@ public sealed record dcPointOfSaleAccessProbeResult(
     string? EmissionType = null)
 {
     public bool Verified => Status == dcPointOfSaleProbeStatus.Verified;
+    public bool CanActivate => Status is dcPointOfSaleProbeStatus.Verified or dcPointOfSaleProbeStatus.ManualUnverified;
 }
 
 public sealed record dcWsfePointOfSale(
@@ -112,16 +114,35 @@ public sealed class dcWsfePointOfSaleProbe
                 "El punto de venta no es válido.", config.PuntoVenta, checkedAt);
 
         var listing = await ListAsync(config, authService, httpClient, cancellationToken);
-        if (!listing.Verified)
-            return new dcPointOfSaleAccessProbeResult(listing.Status, listing.Code,
-                listing.SafeMessage, config.PuntoVenta, listing.CheckedAt);
+        return EvaluatePointOfSale(config.PuntoVenta, listing);
+    }
 
-        var point = listing.Points.SingleOrDefault(x => x.Number == config.PuntoVenta);
+    // The remote directory is advisory: a 602 "Sin Resultados" is not proof that
+    // a manually selected PV is invalid. All other errors remain blocking.
+    public static dcPointOfSaleAccessProbeResult EvaluatePointOfSale(
+        int pointOfSale, dcPointOfSaleListingResult listing)
+    {
+        if (pointOfSale <= 0)
+            return new dcPointOfSaleAccessProbeResult(dcPointOfSaleProbeStatus.NotVerified,
+                "FISCAL_CONTEXT_INVALID", "El punto de venta no es válido.", pointOfSale, listing.CheckedAt);
+        if (!listing.Verified)
+        {
+            if (listing.Code == "WSFE_602" &&
+                listing.SafeMessage.Contains("Sin Resultados", StringComparison.OrdinalIgnoreCase))
+                return new dcPointOfSaleAccessProbeResult(dcPointOfSaleProbeStatus.ManualUnverified,
+                    "POINT_OF_SALE_MANUAL_UNVERIFIED",
+                    "ARCA no informó puntos de venta; se acepta el PV indicado manualmente, sin validación remota de habilitación.",
+                    pointOfSale, listing.CheckedAt);
+            return new dcPointOfSaleAccessProbeResult(listing.Status, listing.Code,
+                listing.SafeMessage, pointOfSale, listing.CheckedAt);
+        }
+
+        var point = listing.Points.SingleOrDefault(x => x.Number == pointOfSale);
         if (point is null)
             return new dcPointOfSaleAccessProbeResult(
                 dcPointOfSaleProbeStatus.NotVerified, "POINT_OF_SALE_NOT_AUTHORIZED",
                 "ARCA no informó el punto de venta para el CUIT representado.",
-                config.PuntoVenta, listing.CheckedAt);
+                pointOfSale, listing.CheckedAt);
         if (point.Blocked)
             return new dcPointOfSaleAccessProbeResult(
                 dcPointOfSaleProbeStatus.NotVerified, "POINT_OF_SALE_BLOCKED",
