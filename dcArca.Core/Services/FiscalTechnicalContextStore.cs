@@ -234,7 +234,14 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
         {
             if (rep.Status is not (FiscalRepresentationStatus.Pending or FiscalRepresentationStatus.Verified or FiscalRepresentationStatus.Active or FiscalRepresentationStatus.ActionRequired))
                 throw new InvalidOperationException("FISCAL_REPRESENTATION_STATE_INVALID");
-            return rep with { Status = FiscalRepresentationStatus.Verified, VerificationEvidence = evidence, VerifiedAt = DateTimeOffset.UtcNow, VerifiedBy = actor };
+            var manual = evidence.StartsWith("MANUAL_PV_UNVERIFIED_602|", StringComparison.Ordinal);
+            return rep with
+            {
+                Status = FiscalRepresentationStatus.Verified,
+                VerificationEvidence = evidence,
+                VerifiedAt = manual ? null : DateTimeOffset.UtcNow,
+                VerifiedBy = manual ? null : actor
+            };
         }, cancellationToken);
     }
 

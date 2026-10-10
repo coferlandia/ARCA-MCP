@@ -21,6 +21,9 @@ var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
 
 try
 {
+    if (args[0] == "diagnose-v2")
+        return await DiagnoseV2Async(args, jsonOptions);
+
     if (args[0] is "create-key" or "list-keys" or "revoke-key" or "set-key-grants")
         return await ManageApiKeysAsync(args, jsonOptions);
 
@@ -313,13 +316,13 @@ static async Task<int> ManageFiscalContextsAsync(string[] args, JsonSerializerOp
             if (candidate.Status is not (FiscalRepresentationStatus.Pending or FiscalRepresentationStatus.Verified or FiscalRepresentationStatus.Active or FiscalRepresentationStatus.ActionRequired))
                 throw new InvalidOperationException("FISCAL_REPRESENTATION_STATE_INVALID");
             var resultProbe = await probe.ProbeAsync(binding.Config, auth, httpClient);
-            if (!resultProbe.Verified)
+            if (!resultProbe.CanActivate)
             {
                 Console.WriteLine(JsonSerializer.Serialize(resultProbe, jsonOptions));
                 return 2;
             }
             var actor = RequiredOption(args, "--actor");
-            var evidence = $"FEParamGetPtosVenta|context={contextId}|env={context.Environment}|cuit={cuit}|pv={pv}|rev={assignment.AssignmentRevision}|checked={resultProbe.CheckedAt:O}";
+            var evidence = $"{(resultProbe.Verified ? "FEParamGetPtosVenta" : "MANUAL_PV_UNVERIFIED_602")}|context={contextId}|env={context.Environment}|cuit={cuit}|pv={pv}|rev={assignment.AssignmentRevision}|checked={resultProbe.CheckedAt:O}";
             await store.MarkRepresentationVerifiedAsync(contextId, consumer, cuit, pv, evidence, actor);
             await store.ActivateRepresentationAsync(contextId, consumer, cuit, pv, actor);
             Console.WriteLine(JsonSerializer.Serialize(new { Status = "Active", ContextId = contextId,
@@ -338,6 +341,60 @@ static async Task<int> ManageFiscalContextsAsync(string[] args, JsonSerializerOp
         default:
             throw new ArgumentException($"Comando desconocido: {args[0]}");
     }
+}
+
+// Consultas no emisoras con la misma credencial y ambiente del contexto técnico V2.
+// El resultado omite respuestas SOAP, token/sign y datos personales del Padrón.
+static async Task<int> DiagnoseV2Async(string[] args, JsonSerializerOptions jsonOptions)
+{
+    var contextId = RequiredOption(args, "--context");
+    var cuit = ParseLong(RequiredOption(args, "--cuit"), "--cuit");
+    var pv = ParseInt(RequiredOption(args, "--point-of-sale"), "--point-of-sale");
+    var tipo = ParseInt(RequiredOption(args, "--tipo-comprobante"), "--tipo-comprobante");
+    var store = new FileSystemFiscalTechnicalContextStore(LoadConfiguration()["FiscalContexts:Directory"]);
+    var context = await store.GetContextAsync(contextId)
+        ?? throw new InvalidOperationException("FISCAL_CONTEXT_NOT_FOUND");
+    var assignment = context.ActiveAssignment
+        ?? throw new InvalidOperationException("ACTIVE_ASSIGNMENT_REQUIRED");
+    var projected = new RepresentedFiscalContextRecord(contextId, context.Environment,
+        cuit, pv, context.OperationalState, context.ContextRevision, false, context.Assignments);
+    var binding = HostBinding(LoadConfiguration(), projected, assignment);
+
+    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+    var wsfeAuth = CreateWsfeAuth(binding);
+    var listing = await new dcWsfePointOfSaleProbe().ListAsync(binding.Config, wsfeAuth, http);
+
+    using var wsfe = new dcWsfeClient(binding.Config, wsfeAuth, http);
+    var ultimo = await wsfe.FECompUltimoAutorizadoAsync((dcTipoComprobante)tipo);
+
+    var padronAuth = new dcArcaAuthService(binding.Config.WsaaUrl,
+        binding.Config.CertificatePath, binding.Config.CertificatePassword,
+        binding.CacheIdentity, serviceName: "ws_sr_constancia_inscripcion");
+    using var padron = new dcPadronClient(binding.Config, padronAuth, http);
+    var persona = await padron.GetPersonaAsync(cuit);
+
+    Console.WriteLine(JsonSerializer.Serialize(new
+    {
+        ContextId = contextId,
+        Environment = context.Environment,
+        WsfePoints = new { listing.Verified, listing.Code, listing.SafeMessage,
+            PointOfSaleFound = listing.Points.Any(x => x.Number == pv) },
+        WsfeLastAuthorized = new { ultimo.Success, ultimo.Codigo,
+            ultimo.NumeroComprobante },
+        Padron = new { persona.Success, persona.ErrorCodigo,
+            SafeMessage = SafeDiagnosticText(persona.ErrorDescripcion?.Split(" | Detalle:", 2)[0]) },
+    }, jsonOptions));
+    return listing.Verified && ultimo.Success && persona.Success ? 0 : 2;
+}
+
+static string SafeDiagnosticText(string? message)
+{
+    if (string.IsNullOrWhiteSpace(message)) return string.Empty;
+    var safe = System.Text.RegularExpressions.Regex.Replace(message,
+        @"[^\p{L}\p{N} .,;:()_\-/]", " ");
+    safe = System.Text.RegularExpressions.Regex.Replace(safe, @"\d{8,}", "[id]");
+    safe = System.Text.RegularExpressions.Regex.Replace(safe, @"\S{48,}", "[redacted]");
+    return safe.Length <= 180 ? safe.Trim() : safe[..180].Trim();
 }
 
 static FiscalCredentialHostBinding HostBinding(
@@ -419,6 +476,7 @@ static void PrintUsage()
         "  set-key-grants <keyId> --consumer <consumerId> --grant <context:operacion,...>\n" +
         "  list-keys\n" +
         "  revoke-key <id>\n" +
+        "  diagnose-v2 --context <ctx> --cuit <cuit> --point-of-sale <pv> --tipo-comprobante <tipo>\n" +
         "  list-contexts\n" +
         "  add-context --id <contextId> --environment <ambiente> [--context-revision <n>]\n" +
         "  add-assignment --context <contextId> --revision <rev> --credential <credentialId> --actor <actor>\n" +
