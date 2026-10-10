@@ -381,9 +381,20 @@ static async Task<int> DiagnoseV2Async(string[] args, JsonSerializerOptions json
             PointOfSaleFound = listing.Points.Any(x => x.Number == pv) },
         WsfeLastAuthorized = new { ultimo.Success, ultimo.Codigo,
             ultimo.NumeroComprobante },
-        Padron = new { persona.Success, persona.ErrorCodigo },
+        Padron = new { persona.Success, persona.ErrorCodigo,
+            SafeMessage = SafeDiagnosticText(persona.ErrorDescripcion?.Split(" | Detalle:", 2)[0]) },
     }, jsonOptions));
     return listing.Verified && ultimo.Success && persona.Success ? 0 : 2;
+}
+
+static string SafeDiagnosticText(string? message)
+{
+    if (string.IsNullOrWhiteSpace(message)) return string.Empty;
+    var safe = System.Text.RegularExpressions.Regex.Replace(message,
+        @"[^\p{L}\p{N} .,;:()_\-/]", " ");
+    safe = System.Text.RegularExpressions.Regex.Replace(safe, @"\d{8,}", "[id]");
+    safe = System.Text.RegularExpressions.Regex.Replace(safe, @"\S{48,}", "[redacted]");
+    return safe.Length <= 180 ? safe.Trim() : safe[..180].Trim();
 }
 
 static FiscalCredentialHostBinding HostBinding(
