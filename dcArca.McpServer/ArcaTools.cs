@@ -180,6 +180,32 @@ public sealed class ArcaTools
                 new dcFacturaResponse { Success = false, Codigo = "TIPOC_INVALID", EmissionOutcome = dcEmissionOutcome.InvalidRequest, Mensaje = "TipoComprobante es obligatorio." },
                 new PdfRenderResult(PdfRenderStatus.NotAttempted, null, null, null));
 
+        factura.NumeroComprobante = null;
+        var replay = await _contract.TryReplayExistingEmissionAsync(
+            Principal,
+            contextId,
+            idempotencyKey,
+            factura,
+            cancellationToken,
+            representedCuit,
+            pointOfSale);
+        if (replay is not null)
+        {
+            var replayService = new InvoicePdfService(
+                new StoredReplayInvoiceIssuer(replay.Response),
+                _pdfRenderer,
+                new FiscalDocumentContext(
+                    replay.Record.Identity.Environment,
+                    replay.Record.Identity.Cuit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    replay.Record.Identity.PuntoVenta));
+            return await replayService.EmitAsync(
+                factura,
+                idempotencyKey,
+                new PdfTemplateReference(templateId, templateVersion),
+                templateData,
+                cancellationToken);
+        }
+
         using var runtime = await _runtimeResolver.ResolveForEmissionAsync(
             Principal, contextId, idempotencyKey, factura.TipoComprobante.Value, representedCuit, pointOfSale, cancellationToken);
         var sequencer = new McpInvoiceSequencer(
@@ -307,6 +333,17 @@ public sealed class ArcaTools
             PeriodoAsocHasta = periodoAsociadoHasta,
         };
 
+        var replay = await _contract.TryReplayExistingEmissionAsync(
+            Principal,
+            contextId,
+            idempotencyKey,
+            factura,
+            cancellationToken,
+            representedCuit,
+            pointOfSale);
+        if (replay is not null)
+            return replay.Response;
+
         using var runtime = await _runtimeResolver.ResolveForEmissionAsync(
             Principal, contextId, idempotencyKey, tipoComprobante, representedCuit, pointOfSale, cancellationToken);
         var sequencer = new McpInvoiceSequencer(
@@ -350,6 +387,17 @@ public sealed class ArcaTools
             };
 
         factura.NumeroComprobante = null;
+        var replay = await _contract.TryReplayExistingEmissionAsync(
+            Principal,
+            contextId,
+            idempotencyKey,
+            factura,
+            cancellationToken,
+            representedCuit,
+            pointOfSale);
+        if (replay is not null)
+            return replay.Response;
+
         using var runtime = await _runtimeResolver.ResolveForEmissionAsync(
             Principal, contextId, idempotencyKey, factura.TipoComprobante.Value, representedCuit, pointOfSale, cancellationToken);
         var sequencer = new McpInvoiceSequencer(
@@ -438,4 +486,18 @@ public sealed class ArcaTools
         using var runtime = await _runtimeResolver.ResolveForReadAsync(Principal, contextId, representedCuit, pointOfSale, cancellationToken);
         return await runtime.Padron.GetPersonaAsync(cuit, cancellationToken);
     }
+    private sealed class StoredReplayInvoiceIssuer : IInvoiceIssuer
+    {
+        private readonly dcFacturaResponse _response;
+
+        public StoredReplayInvoiceIssuer(dcFacturaResponse response)
+            => _response = response;
+
+        public Task<dcFacturaResponse> EmitAsync(
+            dcFacturaRequest factura,
+            string idempotencyKey,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(_response);
+    }
+
 }

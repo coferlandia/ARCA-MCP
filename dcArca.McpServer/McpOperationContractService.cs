@@ -4,6 +4,10 @@ using dcArca.Core.Services;
 
 namespace dcArca.McpServer;
 
+public sealed record McpExistingEmissionReplay(
+    EmissionIdempotencyRecord Record,
+    dcFacturaResponse Response);
+
 public sealed class McpOperationContractService
 {
     private readonly IEmissionIdempotencyStore _operations;
@@ -313,6 +317,74 @@ public sealed class McpOperationContractService
         };
     }
 
+    public async Task<McpExistingEmissionReplay?> TryReplayExistingEmissionAsync(
+        ClaimsPrincipal principal,
+        string? contextId,
+        string idempotencyKey,
+        dcFacturaRequest request,
+        CancellationToken cancellationToken = default,
+        long? representedCuit = null,
+        int? pointOfSale = null)
+    {
+        if (string.IsNullOrWhiteSpace(idempotencyKey) || !request.TipoComprobante.HasValue)
+            return null;
+
+        var located = await LocateAsync(
+            principal,
+            contextId,
+            operationId: null,
+            idempotencyKey,
+            cancellationToken,
+            representedCuit,
+            pointOfSale,
+            requiredOperation: "facturar");
+        var record = located.Record;
+        if (record is null)
+            return null;
+
+        var requestHash = EmissionRequestFingerprint.RequestHash(request);
+        if (record.RequestCanonicalizationVersion != EmissionRequestFingerprint.CanonicalizationVersion
+            || !string.Equals(record.RequestHash, requestHash, StringComparison.Ordinal)
+            || record.Identity.TipoComprobante != (int)request.TipoComprobante.Value)
+        {
+            var conflict = new dcFacturaResponse
+            {
+                Success = false,
+                Codigo = "IDEMPOTENCY_KEY_REUSED",
+                Mensaje = "La idempotencyKey ya fue utilizada con una solicitud o identidad fiscal diferente.",
+                EmissionOutcome = dcEmissionOutcome.InvalidRequest,
+                Errores = ["La idempotencyKey ya fue utilizada con una solicitud o identidad fiscal diferente."]
+            };
+            DecorateStoredResponse(record, conflict);
+            return new McpExistingEmissionReplay(record, conflict);
+        }
+
+        if (IsTerminal(record.State))
+        {
+            var response = record.FiscalResult?.ToResponse()
+                ?? throw new InvalidDataException("Registro terminal sin resultado fiscal durable.");
+            DecorateStoredResponse(record, response);
+            return new McpExistingEmissionReplay(record, response);
+        }
+
+        if (record.State is EmissionIdempotencyState.Submitting or EmissionIdempotencyState.Uncertain)
+        {
+            var response = record.FiscalResult?.ToResponse() ?? new dcFacturaResponse
+            {
+                Success = false,
+                NumeroComprobante = record.NumeroComprobante ?? 0,
+                Codigo = "EMISSION_RECONCILIATION_REQUIRED",
+                Mensaje = "La operación cruzó el límite de envío y debe reconciliarse antes de cualquier nueva emisión.",
+                EmissionOutcome = dcEmissionOutcome.Uncertain,
+                Errores = ["La operación requiere reconciliación; no se realizó un nuevo envío fiscal."]
+            };
+            DecorateStoredResponse(record, response);
+            return new McpExistingEmissionReplay(record, response);
+        }
+
+        return null;
+    }
+
     public async Task DecorateEmissionResponseAsync(
         string consumerId,
         string contextId,
@@ -326,6 +398,13 @@ public sealed class McpOperationContractService
             : EmissionRequestFingerprint.OperationKeyHash(consumerId, contextId, idempotencyKey);
         var record = await _operations.GetAsync(operationId, cancellationToken);
         if (record is null) return;
+        DecorateStoredResponse(record, response);
+    }
+
+    private static void DecorateStoredResponse(
+        EmissionIdempotencyRecord record,
+        dcFacturaResponse response)
+    {
         response.OperationId = record.KeyHash;
         response.OperationContractVersion = ArcaMcpContract.Version;
         response.OperationContextId = record.Identity.ContextId;
@@ -372,7 +451,8 @@ public sealed class McpOperationContractService
         string? operationId,
         string? idempotencyKey,
         CancellationToken cancellationToken,
-        long? representedCuit = null, int? pointOfSale = null)
+        long? representedCuit = null, int? pointOfSale = null,
+        string requiredOperation = "consultar")
     {
         if (string.IsNullOrWhiteSpace(operationId) == string.IsNullOrWhiteSpace(idempotencyKey))
             throw new FiscalContextAccessException(
@@ -407,12 +487,13 @@ public sealed class McpOperationContractService
                     && !string.Equals(record.Identity.ContextId, requestedContextId.Trim(), StringComparison.Ordinal))
                 || (representedCuit.HasValue && record.Identity.Cuit != representedCuit.Value)
                 || (pointOfSale.HasValue && record.Identity.PuntoVenta != pointOfSale.Value)
-                || !HasGrant(principal, record.Identity.ContextId, "consultar", allowLegacy: true))
+                || !HasGrant(principal, record.Identity.ContextId, requiredOperation, allowLegacy: true))
                 return (visibleContextId, null);
 
-            var authorized = await _runtimeResolver.AuthorizeHistoricalOperationAsync(
+            var authorized = await AuthorizeHistoricalAsync(
                 principal,
                 record,
+                requiredOperation,
                 cancellationToken);
             if (!string.Equals(record.Identity.ConsumerId, authorized.ConsumerId, StringComparison.Ordinal)
                 || !string.Equals(record.Identity.ContextId, authorized.Context.ContextId, StringComparison.Ordinal)
@@ -427,6 +508,7 @@ public sealed class McpOperationContractService
         var (lookupConsumerId, contextId) = await ResolveHistoricalLookupNamespaceAsync(
             principal,
             requestedContextId,
+            requiredOperation,
             cancellationToken);
 
         EmissionIdempotencyRecord? located;
@@ -481,9 +563,10 @@ public sealed class McpOperationContractService
             || (pointOfSale.HasValue && located.Identity.PuntoVenta != pointOfSale.Value))
             return (contextId, null);
 
-        var historical = await _runtimeResolver.AuthorizeHistoricalOperationAsync(
+        var historical = await AuthorizeHistoricalAsync(
             principal,
             located,
+            requiredOperation,
             cancellationToken);
         if (!string.Equals(located.Identity.ConsumerId, historical.ConsumerId, StringComparison.Ordinal)
             || !string.Equals(located.Identity.ContextId, historical.Context.ContextId, StringComparison.Ordinal)
@@ -498,6 +581,7 @@ public sealed class McpOperationContractService
     private async Task<(string ConsumerId, string ContextId)> ResolveHistoricalLookupNamespaceAsync(
         ClaimsPrincipal principal,
         string? requestedContextId,
+        string requiredOperation,
         CancellationToken cancellationToken)
     {
         var consumerId = principal.FindFirstValue(ArcaClaimTypes.ConsumerId);
@@ -511,14 +595,14 @@ public sealed class McpOperationContractService
             var authorized = await _runtimeResolver.AuthorizeAsync(
                 principal,
                 requestedContextId,
-                "consultar",
+                requiredOperation,
                 cancellationToken);
             return (authorized.ConsumerId, authorized.Context.ContextId);
         }
 
         var allowed = principal.FindAll(ArcaClaimTypes.ContextGrant)
             .Select(x => ParseGrant(x.Value))
-            .Where(x => string.Equals(x.Operation, "consultar", StringComparison.Ordinal))
+            .Where(x => string.Equals(x.Operation, requiredOperation, StringComparison.Ordinal))
             .Select(x => x.ContextId)
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Distinct(StringComparer.Ordinal)
@@ -544,6 +628,22 @@ public sealed class McpOperationContractService
                 "contextId es obligatorio porque el consumidor tiene más de un contexto autorizado.");
         return (consumerId, allowed[0]);
     }
+
+    private Task<AuthorizedFiscalContext> AuthorizeHistoricalAsync(
+        ClaimsPrincipal principal,
+        EmissionIdempotencyRecord operation,
+        string requiredOperation,
+        CancellationToken cancellationToken)
+        => requiredOperation switch
+        {
+            "consultar" => _runtimeResolver.AuthorizeHistoricalOperationAsync(
+                principal, operation, cancellationToken),
+            "facturar" => _runtimeResolver.AuthorizeHistoricalEmissionAsync(
+                principal, operation, cancellationToken),
+            _ => throw new ArgumentException(
+                "requiredOperation debe ser consultar o facturar.",
+                nameof(requiredOperation))
+        };
 
     private static (string ContextId, string Operation) ParseGrant(string value)
     {
