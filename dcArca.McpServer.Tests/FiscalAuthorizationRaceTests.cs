@@ -72,6 +72,68 @@ public sealed class FiscalAuthorizationRaceTests
         Assert.Equal(EmissionIdempotencyState.NumberAssigned, stored!.State);
     }
 
+    [Fact]
+    public async Task ReemplazoDeRepresentacionDuranteRevalidacion_NoCruzaLimiteDeCAE()
+    {
+        using var temp = new TempDirectory();
+        var operations = new FileSystemEmissionIdempotencyStore(temp.Path);
+        using var coordinator = new InMemoryFiscalSeriesCoordinator();
+        var wsfe = new PausedNumberingWsfeClient();
+        var config = new dcArcaConfig
+        {
+            Cuit = RepresentedCuit.ToString(),
+            PuntoVenta = 7,
+            WsfeUrl = "https://example.invalid/wsfe"
+        };
+        var activatedAt = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var assignment = new CredentialAssignmentRecord(
+            "rev-1", "cred-1", CredentialAssignmentStatus.Active,
+            "validated", activatedAt, activatedAt,
+            activatedAt, "admin");
+        var context = new RepresentedFiscalContextRecord(
+            "operator-homo", "homologacion", RepresentedCuit, 7,
+            FiscalContextOperationalState.Active, 1, false, [assignment]);
+        var identity = new SingleFiscalOperationIdentityProvider(
+            config, new SingleFiscalContextOptions(
+                "consumer-a", "operator-homo", "homologacion", 1, "rev-1"));
+        var runtime = new FiscalContextRuntime(
+            "consumer-a", context, assignment, config, wsfe, null!, identity);
+        var resolver = new MutableContextResolver(runtime);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ArcaClaimTypes.ConsumerId, "consumer-a"),
+            new Claim("scope", "arca:facturar"),
+            new Claim(ArcaClaimTypes.ContextGrant,
+                ArcaClaimTypes.GrantValue("operator-homo", "facturar"))
+        ], "test"));
+        var tools = new ArcaTools(
+            resolver, operations, coordinator, null!,
+            new McpOperationContractService(operations, null!, resolver, null!, coordinator),
+            new HttpContextAccessor { HttpContext = new DefaultHttpContext { User = principal } });
+
+        var emission = tools.EmitirComprobanteAvanzado(
+            Request(), "race-representation-replacement", "operator-homo", RepresentedCuit, 7);
+        await wsfe.RevalidationEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Current authorization still looks Active with the same assignment revision/environment,
+        // but the operation-era representation has been revoked/replaced while numbering was in flight.
+        resolver.HistoricalEmissionAllowed = false;
+        wsfe.ResumeRevalidation.TrySetResult();
+
+        var error = await Assert.ThrowsAsync<FiscalContextAccessException>(() => emission);
+        Assert.Equal("FISCAL_REPRESENTATION_FORBIDDEN", error.Code);
+        Assert.Equal(2, wsfe.LastNumberCalls);
+        Assert.Equal(0, wsfe.EmitCalls);
+        Assert.Equal(1, resolver.HistoricalEmissionAuthorizeCalls);
+
+        var keyHash = EmissionRequestFingerprint.OperationKeyHash(
+            "consumer-a", "operator-homo", RepresentedCuit, 7,
+            "race-representation-replacement");
+        var stored = await operations.GetAsync(keyHash);
+        Assert.NotNull(stored);
+        Assert.Equal(EmissionIdempotencyState.NumberAssigned, stored!.State);
+    }
+
     private static dcFacturaRequest Request() => new()
     {
         TipoComprobante = dcTipoComprobante.FacturaB,
@@ -89,6 +151,8 @@ public sealed class FiscalAuthorizationRaceTests
     private sealed class MutableContextResolver(FiscalContextRuntime runtime) : IFiscalContextRuntimeResolver
     {
         public FiscalContextOperationalState State { get; set; } = FiscalContextOperationalState.Active;
+        public bool HistoricalEmissionAllowed { get; set; } = true;
+        public int HistoricalEmissionAuthorizeCalls { get; private set; }
 
         public Task<AuthorizedFiscalContext> AuthorizeAsync(
             ClaimsPrincipal principal, string? contextId, string operation,
@@ -104,6 +168,20 @@ public sealed class FiscalAuthorizationRaceTests
         public Task<FiscalContextRuntime> ResolveForReadAsync(
             ClaimsPrincipal principal, string? contextId, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+
+        public Task<AuthorizedFiscalContext> AuthorizeHistoricalEmissionAsync(
+            ClaimsPrincipal principal,
+            EmissionIdempotencyRecord operation,
+            CancellationToken cancellationToken = default)
+        {
+            HistoricalEmissionAuthorizeCalls++;
+            if (!HistoricalEmissionAllowed)
+                throw new FiscalContextAccessException(
+                    "FISCAL_REPRESENTATION_FORBIDDEN",
+                    "La representación histórica de la operación fue reemplazada.");
+            return Task.FromResult(new AuthorizedFiscalContext(
+                runtime.ConsumerId, runtime.Context with { OperationalState = State }));
+        }
 
         public Task<FiscalContextRuntime> ResolveForHistoricalOperationAsync(
             ClaimsPrincipal principal, EmissionIdempotencyRecord operation,
