@@ -130,7 +130,8 @@ builder.Services.AddMcpServer()
     {
         options.SessionMode = HttpServerSessionMode.Stateless;
     })
-    .AddAuthorizationFilters();
+    .AddAuthorizationFilters()
+    .AddFiscalToolErrorBoundary();
 
 var app = builder.Build();
 
