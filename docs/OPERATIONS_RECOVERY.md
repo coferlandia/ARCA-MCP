@@ -143,7 +143,7 @@ La completion es crash-idempotent: si el historial quedó persistido y el proces
 Ante `Uncertain`, `RECONCILIATION_MISMATCH` o `RECONCILIATION_EVIDENCE_INSUFFICIENT`:
 
 1. conservar operación, key, número y assignment histórica;
-2. consultar/reconciliar la misma operación;
+2. consultar/reconciliar la misma operación; una representación previamente activada en `ActionRequired` puede usarse sólo para esta recuperación histórica, mientras `Revoked` o un `ActionRequired` nunca activado permanecen fail-closed;
 3. registrar evidencia y resultado de ARCA;
 4. mantener bloqueada la serie si no se demuestra equivalencia;
 5. escalar manualmente cuando la credencial histórica esté revocada/expirada o la evidencia sea insuficiente.
