@@ -272,6 +272,53 @@ public class McpOperationContractServiceTests
     }
 
     [Fact]
+    public async Task ReplayTerminal_SiLaReservaCambioDeOwnerDuranteCleanup_NoFallaElReplay()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemEmissionIdempotencyStore(temp.Path);
+        var request = ValidRequest();
+        var identity = Identity();
+        const string idempotencyKey = "terminal-owner-race";
+        var operationId = EmissionRequestFingerprint.OperationKeyHash(
+            identity.ConsumerId,
+            identity.ContextId,
+            identity.Cuit,
+            identity.PuntoVenta,
+            idempotencyKey);
+        var created = await store.GetOrCreateAsync(
+            operationId,
+            EmissionRequestFingerprint.RequestHash(request),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            identity,
+            StoredFiscalEvidence.FromRequest(request));
+        var response = AuthorizedResponse(request, 123);
+        await store.SaveAsync(created with
+        {
+            NumeroComprobante = 123,
+            State = EmissionIdempotencyState.Authorized,
+            FiscalResult = StoredFiscalResult.FromResponse(response),
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        var coordinator = new OwnerChangedDuringCleanupCoordinator(identity, operationId, 123);
+        var resolver = new HistoricalOnlyRuntimeResolver(Context());
+        var service = Service(store, resolver, coordinator);
+
+        var replay = await service.TryReplayExistingEmissionAsync(
+            Principal(includeEmit: true),
+            identity.ContextId,
+            idempotencyKey,
+            request,
+            representedCuit: identity.Cuit,
+            pointOfSale: identity.PuntoVenta);
+
+        Assert.NotNull(replay);
+        Assert.True(replay!.Response.Success);
+        Assert.Equal("12345678901234", replay.Response.Cae);
+        Assert.Equal(1, coordinator.ReleaseCalls);
+    }
+
+    [Fact]
     public async Task ConsultarOperacionTerminal_UsaAutorizacionHistoricaEnLugarDeAutorizacionActual()
     {
         using var temp = new TempDirectory();
@@ -619,6 +666,15 @@ public class McpOperationContractServiceTests
             return Task.FromResult(new AuthorizedFiscalContext("consumer-a", _context));
         }
 
+        public Task<AuthorizedFiscalContext> AuthorizeHistoricalEmissionAsync(
+            ClaimsPrincipal principal,
+            EmissionIdempotencyRecord operation,
+            CancellationToken cancellationToken = default)
+        {
+            HistoricalAuthorizeCalls++;
+            return Task.FromResult(new AuthorizedFiscalContext("consumer-a", _context));
+        }
+
         public Task<FiscalContextRuntime> ResolveForHistoricalOperationAsync(
             ClaimsPrincipal principal,
             EmissionIdempotencyRecord operation,
@@ -753,6 +809,60 @@ public class McpOperationContractServiceTests
     {
         public Task<dcPadronPersonaResult> GetPersonaAsync(long cuit, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("No esperado.");
+    }
+
+    private sealed class OwnerChangedDuringCleanupCoordinator : IFiscalSeriesCoordinator
+    {
+        private readonly FiscalOperationIdentity _identity;
+        private readonly string _owner;
+        private readonly long _number;
+
+        public int ReleaseCalls { get; private set; }
+
+        public OwnerChangedDuringCleanupCoordinator(
+            FiscalOperationIdentity identity,
+            string owner,
+            long number)
+        {
+            _identity = identity;
+            _owner = owner;
+            _number = number;
+        }
+
+        public Task InitializeAsync(
+            IEmissionIdempotencyStore store,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task<FiscalSeriesReservation?> GetActiveAsync(
+            FiscalOperationIdentity identity,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<FiscalSeriesReservation?>(
+                new(
+                    1,
+                    _identity.SeriesKey,
+                    _owner,
+                    _number,
+                    DateTimeOffset.UtcNow.AddMinutes(-1),
+                    DateTimeOffset.UtcNow));
+
+        public Task<FiscalSeriesReservation> ReserveAsync(
+            FiscalOperationIdentity identity,
+            string ownerKeyHash,
+            long numeroComprobante,
+            CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("No esperado.");
+
+        public Task ReleaseAsync(
+            FiscalOperationIdentity identity,
+            string ownerKeyHash,
+            CancellationToken cancellationToken = default)
+        {
+            ReleaseCalls++;
+            throw new FiscalSeriesBlockedException("SERIES_RESERVATION_OWNER_MISMATCH");
+        }
+
+        public void Dispose() { }
     }
 
     private sealed class FakeAssignmentValidator : IFiscalAssignmentAuthorizationValidator
