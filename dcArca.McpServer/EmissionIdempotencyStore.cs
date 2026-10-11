@@ -429,7 +429,11 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
             || identity.Cuit <= 0
             || identity.PuntoVenta <= 0
             || identity.TipoComprobante <= 0
-            || identity.ContextRevision <= 0)
+            || identity.ContextRevision <= 0
+            || (identity.RepresentationProvenance is { } provenance
+                && (provenance.CreatedAt == default
+                    || provenance.ActivatedAt == default
+                    || provenance.ActivatedAt < provenance.CreatedAt)))
         {
             throw new InvalidDataException("Registro de idempotencia con identidad fiscal inválida.");
         }

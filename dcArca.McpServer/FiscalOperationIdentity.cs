@@ -8,6 +8,10 @@ public sealed record FiscalContextDescriptor(
     long Cuit,
     int PuntoVenta);
 
+public sealed record FiscalRepresentationProvenance(
+    DateTimeOffset CreatedAt,
+    DateTimeOffset ActivatedAt);
+
 public sealed record FiscalOperationIdentity(
     string ConsumerId,
     string ContextId,
@@ -16,7 +20,8 @@ public sealed record FiscalOperationIdentity(
     int PuntoVenta,
     int TipoComprobante,
     int ContextRevision,
-    string CredentialAssignmentRevision)
+    string CredentialAssignmentRevision,
+    FiscalRepresentationProvenance? RepresentationProvenance = null)
 {
     public FiscalContextDescriptor Context => new(ContextId, Environment, Cuit, PuntoVenta);
 
@@ -28,7 +33,10 @@ public sealed record FiscalOperationIdentity(
             && string.Equals(Environment, other.Environment, StringComparison.Ordinal)
             && Cuit == other.Cuit
             && PuntoVenta == other.PuntoVenta
-            && TipoComprobante == other.TipoComprobante;
+            && TipoComprobante == other.TipoComprobante
+            && (RepresentationProvenance is null
+                || other.RepresentationProvenance is null
+                || RepresentationProvenance == other.RepresentationProvenance);
 }
 
 public sealed record SingleFiscalContextOptions(
@@ -36,7 +44,8 @@ public sealed record SingleFiscalContextOptions(
     string ContextId,
     string Environment,
     int ContextRevision,
-    string CredentialAssignmentRevision)
+    string CredentialAssignmentRevision,
+    FiscalRepresentationProvenance? RepresentationProvenance = null)
 {
     public static SingleFiscalContextOptions FromConfiguration(IConfiguration configuration)
     {
@@ -91,7 +100,8 @@ public sealed class SingleFiscalOperationIdentityProvider : IFiscalOperationIden
             _arcaConfig.PuntoVenta,
             (int)tipoComprobante,
             _options.ContextRevision,
-            _options.CredentialAssignmentRevision);
+            _options.CredentialAssignmentRevision,
+            _options.RepresentationProvenance);
 
     public static SingleFiscalOperationIdentityProvider ForTests(dcArcaConfig arcaConfig)
         => new(

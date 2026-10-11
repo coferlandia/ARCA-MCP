@@ -16,7 +16,7 @@ Las tools ordinarias de consulta, prevalidación, emisión, PDF, diagnóstico y 
 
 El `operationId` es un hash opaco del namespace `consumerId+contextId+representedCuit+pointOfSale+idempotencyKey`. Cambiar cualquiera de esos elementos nunca recupera el resultado de otra representación. La clave en claro no se persiste. El request fiscal se compara por fingerprint; mismo namespace/key con datos distintos falla.
 
-La reserva de numeración queda por `(ambiente, CUIT representado, PV, tipo)` y no se fragmenta por consumer. El registro durable conserva ambiente, CUIT, PV, tipo, `contextId`, `consumerId` y `assignmentRevision`, para evitar mezcla entre tenants y preservar la autoridad fiscal histórica.
+La reserva de numeración queda por `(ambiente, CUIT representado, PV, tipo)` y no se fragmenta por consumer. El registro durable conserva ambiente, CUIT, PV, tipo, `contextId`, `consumerId`, `assignmentRevision` y, para operaciones V2 nuevas, la provenance exacta del registro de representación que admitió el request (alta + primera activación). Esa provenance queda congelada antes de persistir la operación y se revalida en retries/recuperación y en el último boundary previo a CAE; una representación sustituta no puede heredar trabajo durable del registro anterior.
 
 `consultar_operacion` acepta un `operationId` o la `idempotencyKey` junto con la representación autorizada. `reconciliar_operacion` no emite ni reserva números: en `Submitting`/`Uncertain` consulta el número histórico con `FECompConsultar`, compara evidencia y recupera sólo ante equivalencia estricta. No se usa `FECAESolicitar` durante reconciliación.
 

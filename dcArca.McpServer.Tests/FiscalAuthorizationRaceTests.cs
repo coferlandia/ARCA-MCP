@@ -35,7 +35,14 @@ public sealed class FiscalAuthorizationRaceTests
             FiscalContextOperationalState.Active, 1, false, [assignment]);
         var identity = new SingleFiscalOperationIdentityProvider(
             config, new SingleFiscalContextOptions(
-                "consumer-a", "operator-homo", "homologacion", 1, "rev-1"));
+                "consumer-a",
+                "operator-homo",
+                "homologacion",
+                1,
+                "rev-1",
+                new FiscalRepresentationProvenance(
+                    assignment.ActivatedAt!.Value.AddMinutes(-1),
+                    assignment.ActivatedAt.Value)));
         var runtime = new FiscalContextRuntime(
             "consumer-a", context, assignment, config, wsfe, null!, identity);
         var resolver = new MutableContextResolver(runtime);
@@ -95,7 +102,14 @@ public sealed class FiscalAuthorizationRaceTests
             FiscalContextOperationalState.Active, 1, false, [assignment]);
         var identity = new SingleFiscalOperationIdentityProvider(
             config, new SingleFiscalContextOptions(
-                "consumer-a", "operator-homo", "homologacion", 1, "rev-1"));
+                "consumer-a",
+                "operator-homo",
+                "homologacion",
+                1,
+                "rev-1",
+                new FiscalRepresentationProvenance(
+                    assignment.ActivatedAt!.Value.AddMinutes(-1),
+                    assignment.ActivatedAt.Value)));
         var runtime = new FiscalContextRuntime(
             "consumer-a", context, assignment, config, wsfe, null!, identity);
         var resolver = new MutableContextResolver(runtime);
@@ -158,7 +172,14 @@ public sealed class FiscalAuthorizationRaceTests
             FiscalContextOperationalState.Active, 1, false, [assignment]);
         var identity = new SingleFiscalOperationIdentityProvider(
             config, new SingleFiscalContextOptions(
-                "consumer-a", "operator-homo", "homologacion", 1, "rev-1"));
+                "consumer-a",
+                "operator-homo",
+                "homologacion",
+                1,
+                "rev-1",
+                new FiscalRepresentationProvenance(
+                    assignment.ActivatedAt!.Value.AddMinutes(-1),
+                    assignment.ActivatedAt.Value)));
         var runtime = new FiscalContextRuntime(
             "consumer-a", context, assignment, config, wsfe, null!, identity);
         var resolver = new MutableContextResolver(runtime);
@@ -193,6 +214,10 @@ public sealed class FiscalAuthorizationRaceTests
         var stored = await durableStore.GetAsync(keyHash);
         Assert.NotNull(stored);
         Assert.Equal(EmissionIdempotencyState.NumberAssigned, stored!.State);
+        Assert.NotNull(stored.Identity.RepresentationProvenance);
+        Assert.Equal(
+            identity.For(dcTipoComprobante.FacturaB).RepresentationProvenance,
+            stored.Identity.RepresentationProvenance);
     }
 
     private static dcFacturaRequest Request() => new()
@@ -237,12 +262,16 @@ public sealed class FiscalAuthorizationRaceTests
             CancellationToken cancellationToken = default)
         {
             HistoricalEmissionAuthorizeCalls++;
-            if (!HistoricalEmissionAllowed)
+            if (!HistoricalEmissionAllowed
+                || (!EntryRepresentationStillCurrent
+                    && operation.Identity.RepresentationProvenance is not null))
                 throw new FiscalContextAccessException(
                     "FISCAL_REPRESENTATION_FORBIDDEN",
                     "La representación histórica de la operación fue reemplazada.");
             return Task.FromResult(new AuthorizedFiscalContext(
-                runtime.ConsumerId, runtime.Context with { OperationalState = State }));
+                runtime.ConsumerId,
+                runtime.Context with { OperationalState = State },
+                operation.Identity.RepresentationProvenance));
         }
 
         public Task<FiscalContextRuntime> ResolveForHistoricalOperationAsync(
