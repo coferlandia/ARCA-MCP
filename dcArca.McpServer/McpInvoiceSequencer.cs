@@ -374,9 +374,18 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
         string keyHash,
         CancellationToken cancellationToken)
     {
-        var active = await _seriesCoordinator.GetActiveAsync(identity, cancellationToken);
-        if (active is not null && string.Equals(active.OwnerKeyHash, keyHash, StringComparison.Ordinal))
+        try
+        {
             await _seriesCoordinator.ReleaseAsync(identity, keyHash, cancellationToken);
+        }
+        catch (FiscalSeriesBlockedException exception)
+            when (string.Equals(
+                exception.Message,
+                "SERIES_RESERVATION_OWNER_MISMATCH",
+                StringComparison.Ordinal))
+        {
+            // A newer owner controls the series. Never remove it for an older replay.
+        }
     }
 
     private static dcFacturaResponse BeforeSubmissionFailure(dcFacturaResponse response, long numero = 0)
@@ -397,9 +406,18 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
                 StringComparison.Ordinal);
 
     private static dcFacturaResponse? ReplayTerminal(EmissionIdempotencyRecord record)
-        => record.State is EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected
-            ? record.FiscalResult?.ToResponse()
-            : null;
+        => record.State switch
+        {
+            EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected
+                => record.FiscalResult?.ToResponse(),
+            EmissionIdempotencyState.AbandonedBeforeSubmission
+                => Error(
+                    "OPERATION_ABANDONED_BEFORE_SUBMISSION",
+                    "La operación fue abandonada de forma explícita antes del envío fiscal; la idempotencyKey no puede reutilizarse.",
+                    dcEmissionOutcome.FailedBeforeSubmission,
+                    record.NumeroComprobante ?? 0),
+            _ => null
+        };
 
     private static dcFacturaResponse IdempotencyConflict()
         => Error(
