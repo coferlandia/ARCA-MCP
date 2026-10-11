@@ -101,8 +101,9 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
         var replay = ReplayTerminal(record);
         if (replay is not null)
         {
-            await ReleaseReplayReservationIfOwnedAsync(identity, keyHash, cancellationToken);
-            return replay;
+            record = await ReleaseReplayReservationIfOwnedAsync(record, cancellationToken);
+            return ReplayTerminal(record)
+                ?? throw new InvalidDataException("El replay terminal dejó de ser terminal durante cleanup.");
         }
 
         var gate = Locks.GetOrAdd(identity.SeriesKey, _ => new SemaphoreSlim(1, 1));
@@ -125,8 +126,9 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
             replay = ReplayTerminal(record);
             if (replay is not null)
             {
-                await ReleaseReplayReservationIfOwnedAsync(identity, keyHash, cancellationToken);
-                return replay;
+                record = await ReleaseReplayReservationIfOwnedAsync(record, cancellationToken);
+                return ReplayTerminal(record)
+                    ?? throw new InvalidDataException("El replay terminal dejó de ser terminal durante cleanup.");
             }
 
             var activeReservation = await _seriesCoordinator.GetActiveAsync(identity, cancellationToken);
@@ -288,13 +290,11 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
         }
         catch (EmissionTerminalStateConflictException conflict)
         {
-            var terminal = ReplayTerminal(conflict.Existing)
-                ?? throw new InvalidDataException("El store informó conflicto terminal sin un resultado fiscal terminal válido.");
-            await ReleaseReplayReservationIfOwnedAsync(
-                conflict.Existing.Identity,
-                conflict.Existing.KeyHash,
+            var terminalRecord = await ReleaseReplayReservationIfOwnedAsync(
+                conflict.Existing,
                 CancellationToken.None);
-            return terminal;
+            return ReplayTerminal(terminalRecord)
+                ?? throw new InvalidDataException("El store informó conflicto terminal sin un resultado fiscal terminal válido.");
         }
         catch (FiscalSeriesBlockedException)
         {
@@ -369,14 +369,36 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
         await _store.SaveAsync(updated, cancellationToken);
     }
 
-    private async Task ReleaseReplayReservationIfOwnedAsync(
-        FiscalOperationIdentity identity,
-        string keyHash,
+    private async Task<EmissionIdempotencyRecord> ReleaseReplayReservationIfOwnedAsync(
+        EmissionIdempotencyRecord record,
         CancellationToken cancellationToken)
     {
+        var active = await _seriesCoordinator.GetActiveAsync(
+            record.Identity,
+            cancellationToken);
+        if (active is not null
+            && string.Equals(active.OwnerKeyHash, record.KeyHash, StringComparison.Ordinal)
+            && record.State == EmissionIdempotencyState.AbandonedBeforeSubmission)
+        {
+            if (record.NumeroComprobante.HasValue
+                && record.NumeroComprobante.Value != active.NumeroComprobante)
+                throw new InvalidDataException("OPERATION_RESERVATION_MISMATCH");
+
+            if (!record.NumeroComprobante.HasValue)
+            {
+                record = await _store.CaptureAbandonedReservationAsync(
+                    record.KeyHash,
+                    active.NumeroComprobante,
+                    cancellationToken);
+            }
+        }
+
         try
         {
-            await _seriesCoordinator.ReleaseAsync(identity, keyHash, cancellationToken);
+            await _seriesCoordinator.ReleaseAsync(
+                record.Identity,
+                record.KeyHash,
+                cancellationToken);
         }
         catch (FiscalSeriesBlockedException exception)
             when (string.Equals(
@@ -386,6 +408,8 @@ public sealed class McpInvoiceSequencer : IInvoiceIssuer
         {
             // A newer owner controls the series. Never remove it for an older replay.
         }
+
+        return record;
     }
 
     private static dcFacturaResponse BeforeSubmissionFailure(dcFacturaResponse response, long numero = 0)

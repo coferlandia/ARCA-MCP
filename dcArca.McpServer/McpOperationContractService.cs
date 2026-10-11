@@ -255,7 +255,7 @@ public sealed class McpOperationContractService
         var concurrentWinner = await GetTerminalWinnerAsync(record.KeyHash, cancellationToken);
         if (concurrentWinner is not null)
         {
-            await ReleaseReservationIfOwnedAsync(concurrentWinner, cancellationToken);
+            concurrentWinner = await ReleaseReservationIfOwnedAsync(concurrentWinner, cancellationToken);
             return Build(concurrentWinner, consulted);
         }
 
@@ -280,7 +280,7 @@ public sealed class McpOperationContractService
                 UpdatedAt = DateTimeOffset.UtcNow
             };
             var persisted = await SaveOrObserveTerminalWinnerAsync(authorized, cancellationToken);
-            await ReleaseReservationIfOwnedAsync(persisted, cancellationToken);
+            persisted = await ReleaseReservationIfOwnedAsync(persisted, cancellationToken);
             return Build(persisted, consulted) with
             {
                 SafeMessage = persisted == authorized
@@ -307,7 +307,7 @@ public sealed class McpOperationContractService
         var afterSave = await SaveOrObserveTerminalWinnerAsync(uncertain, cancellationToken);
         if (IsTerminal(afterSave.State))
         {
-            await ReleaseReservationIfOwnedAsync(afterSave, cancellationToken);
+            afterSave = await ReleaseReservationIfOwnedAsync(afterSave, cancellationToken);
             return Build(afterSave, consulted) with
             {
                 SafeMessage = "Una transición concurrente ya fijó el resultado fiscal terminal; la reconciliación atrasada no lo degradó."
@@ -364,7 +364,7 @@ public sealed class McpOperationContractService
 
         if (record.State == EmissionIdempotencyState.AbandonedBeforeSubmission)
         {
-            await ReleaseReservationIfOwnedAsync(record, cancellationToken);
+            record = await ReleaseReservationIfOwnedAsync(record, cancellationToken);
             var response = new dcFacturaResponse
             {
                 Success = false,
@@ -380,7 +380,7 @@ public sealed class McpOperationContractService
 
         if (IsFiscalTerminal(record.State))
         {
-            await ReleaseReservationIfOwnedAsync(record, cancellationToken);
+            record = await ReleaseReservationIfOwnedAsync(record, cancellationToken);
             var response = record.FiscalResult?.ToResponse()
                 ?? throw new InvalidDataException("Registro terminal sin resultado fiscal durable.");
             DecorateStoredResponse(record, response);
@@ -455,16 +455,36 @@ public sealed class McpOperationContractService
         }
     }
 
-    private async Task ReleaseReservationIfOwnedAsync(
+    private async Task<EmissionIdempotencyRecord> ReleaseReservationIfOwnedAsync(
         EmissionIdempotencyRecord record,
         CancellationToken cancellationToken)
     {
-        if (!IsTerminal(record.State)) return;
+        if (!IsTerminal(record.State)) return record;
+
+        var active = await _seriesCoordinator.GetActiveAsync(
+            record.Identity,
+            cancellationToken);
+        if (active is not null
+            && string.Equals(active.OwnerKeyHash, record.KeyHash, StringComparison.Ordinal)
+            && record.State == EmissionIdempotencyState.AbandonedBeforeSubmission)
+        {
+            if (record.NumeroComprobante.HasValue
+                && record.NumeroComprobante.Value != active.NumeroComprobante)
+                throw new InvalidDataException("OPERATION_RESERVATION_MISMATCH");
+
+            if (!record.NumeroComprobante.HasValue)
+            {
+                record = await _operations.CaptureAbandonedReservationAsync(
+                    record.KeyHash,
+                    active.NumeroComprobante,
+                    cancellationToken);
+            }
+        }
+
         try
         {
-            // ReleaseAsync performs the owner check while holding the coordinator's
-            // series lock. Avoid a separate GetActive check: a newer owner may appear
-            // between observation and deletion.
+            // ReleaseAsync repeats the owner check while holding the coordinator's
+            // series lock. If a newer owner won after our observation, never delete it.
             await _seriesCoordinator.ReleaseAsync(
                 record.Identity,
                 record.KeyHash,
@@ -476,9 +496,10 @@ public sealed class McpOperationContractService
                 "SERIES_RESERVATION_OWNER_MISMATCH",
                 StringComparison.Ordinal))
         {
-            // A newer owner already controls the series. The terminal replay must not
-            // delete it and must not fail merely because cleanup lost this race.
+            // A newer owner already controls the series.
         }
+
+        return record;
     }
 
     private async Task<(string ContextId, EmissionIdempotencyRecord? Record)> LocateAsync(
