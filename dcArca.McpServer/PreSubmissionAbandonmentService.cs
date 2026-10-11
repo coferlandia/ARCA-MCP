@@ -33,15 +33,23 @@ public sealed class PreSubmissionAbandonmentService
                 or EmissionIdempotencyState.AbandonedBeforeSubmission))
             throw new PreSubmissionAbandonmentException("OPERATION_ABANDON_NOT_ALLOWED");
 
-        var active = await _seriesCoordinator.GetActiveAsync(existing.Identity, cancellationToken);
+        var observedBefore = await _seriesCoordinator.GetActiveAsync(
+            existing.Identity,
+            cancellationToken);
         if (existing.State == EmissionIdempotencyState.NumberAssigned
-            && active is not null
-            && !string.Equals(active.OwnerKeyHash, existing.KeyHash, StringComparison.Ordinal))
+            && observedBefore is not null
+            && !string.Equals(
+                observedBefore.OwnerKeyHash,
+                existing.KeyHash,
+                StringComparison.Ordinal))
             throw new PreSubmissionAbandonmentException("OPERATION_RESERVATION_MISMATCH");
 
-        var exactReservation = active is not null
-            && string.Equals(active.OwnerKeyHash, existing.KeyHash, StringComparison.Ordinal)
-                ? active
+        var initialExactReservation = observedBefore is not null
+            && string.Equals(
+                observedBefore.OwnerKeyHash,
+                existing.KeyHash,
+                StringComparison.Ordinal)
+                ? observedBefore
                 : null;
 
         var audit = existing.AbandonmentAudit
@@ -52,25 +60,49 @@ public sealed class PreSubmissionAbandonmentService
 
         var abandoned = await _store.AbandonBeforeSubmissionAsync(
             existing.KeyHash,
-            exactReservation?.NumeroComprobante,
+            initialExactReservation?.NumeroComprobante,
             audit,
             cancellationToken);
 
-        var released = exactReservation is not null;
-        try
-        {
-            await _seriesCoordinator.ReleaseAsync(
-                abandoned.Identity,
+        // Close the crash window where the sequencer created the reservation after
+        // our first observation but before the terminal abandonment was persisted.
+        var observedAfter = await _seriesCoordinator.GetActiveAsync(
+            abandoned.Identity,
+            cancellationToken);
+        var exactReservation = observedAfter is not null
+            && string.Equals(
+                observedAfter.OwnerKeyHash,
                 abandoned.KeyHash,
+                StringComparison.Ordinal)
+                ? observedAfter
+                : null;
+
+        if (exactReservation is not null)
+        {
+            abandoned = await _store.CaptureAbandonedReservationAsync(
+                abandoned.KeyHash,
+                exactReservation.NumeroComprobante,
                 cancellationToken);
         }
-        catch (FiscalSeriesBlockedException exception)
-            when (string.Equals(
-                exception.Message,
-                "SERIES_RESERVATION_OWNER_MISMATCH",
-                StringComparison.Ordinal))
+
+        var released = exactReservation is not null;
+        if (released)
         {
-            released = false;
+            try
+            {
+                await _seriesCoordinator.ReleaseAsync(
+                    abandoned.Identity,
+                    abandoned.KeyHash,
+                    cancellationToken);
+            }
+            catch (FiscalSeriesBlockedException exception)
+                when (string.Equals(
+                    exception.Message,
+                    "SERIES_RESERVATION_OWNER_MISMATCH",
+                    StringComparison.Ordinal))
+            {
+                released = false;
+            }
         }
 
         return new PreSubmissionAbandonmentResult(abandoned, released);

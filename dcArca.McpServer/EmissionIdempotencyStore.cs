@@ -159,6 +159,12 @@ public interface IEmissionIdempotencyStore
         PreSubmissionAbandonmentAudit audit,
         CancellationToken cancellationToken = default)
         => throw new NotSupportedException("PRE_SUBMISSION_ABANDONMENT_UNSUPPORTED");
+
+    Task<EmissionIdempotencyRecord> CaptureAbandonedReservationAsync(
+        string keyHash,
+        long reservedNumber,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("ABANDONED_RESERVATION_CAPTURE_UNSUPPORTED");
 }
 
 public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencyStore
@@ -366,6 +372,41 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
         ValidateRecord(abandoned);
         WriteAtomic(path, abandoned);
         return abandoned;
+    }
+
+    public async Task<EmissionIdempotencyRecord> CaptureAbandonedReservationAsync(
+        string keyHash,
+        long reservedNumber,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateHash(keyHash, nameof(keyHash));
+        if (reservedNumber <= 0)
+            throw new ArgumentOutOfRangeException(nameof(reservedNumber));
+
+        var path = RecordPath(keyHash);
+        await using var handle = await AcquireAsync(path, cancellationToken);
+        if (!File.Exists(path))
+            throw new PreSubmissionAbandonmentException("OPERATION_NOT_FOUND");
+
+        var existing = await ReadUnlockedAsync(path, cancellationToken);
+        if (existing.State != EmissionIdempotencyState.AbandonedBeforeSubmission)
+            throw new PreSubmissionAbandonmentException("OPERATION_ABANDON_NOT_ALLOWED");
+        if (existing.NumeroComprobante.HasValue)
+        {
+            if (existing.NumeroComprobante.Value != reservedNumber)
+                throw new PreSubmissionAbandonmentException("OPERATION_RESERVATION_MISMATCH");
+            return existing;
+        }
+
+        var repaired = existing with
+        {
+            SchemaVersion = CurrentSchemaVersion,
+            NumeroComprobante = reservedNumber,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        ValidateRecord(repaired);
+        WriteAtomic(path, repaired);
+        return repaired;
     }
 
     private string RecordPath(string keyHash) => Path.Combine(_directory, keyHash + ".json");

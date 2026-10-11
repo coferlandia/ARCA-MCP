@@ -144,7 +144,10 @@ public sealed class McpOperationContractService
 
             var pending = operationSummaries.Count(x =>
                 string.Equals(x.AssignmentRevision, assignment.AssignmentRevision, StringComparison.Ordinal)
-                && x.State is not (EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected));
+                && x.State is not (
+                    EmissionIdempotencyState.Authorized
+                    or EmissionIdempotencyState.FiscalRejected
+                    or EmissionIdempotencyState.AbandonedBeforeSubmission));
             var blockers = new List<string>();
             if (assignment.Status == CredentialAssignmentStatus.Active)
                 blockers.Add("active-assignment");

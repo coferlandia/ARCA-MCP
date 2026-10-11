@@ -1,6 +1,6 @@
 # Migración del store idempotente de emisiones
 
-El schema versionado de operaciones fiscales incorpora identidad durable de consumidor y contexto fiscal. Desde el hardening posterior a #62, las operaciones nuevas se escriben en **schema v3**, que hace durable la provenance de la representación fiscal que admitió el request. El lector actual conserva compatibilidad con operaciones **schema v2 sin provenance**; un registro v2 que contenga provenance es inválido, porque esa combinación permitiría que un binario anterior ignore silenciosamente el binding. Los manifests de contexto bajo `.contexts` continúan en schema v2 y tienen versionado independiente.
+El schema versionado de operaciones fiscales incorpora identidad durable de consumidor y contexto fiscal. Desde el hardening posterior a #62, el lector conserva compatibilidad con operaciones **schema v2** sin provenance y **schema v3** con provenance; desde #74, toda operación nueva o reescrita se persiste en **schema v4**, que además modela el cierre durable `AbandonedBeforeSubmission`. Un registro v2 que contenga provenance es inválido, porque esa combinación permitiría que un binario anterior ignore silenciosamente el binding. Los manifests de contexto bajo `.contexts` continúan en schema v2 y tienen versionado independiente.
 
 Un store legacy sin `SchemaVersion` no se interpreta usando silenciosamente la configuración actual: debe mapearse de forma explícita antes de habilitar el escritor.
 
@@ -68,9 +68,9 @@ Una segunda ejecución sobre un store ya migrado es idempotente: valida el mappi
 
 ## Rollback
 
-Rollback sólo con el escritor detenido. La versión actual puede **leer** operaciones schema v2 históricas sin provenance, pero toda operación nueva o reescrita se persiste como schema v3. Un binario anterior a este cambio debe rechazar schema v3; esa incompatibilidad es deliberada para impedir que ignore `RepresentationProvenance`.
+Rollback sólo con el escritor detenido. La versión actual puede **leer** operaciones schema v2 históricas sin provenance y schema v3 con provenance, pero toda operación nueva o reescrita se persiste como schema v4. Un binario anterior a v4 debe rechazar esos registros; esa incompatibilidad es deliberada para impedir que ignore tanto `RepresentationProvenance` como el estado/auditoría de abandono pre-submission.
 
-Si todavía no hubo nuevas operaciones ni reescrituras en schema v3, puede evaluarse restaurar el backup por rename siguiendo el procedimiento de recuperación. Si existe cualquier registro v3 o hubo cualquier side effect fiscal posterior al backup, no hacer downgrade ciego: primero identificar y conciliar esas operaciones. Nunca editar `SchemaVersion` manualmente ni eliminar `RepresentationProvenance` para forzar un rollback.
+Si todavía no hubo nuevas operaciones ni reescrituras en schema v4, puede evaluarse restaurar el backup por rename siguiendo el procedimiento de recuperación. Si existe cualquier registro v4 o hubo cualquier side effect fiscal posterior al backup, no hacer downgrade ciego: primero identificar y conciliar esas operaciones. Nunca editar `SchemaVersion` manualmente, eliminar provenance ni borrar el estado/auditoría de abandono para forzar un rollback.
 
 ## Cambio de credencial
 
