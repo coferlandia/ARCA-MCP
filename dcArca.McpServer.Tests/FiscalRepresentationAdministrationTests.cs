@@ -101,6 +101,38 @@ public sealed class FiscalRepresentationAdministrationTests
     }
 
     [Fact]
+    public async Task RetryDeRegistroConcurrenteConSeleccionNoDevuelveCandidatoNulo()
+    {
+        for (var iteration = 0; iteration < 12; iteration++)
+        {
+            using var temp = new TempCatalog();
+            var catalog = new FileSystemFiscalTechnicalContextStore(temp.Path);
+            await catalog.AddContextAsync(new FiscalTechnicalContextRecord(
+                "operator-homo", "homologacion", FiscalContextOperationalState.Disabled, 1, []));
+            var administration = new FiscalRepresentationAdministration(
+                catalog, new NoRemoteMaterializer(), new NoRemoteClientFactory());
+            var principal = Principal("admin", "arca:administrar", true);
+            await administration.RegisterCandidateAsync(
+                principal, "operator-homo", "consumer-a", 20123456786, default);
+
+            var registered = administration.RegisterCandidateAsync(
+                principal, "operator-homo", "consumer-a", 20123456786, default);
+            var selected = administration.SelectPointOfSaleAsync(
+                principal, "operator-homo", "consumer-a", 20123456786, 7, default);
+            await Task.WhenAll(registered, selected);
+
+            Assert.NotNull(registered.Result);
+            Assert.Equal(7, selected.Result.PointOfSale);
+            var records = (await catalog.ListRepresentationsAsync("operator-homo"))
+                .Where(x => x.ConsumerId == "consumer-a" && x.RepresentedCuit == 20123456786
+                    && x.Status != FiscalRepresentationStatus.Revoked)
+                .ToArray();
+            Assert.Single(records);
+            Assert.Equal(7, records[0].PointOfSale);
+        }
+    }
+
+    [Fact]
     public async Task DescubrimientoRequiereCandidatoDelConsumidorAntesDeUsarLaCredencial()
     {
         using var temp = new TempCatalog();
