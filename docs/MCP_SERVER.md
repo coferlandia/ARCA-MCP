@@ -50,6 +50,32 @@ Las operaciones idempotentes persisten esa revisión histórica: rotar una API k
 
 `arca:facturar` no implica `arca:consultar`, ni al revés.
 
+## Errores estructurados de tool calls
+
+Las tools fiscales exponen errores de dominio esperados como un resultado MCP con `isError=true`. El contrato estable para consumidores está en `structuredContent`:
+
+```json
+{
+  "code": "FISCAL_REPRESENTATION_NOT_FOUND",
+  "safeMessage": "La representación no está registrada."
+}
+```
+
+El campo textual de `content` conserva el mismo código y mensaje seguro para clientes que no consumen `structuredContent`, pero los consumidores deben ramificar por `structuredContent.code`, no parsear texto.
+
+La frontera aplica tanto a tools administrativas como a las tools fiscales ordinarias. Los `FiscalContextAccessException` conservan su `code` y mensaje seguro; los códigos máquina conocidos del catálogo V2 se normalizan mediante una whitelist exacta. No se propagan stack traces, mensajes internos, payloads SOAP, API keys, token/sign, certificados ni otros secretos.
+
+Una excepción inesperada se registra server-side con nombre de tool, `contextId` acotado cuando está disponible y correlación HTTP, y el cliente recibe únicamente:
+
+```json
+{
+  "code": "ARCA_MCP_INTERNAL_ERROR",
+  "safeMessage": "Ocurrió un error interno al procesar la herramienta fiscal."
+}
+```
+
+La frontera se ejecuta **después** de `AddAuthorizationFilters()`: los rechazos de autenticación/autorización del protocolo mantienen la semántica propia del SDK y no se convierten en errores fiscales de aplicación.
+
 ## Emisión segura
 
 Flujo simplificado:
