@@ -243,6 +243,11 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         if (existing is not null)
         {
             EnsureOperationIdentity(existing, consumerId, context, (int)tipoComprobante);
+            if (_catalog is not null)
+                _ = await ResolveHistoricalRepresentationRecordAsync(
+                    consumerId,
+                    existing,
+                    cancellationToken);
             assignment = ResolveHistoricalAssignment(context, existing);
         }
         else
@@ -341,27 +346,10 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
                 "FISCAL_CONTEXT_NOT_FOUND",
                 "El contexto técnico histórico ya no existe.");
 
-        var representations = (await catalog.ListRepresentationsAsync(
-                technical.ContextId,
-                cancellationToken))
-            .Where(x =>
-                string.Equals(x.ConsumerId, consumerId, StringComparison.Ordinal)
-                && x.RepresentedCuit == operation.Identity.Cuit
-                && x.PointOfSale == operation.Identity.PuntoVenta
-                && x.CreatedAt <= operation.CreatedAt
-                && x.ActivatedAt.HasValue
-                && x.ActivatedAt.Value <= operation.CreatedAt
-                && (x.Status == FiscalRepresentationStatus.Active
-                    || x.Status == FiscalRepresentationStatus.ActionRequired))
-            .ToArray();
-        if (representations.Length == 0)
-            throw new FiscalContextAccessException(
-                "FISCAL_REPRESENTATION_FORBIDDEN",
-                "La representación fiscal histórica no está disponible para este consumidor/contexto.");
-        if (representations.Length != 1)
-            throw new FiscalContextAccessException(
-                "FISCAL_REPRESENTATION_REQUIRED",
-                "La representación fiscal histórica es ambigua.");
+        _ = await ResolveHistoricalRepresentationRecordAsync(
+            consumerId,
+            operation,
+            cancellationToken);
 
         var projected = new RepresentedFiscalContextRecord(
             technical.ContextId,
@@ -373,6 +361,38 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
             false,
             technical.Assignments);
         return (consumerId, projected);
+    }
+
+    private async Task<FiscalRepresentationRecord> ResolveHistoricalRepresentationRecordAsync(
+        string consumerId,
+        EmissionIdempotencyRecord operation,
+        CancellationToken cancellationToken)
+    {
+        var catalog = _catalog
+            ?? throw new InvalidOperationException("TECHNICAL_CONTEXT_STORE_UNCONFIGURED");
+        var representations = (await catalog.ListRepresentationsAsync(
+                operation.Identity.ContextId,
+                cancellationToken))
+            .Where(x =>
+                string.Equals(x.ConsumerId, consumerId, StringComparison.Ordinal)
+                && x.RepresentedCuit == operation.Identity.Cuit
+                && x.PointOfSale == operation.Identity.PuntoVenta
+                && x.CreatedAt <= operation.CreatedAt
+                && x.ActivatedAt.HasValue
+                && x.ActivatedAt.Value <= operation.CreatedAt
+                && (x.Status == FiscalRepresentationStatus.Active
+                    || x.Status == FiscalRepresentationStatus.ActionRequired))
+            .ToArray();
+
+        if (representations.Length == 0)
+            throw new FiscalContextAccessException(
+                "FISCAL_REPRESENTATION_FORBIDDEN",
+                "La representación fiscal histórica no está disponible para este consumidor/contexto.");
+        if (representations.Length != 1)
+            throw new FiscalContextAccessException(
+                "FISCAL_REPRESENTATION_REQUIRED",
+                "La representación fiscal histórica es ambigua.");
+        return representations[0];
     }
 
     private static void EnsureOperationIdentity(
