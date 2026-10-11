@@ -348,9 +348,10 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
                 string.Equals(x.ConsumerId, consumerId, StringComparison.Ordinal)
                 && x.RepresentedCuit == operation.Identity.Cuit
                 && x.PointOfSale == operation.Identity.PuntoVenta
+                && x.CreatedAt <= operation.CreatedAt
+                && x.ActivatedAt.HasValue
                 && (x.Status == FiscalRepresentationStatus.Active
-                    || (x.Status == FiscalRepresentationStatus.ActionRequired
-                        && x.ActivatedAt.HasValue)))
+                    || x.Status == FiscalRepresentationStatus.ActionRequired))
             .ToArray();
         if (representations.Length == 0)
             throw new FiscalContextAccessException(
