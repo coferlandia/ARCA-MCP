@@ -254,6 +254,37 @@ public sealed class PreSubmissionAbandonmentTests
     }
 
     [Fact]
+    public async Task ObservableStore_ReenviaCapturaDeNumeroAbandonado()
+    {
+        using var temp = new TempDirectory();
+        var inner = new FileSystemEmissionIdempotencyStore(temp.Path);
+        var key = new string('a', 64);
+        var request = Request();
+        await inner.GetOrCreateAsync(
+            key,
+            EmissionRequestFingerprint.RequestHash(request),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            Identity(),
+            StoredFiscalEvidence.FromRequest(request));
+        await inner.AbandonBeforeSubmissionAsync(
+            key,
+            null,
+            new PreSubmissionAbandonmentAudit(
+                "admin-test",
+                "race_recovery",
+                DateTimeOffset.UtcNow));
+
+        IEmissionIdempotencyStore observable = new ObservableEmissionIdempotencyStore(
+            inner,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ObservableEmissionIdempotencyStore>.Instance);
+
+        var repaired = await observable.CaptureAbandonedReservationAsync(key, 31);
+
+        Assert.Equal(31, repaired.NumeroComprobante);
+        Assert.Equal(EmissionIdempotencyState.AbandonedBeforeSubmission, repaired.State);
+    }
+
+    [Fact]
     public async Task AuditoriaConTextoLibre_FallaCerrado()
     {
         using var temp = new TempDirectory();
