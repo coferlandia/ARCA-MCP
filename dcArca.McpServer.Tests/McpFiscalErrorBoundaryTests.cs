@@ -303,12 +303,28 @@ public sealed class McpFiscalErrorBoundaryTests : IClassFixture<WebApplicationFa
 
     private static void AssertStructuredError(string body, string expectedCode)
     {
-        using var document = JsonDocument.Parse(body);
+        using var document = ParseJsonRpcResponse(body);
         var result = document.RootElement.GetProperty("result");
         Assert.True(result.GetProperty("isError").GetBoolean());
         var structured = result.GetProperty("structuredContent");
         Assert.Equal(expectedCode, structured.GetProperty("code").GetString());
         Assert.False(string.IsNullOrWhiteSpace(structured.GetProperty("safeMessage").GetString()));
+    }
+
+    private static JsonDocument ParseJsonRpcResponse(string body)
+    {
+        var trimmed = body.TrimStart();
+        if (trimmed.StartsWith("{", StringComparison.Ordinal))
+            return JsonDocument.Parse(trimmed);
+
+        var data = string.Join(
+            "\n",
+            body.Split('\n')
+                .Where(line => line.StartsWith("data:", StringComparison.Ordinal))
+                .Select(line => line["data:".Length..].TrimStart()));
+
+        Assert.False(string.IsNullOrWhiteSpace(data), "La respuesta MCP no contenía un frame SSE data.");
+        return JsonDocument.Parse(data);
     }
 
     private static async Task ProvisionActiveContextAndCandidateAsync(
