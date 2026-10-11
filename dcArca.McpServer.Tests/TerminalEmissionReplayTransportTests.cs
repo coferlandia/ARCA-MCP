@@ -146,6 +146,83 @@ public sealed class TerminalEmissionReplayTransportTests : IClassFixture<WebAppl
     }
 
     [Fact]
+    public async Task AbandonedReplay_CapturaReservaCrashWindowAntesDeLiberarla()
+    {
+        var request = Request();
+        const string idempotencyKey = "abandoned-crash-window";
+        var identity = new FiscalOperationIdentity(
+            ConsumerId,
+            ContextId,
+            "homologacion",
+            RepresentedCuit,
+            PointOfSale,
+            (int)dcTipoComprobante.FacturaB,
+            1,
+            "test-credential-1");
+        var keyHash = EmissionRequestFingerprint.OperationKeyHash(
+            ConsumerId,
+            ContextId,
+            RepresentedCuit,
+            PointOfSale,
+            idempotencyKey);
+
+        await _store.GetOrCreateAsync(
+            keyHash,
+            EmissionRequestFingerprint.RequestHash(request),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            identity,
+            StoredFiscalEvidence.FromRequest(request));
+        await _store.AbandonBeforeSubmissionAsync(
+            keyHash,
+            null,
+            new PreSubmissionAbandonmentAudit(
+                "admin-test",
+                "crash_window",
+                DateTimeOffset.UtcNow));
+        await _coordinator.ReserveAsync(identity, keyHash, 41);
+
+        using var client = _factory.CreateClient();
+        var response = await client.SendAsync(JsonRpc("tools/call", new
+        {
+            name = "emitir_comprobante_avanzado",
+            arguments = new
+            {
+                factura = new
+                {
+                    tipoComprobante = "FacturaB",
+                    concepto = "Productos",
+                    cuitReceptor = RepresentedCuit,
+                    tipoDocReceptor = 80,
+                    condicionIvaReceptor = "ResponsableInscripto",
+                    importeNeto = 100m,
+                    importeIva = 21m,
+                    importeTotal = 121m,
+                    alicuotaIva = "Veintiuno",
+                    monedaId = "PES",
+                    monedaCotizacion = 1m,
+                    fechaComprobante = "20261011"
+                },
+                idempotencyKey,
+                contextId = ContextId,
+                representedCuit = RepresentedCuit,
+                pointOfSale = PointOfSale
+            }
+        }));
+        var body = await response.Content.ReadAsStringAsync();
+        var stored = await _store.GetAsync(keyHash);
+
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("OPERATION_ABANDONED_BEFORE_SUBMISSION", body, StringComparison.Ordinal);
+        Assert.Contains("41", body, StringComparison.Ordinal);
+        Assert.NotNull(stored);
+        Assert.Equal(41, stored!.NumeroComprobante);
+        Assert.Null(await _coordinator.GetActiveAsync(identity));
+        Assert.Equal(0, _resolver.CurrentEmissionResolveCalls);
+        Assert.Equal(1, _resolver.HistoricalEmissionAuthorizeCalls);
+        Assert.Equal(0, _resolver.WsfeCalls);
+    }
+
+    [Fact]
     public async Task TerminalSameKey_DifferentRequest_DevuelveConflictoAntesDeAutorizacionActual()
     {
         var request = Request();

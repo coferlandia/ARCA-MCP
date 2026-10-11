@@ -92,6 +92,70 @@ public class McpInvoiceSequencerTests
     }
 
     [Fact]
+    public async Task SequencerReplayAbandoned_CapturaReservaCrashWindowAntesDeLiberarla()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "arca-sequencer-abandoned-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var fake = new FakeWsfeClient();
+            var config = Config(1);
+            var store = new FileSystemEmissionIdempotencyStore(root);
+            var provider = Provider(config, "test-consumer", "test-context");
+            using var coordinator = new InMemoryFiscalSeriesCoordinator();
+            await coordinator.InitializeAsync(store);
+            var request = Request(dcTipoComprobante.FacturaB);
+            const string idempotencyKey = "abandoned-direct-replay";
+            var identity = provider.For(dcTipoComprobante.FacturaB);
+            var keyHash = EmissionRequestFingerprint.OperationKeyHash(
+                identity.ConsumerId,
+                identity.ContextId,
+                identity.Cuit,
+                identity.PuntoVenta,
+                idempotencyKey);
+
+            await store.GetOrCreateAsync(
+                keyHash,
+                EmissionRequestFingerprint.RequestHash(request),
+                EmissionRequestFingerprint.CanonicalizationVersion,
+                identity,
+                StoredFiscalEvidence.FromRequest(request));
+            await store.AbandonBeforeSubmissionAsync(
+                keyHash,
+                null,
+                new PreSubmissionAbandonmentAudit(
+                    "admin-test",
+                    "crash_window",
+                    DateTimeOffset.UtcNow));
+            await coordinator.ReserveAsync(identity, keyHash, 42);
+
+            var sequencer = new McpInvoiceSequencer(
+                fake,
+                config,
+                store,
+                provider,
+                coordinator);
+            var result = await sequencer.EmitAsync(request, idempotencyKey);
+            var stored = await store.GetAsync(keyHash);
+
+            Assert.Equal("OPERATION_ABANDONED_BEFORE_SUBMISSION", result.Codigo);
+            Assert.Equal(42, result.NumeroComprobante);
+            Assert.NotNull(stored);
+            Assert.Equal(42, stored!.NumeroComprobante);
+            Assert.Null(await coordinator.GetActiveAsync(identity));
+            Assert.Empty(fake.EmittedNumbers);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [Fact]
     public async Task TiposDiferentes_NoCompartenLock()
     {
         var fake = new FakeWsfeClient(delayMs: 100);
