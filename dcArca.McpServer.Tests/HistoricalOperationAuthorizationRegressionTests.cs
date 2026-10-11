@@ -101,6 +101,103 @@ public sealed class HistoricalOperationAuthorizationRegressionTests : IDisposabl
         Assert.Equal("FISCAL_REPRESENTATION_FORBIDDEN", currentRead.Code);
     }
 
+    [Fact]
+    public async Task V2_ActionRequiredNuncaActivado_NoReabreOperacionDeRepresentacionRevocada()
+    {
+        var contexts = Path.Combine(_root, "revoked-contexts");
+        var operationsDirectory = Path.Combine(_root, "revoked-operations");
+        Directory.CreateDirectory(contexts);
+        Directory.CreateDirectory(operationsDirectory);
+
+        var catalog = new FileSystemFiscalTechnicalContextStore(contexts);
+        await catalog.AddContextAsync(new FiscalTechnicalContextRecord(
+            "operator-homo",
+            "homologacion",
+            FiscalContextOperationalState.Disabled,
+            1,
+            []));
+        await catalog.AddCandidateAssignmentAsync("operator-homo", "rev-1", "cred-original", "admin");
+        await catalog.MarkAssignmentValidatedAsync("operator-homo", "rev-1", "wsaa-ok", "admin");
+        await catalog.ActivateAssignmentAsync("operator-homo", "rev-1", "admin");
+        await catalog.SetContextStateAsync("operator-homo", FiscalContextOperationalState.Active, "admin");
+
+        await catalog.RegisterCandidateAsync("operator-homo", "consumer-a", 20123456786, "admin");
+        await catalog.SelectPointOfSaleAsync("operator-homo", "consumer-a", 20123456786, 7, "admin");
+        await catalog.MarkRepresentationVerifiedAsync(
+            "operator-homo",
+            "consumer-a",
+            20123456786,
+            7,
+            "FEParamGetPtosVenta|context=operator-homo|env=homologacion|cuit=20123456786|pv=7|rev=rev-1|checked=2026-10-11T00:00:00Z",
+            "admin");
+        await catalog.ActivateRepresentationAsync(
+            "operator-homo",
+            "consumer-a",
+            20123456786,
+            7,
+            "admin");
+
+        var operations = new FileSystemEmissionIdempotencyStore(operationsDirectory);
+        var request = Request();
+        var operation = await operations.GetOrCreateAsync(
+            EmissionRequestFingerprint.OperationKeyHash(
+                "consumer-a", "operator-homo", 20123456786, 7, "revoked-payment"),
+            EmissionRequestFingerprint.RequestHash(request),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            new FiscalOperationIdentity(
+                "consumer-a",
+                "operator-homo",
+                "homologacion",
+                20123456786,
+                7,
+                (int)dcTipoComprobante.FacturaB,
+                1,
+                "rev-1"),
+            StoredFiscalEvidence.FromRequest(request));
+
+        await catalog.RevokeRepresentationAsync(
+            "operator-homo",
+            "consumer-a",
+            20123456786,
+            7,
+            "admin");
+
+        await catalog.RegisterCandidateAsync(
+            "operator-homo",
+            "consumer-a",
+            20123456786,
+            "admin");
+        await catalog.SelectPointOfSaleAsync(
+            "operator-homo",
+            "consumer-a",
+            20123456786,
+            7,
+            "admin");
+        await catalog.MarkRepresentationActionRequiredAsync(
+            "operator-homo",
+            "consumer-a",
+            20123456786,
+            7,
+            "WSFE_601",
+            "admin");
+
+        var materializer = new FakeMaterializer();
+        var resolver = new FiscalContextRuntimeResolver(
+            catalog,
+            operations,
+            new SingleFiscalContextOptions("legacy", "legacy", "homologacion", 1, "legacy"),
+            materializer,
+            OpenEmissionRecoveryGate.Instance);
+
+        var exception = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
+            resolver.ResolveForHistoricalOperationAsync(
+                Principal("consumer-a", ("operator-homo", "consultar")),
+                operation));
+
+        Assert.Equal("FISCAL_REPRESENTATION_FORBIDDEN", exception.Code);
+        Assert.Equal(0, materializer.Calls);
+    }
+
     private static ClaimsPrincipal Principal(
         string consumerId,
         params (string ContextId, string Operation)[] grants)
