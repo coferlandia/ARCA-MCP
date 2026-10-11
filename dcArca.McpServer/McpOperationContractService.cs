@@ -385,33 +385,65 @@ public sealed class McpOperationContractService
                 "FISCAL_REPRESENTATION_INVALID",
                 "CUIT y PV deben indicarse juntos y ser positivos.");
 
-        var (consumerId, contextId) = await ResolveHistoricalLookupNamespaceAsync(
+        if (!string.IsNullOrWhiteSpace(operationId))
+        {
+            var visibleContextId = requestedContextId?.Trim() ?? string.Empty;
+            var keyHash = operationId.Trim().ToLowerInvariant();
+            if (keyHash.Length != 64 || !keyHash.All(Uri.IsHexDigit))
+                return (visibleContextId, null);
+
+            var record = await _operations.GetAsync(keyHash, cancellationToken);
+            if (record is null)
+                return (visibleContextId, null);
+
+            var consumerId = principal.FindFirstValue(ArcaClaimTypes.ConsumerId);
+            if (string.IsNullOrWhiteSpace(consumerId))
+                throw new FiscalContextAccessException(
+                    "CONSUMER_ID_REQUIRED",
+                    "No existe consumerId autenticado.");
+
+            if (!string.Equals(record.Identity.ConsumerId, consumerId, StringComparison.Ordinal)
+                || (!string.IsNullOrWhiteSpace(requestedContextId)
+                    && !string.Equals(record.Identity.ContextId, requestedContextId.Trim(), StringComparison.Ordinal))
+                || (representedCuit.HasValue && record.Identity.Cuit != representedCuit.Value)
+                || (pointOfSale.HasValue && record.Identity.PuntoVenta != pointOfSale.Value)
+                || !HasGrant(principal, record.Identity.ContextId, "consultar", allowLegacy: true))
+                return (visibleContextId, null);
+
+            var authorized = await _runtimeResolver.AuthorizeHistoricalOperationAsync(
+                principal,
+                record,
+                cancellationToken);
+            if (!string.Equals(record.Identity.ConsumerId, authorized.ConsumerId, StringComparison.Ordinal)
+                || !string.Equals(record.Identity.ContextId, authorized.Context.ContextId, StringComparison.Ordinal)
+                || record.Identity.Cuit != authorized.Context.RepresentedCuit
+                || record.Identity.PuntoVenta != authorized.Context.PointOfSale
+                || !string.Equals(record.Identity.Environment, authorized.Context.Environment, StringComparison.Ordinal))
+                return (authorized.Context.ContextId, null);
+
+            return (authorized.Context.ContextId, record);
+        }
+
+        var (lookupConsumerId, contextId) = await ResolveHistoricalLookupNamespaceAsync(
             principal,
             requestedContextId,
             cancellationToken);
 
-        EmissionIdempotencyRecord? record;
-        if (!string.IsNullOrWhiteSpace(operationId))
-        {
-            var keyHash = operationId.Trim().ToLowerInvariant();
-            if (keyHash.Length != 64 || !keyHash.All(Uri.IsHexDigit))
-                return (contextId, null);
-            record = await _operations.GetAsync(keyHash, cancellationToken);
-        }
-        else if (representedCuit.HasValue && pointOfSale.HasValue)
+        EmissionIdempotencyRecord? located;
+        if (representedCuit.HasValue && pointOfSale.HasValue)
         {
             var keyHash = EmissionRequestFingerprint.OperationKeyHash(
-                consumerId,
+                lookupConsumerId,
                 contextId,
                 representedCuit.Value,
                 pointOfSale.Value,
                 idempotencyKey!);
-            record = await _operations.GetAsync(keyHash, cancellationToken);
+            located = await _operations.GetAsync(keyHash, cancellationToken);
         }
         else
         {
             var summaries = await _inspector.ListByContextAsync(
-                consumerId,
+                lookupConsumerId,
                 contextId,
                 cancellationToken);
             var matches = new List<EmissionIdempotencyRecord>();
@@ -421,13 +453,13 @@ public sealed class McpOperationContractService
                 if (candidate is null) continue;
 
                 var v2Hash = EmissionRequestFingerprint.OperationKeyHash(
-                    consumerId,
+                    lookupConsumerId,
                     contextId,
                     candidate.Identity.Cuit,
                     candidate.Identity.PuntoVenta,
                     idempotencyKey!);
                 var legacyHash = EmissionRequestFingerprint.OperationKeyHash(
-                    consumerId,
+                    lookupConsumerId,
                     contextId,
                     idempotencyKey!);
                 if (string.Equals(candidate.KeyHash, v2Hash, StringComparison.Ordinal)
@@ -439,28 +471,28 @@ public sealed class McpOperationContractService
                 throw new FiscalContextAccessException(
                     "FISCAL_REPRESENTATION_REQUIRED",
                     "Debe especificar CUIT representado y punto de venta para resolver una idempotencyKey ambigua.");
-            record = matches.SingleOrDefault();
+            located = matches.SingleOrDefault();
         }
 
-        if (record is null
-            || !string.Equals(record.Identity.ConsumerId, consumerId, StringComparison.Ordinal)
-            || !string.Equals(record.Identity.ContextId, contextId, StringComparison.Ordinal)
-            || (representedCuit.HasValue && record.Identity.Cuit != representedCuit.Value)
-            || (pointOfSale.HasValue && record.Identity.PuntoVenta != pointOfSale.Value))
+        if (located is null
+            || !string.Equals(located.Identity.ConsumerId, lookupConsumerId, StringComparison.Ordinal)
+            || !string.Equals(located.Identity.ContextId, contextId, StringComparison.Ordinal)
+            || (representedCuit.HasValue && located.Identity.Cuit != representedCuit.Value)
+            || (pointOfSale.HasValue && located.Identity.PuntoVenta != pointOfSale.Value))
             return (contextId, null);
 
-        var authorized = await _runtimeResolver.AuthorizeHistoricalOperationAsync(
+        var historical = await _runtimeResolver.AuthorizeHistoricalOperationAsync(
             principal,
-            record,
+            located,
             cancellationToken);
-        if (!string.Equals(record.Identity.ConsumerId, authorized.ConsumerId, StringComparison.Ordinal)
-            || !string.Equals(record.Identity.ContextId, authorized.Context.ContextId, StringComparison.Ordinal)
-            || record.Identity.Cuit != authorized.Context.RepresentedCuit
-            || record.Identity.PuntoVenta != authorized.Context.PointOfSale
-            || !string.Equals(record.Identity.Environment, authorized.Context.Environment, StringComparison.Ordinal))
+        if (!string.Equals(located.Identity.ConsumerId, historical.ConsumerId, StringComparison.Ordinal)
+            || !string.Equals(located.Identity.ContextId, historical.Context.ContextId, StringComparison.Ordinal)
+            || located.Identity.Cuit != historical.Context.RepresentedCuit
+            || located.Identity.PuntoVenta != historical.Context.PointOfSale
+            || !string.Equals(located.Identity.Environment, historical.Context.Environment, StringComparison.Ordinal))
             return (contextId, null);
 
-        return (contextId, record);
+        return (contextId, located);
     }
 
     private async Task<(string ConsumerId, string ContextId)> ResolveHistoricalLookupNamespaceAsync(
