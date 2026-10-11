@@ -350,6 +350,7 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
                 && x.PointOfSale == operation.Identity.PuntoVenta
                 && x.CreatedAt <= operation.CreatedAt
                 && x.ActivatedAt.HasValue
+                && x.ActivatedAt.Value <= operation.CreatedAt
                 && (x.Status == FiscalRepresentationStatus.Active
                     || x.Status == FiscalRepresentationStatus.ActionRequired))
             .ToArray();
