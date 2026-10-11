@@ -358,6 +358,15 @@ public sealed class PreSubmissionAbandonmentTests
                 audit,
                 cancellationToken);
         }
+
+        public Task<EmissionIdempotencyRecord> CaptureAbandonedReservationAsync(
+            string keyHash,
+            long reservedNumber,
+            CancellationToken cancellationToken = default)
+            => _inner.CaptureAbandonedReservationAsync(
+                keyHash,
+                reservedNumber,
+                cancellationToken);
     }
 
     private sealed class TempDirectory : IDisposable
