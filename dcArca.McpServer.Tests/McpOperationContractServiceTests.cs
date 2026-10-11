@@ -147,6 +147,48 @@ public class McpOperationContractServiceTests
         Assert.Null(await coordinator.GetActiveAsync(identity));
     }
 
+    [Fact]
+    public async Task ConsultarOperacionTerminal_UsaAutorizacionHistoricaEnLugarDeAutorizacionActual()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemEmissionIdempotencyStore(temp.Path);
+        var request = ValidRequest();
+        var identity = Identity();
+        var operationId = EmissionRequestFingerprint.OperationKeyHash(
+            "consumer-a", "ctx-a", identity.Cuit, identity.PuntoVenta, "terminal-historical");
+        var created = await store.GetOrCreateAsync(
+            operationId,
+            EmissionRequestFingerprint.RequestHash(request),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            identity,
+            StoredFiscalEvidence.FromRequest(request));
+        var response = AuthorizedResponse(request, 123);
+        var terminal = created with
+        {
+            NumeroComprobante = 123,
+            State = EmissionIdempotencyState.Authorized,
+            FiscalResult = StoredFiscalResult.FromResponse(response),
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        await store.SaveAsync(terminal);
+
+        var resolver = new HistoricalOnlyRuntimeResolver(Context());
+        var service = Service(store, resolver);
+
+        var result = await service.GetOperationAsync(
+            Principal(),
+            "ctx-a",
+            operationId,
+            idempotencyKey: null,
+            representedCuit: identity.Cuit,
+            pointOfSale: identity.PuntoVenta);
+
+        Assert.True(result.Found);
+        Assert.Equal(EmissionIdempotencyState.Authorized.ToString(), result.State);
+        Assert.Equal(0, resolver.CurrentAuthorizeCalls);
+        Assert.Equal(1, resolver.HistoricalAuthorizeCalls);
+    }
+
     private static async Task<EmissionIdempotencyRecord> CreateUncertainAsync(
         FileSystemEmissionIdempotencyStore store,
         dcFacturaRequest request,
@@ -288,6 +330,57 @@ public class McpOperationContractServiceTests
                 }
             ]
         };
+
+    private sealed class HistoricalOnlyRuntimeResolver : IFiscalContextRuntimeResolver
+    {
+        private readonly RepresentedFiscalContextRecord _context;
+        public int CurrentAuthorizeCalls { get; private set; }
+        public int HistoricalAuthorizeCalls { get; private set; }
+
+        public HistoricalOnlyRuntimeResolver(RepresentedFiscalContextRecord context)
+            => _context = context;
+
+        public Task<AuthorizedFiscalContext> AuthorizeAsync(
+            ClaimsPrincipal principal,
+            string? requestedContextId,
+            string operation,
+            CancellationToken cancellationToken = default)
+        {
+            CurrentAuthorizeCalls++;
+            throw new FiscalContextAccessException(
+                "FISCAL_REPRESENTATION_FORBIDDEN",
+                "La autorización fiscal actual no está disponible.");
+        }
+
+        public Task<AuthorizedFiscalContext> AuthorizeHistoricalOperationAsync(
+            ClaimsPrincipal principal,
+            EmissionIdempotencyRecord operation,
+            CancellationToken cancellationToken = default)
+        {
+            HistoricalAuthorizeCalls++;
+            return Task.FromResult(new AuthorizedFiscalContext("consumer-a", _context));
+        }
+
+        public Task<FiscalContextRuntime> ResolveForHistoricalOperationAsync(
+            ClaimsPrincipal principal,
+            EmissionIdempotencyRecord operation,
+            CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Un terminal durable no debe materializar runtime histórico.");
+
+        public Task<FiscalContextRuntime> ResolveForReadAsync(
+            ClaimsPrincipal principal,
+            string? requestedContextId,
+            CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("No esperado.");
+
+        public Task<FiscalContextRuntime> ResolveForEmissionAsync(
+            ClaimsPrincipal principal,
+            string? requestedContextId,
+            string idempotencyKey,
+            dcTipoComprobante tipoComprobante,
+            CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("No esperado.");
+    }
 
     private sealed class FakeRuntimeResolver : IFiscalContextRuntimeResolver
     {
