@@ -28,9 +28,30 @@ public sealed class FiscalRepresentationAdministration
         CancellationToken cancellationToken)
     {
         DemandAdministrator(principal, contextId);
-        await _catalog.RegisterCandidateAsync(contextId, consumerId, representedCuit,
-            Actor(principal), cancellationToken);
-        return (await _catalog.GetRepresentationAsync(contextId, consumerId, representedCuit, 0, cancellationToken))!;
+        var existing = await FindLiveRepresentationAsync(
+            contextId, consumerId, representedCuit, pointOfSale: null, cancellationToken);
+        if (existing is not null)
+            return existing;
+
+        try
+        {
+            await _catalog.RegisterCandidateAsync(contextId, consumerId, representedCuit,
+                Actor(principal), cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            // The list/register window can race with another authorized retry.
+            // Treat the winner as success only when this same live representation
+            // now exists; unrelated store failures still propagate.
+            existing = await FindLiveRepresentationAsync(
+                contextId, consumerId, representedCuit, pointOfSale: null, cancellationToken);
+            if (existing is not null)
+                return existing;
+            throw;
+        }
+
+        return (await _catalog.GetRepresentationAsync(
+            contextId, consumerId, representedCuit, 0, cancellationToken))!;
     }
 
     public async Task<dcPointOfSaleListingResult> ListPointsOfSaleAsync(
@@ -56,11 +77,49 @@ public sealed class FiscalRepresentationAdministration
         int pointOfSale, CancellationToken cancellationToken)
     {
         DemandAdministrator(principal, contextId);
-        // Selection itself never implies remote authorization.
-        await _catalog.SelectPointOfSaleAsync(contextId, consumerId, representedCuit,
-            pointOfSale, Actor(principal), cancellationToken);
+        if (pointOfSale <= 0)
+            throw new FiscalContextAccessException("POINT_OF_SALE_INVALID",
+                "El punto de venta debe ser positivo.");
+
+        // Selection itself never implies remote authorization. Repeating the
+        // same authorized target is a no-op so callers can resume safely.
+        var existing = await FindLiveRepresentationAsync(
+            contextId, consumerId, representedCuit, pointOfSale, cancellationToken);
+        if (existing is not null)
+            return existing;
+
+        try
+        {
+            await _catalog.SelectPointOfSaleAsync(contextId, consumerId, representedCuit,
+                pointOfSale, Actor(principal), cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            existing = await FindLiveRepresentationAsync(
+                contextId, consumerId, representedCuit, pointOfSale, cancellationToken);
+            if (existing is not null)
+                return existing;
+            throw;
+        }
+
         return (await _catalog.GetRepresentationAsync(contextId, consumerId,
             representedCuit, pointOfSale, cancellationToken))!;
+    }
+
+    private async Task<FiscalRepresentationRecord?> FindLiveRepresentationAsync(
+        string contextId, string consumerId, long representedCuit, int? pointOfSale,
+        CancellationToken cancellationToken)
+    {
+        var representations = await _catalog.ListRepresentationsAsync(contextId, cancellationToken);
+        return representations
+            .Where(x =>
+                string.Equals(x.ConsumerId, consumerId, StringComparison.Ordinal)
+                && x.RepresentedCuit == representedCuit
+                && x.Status != FiscalRepresentationStatus.Revoked
+                && (!pointOfSale.HasValue || x.PointOfSale == pointOfSale.Value))
+            .OrderByDescending(x => x.PointOfSale > 0)
+            .ThenByDescending(x => x.ActivatedAt ?? x.VerifiedAt ?? x.CreatedAt)
+            .FirstOrDefault();
     }
 
     public async Task<FiscalRepresentationRecord> VerifyAndActivateAsync(
