@@ -385,6 +385,7 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
         if (record is null) throw new InvalidDataException("Registro de idempotencia nulo.");
         if (record.SchemaVersion is not (LegacyOperationSchemaVersion or CurrentSchemaVersion))
             throw new InvalidDataException($"STORE_SCHEMA_UNSUPPORTED:{record.SchemaVersion}");
+        ValidateIdentity(record.Identity);
         if (record.SchemaVersion == LegacyOperationSchemaVersion
             && record.Identity.RepresentationProvenance is not null)
             throw new InvalidDataException("STORE_SCHEMA_PROVENANCE_REQUIRES_V3");
@@ -392,7 +393,6 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
         ValidateHash(record.RequestHash, nameof(record.RequestHash));
         if (record.RequestCanonicalizationVersion <= 0)
             throw new InvalidDataException("Registro con versión de canonicalización inválida.");
-        ValidateIdentity(record.Identity);
         ValidateFiscalEvidence(record.FiscalEvidence);
         if (record.NumeroComprobante is <= 0)
             throw new InvalidDataException("Registro de idempotencia con número inválido.");
