@@ -330,6 +330,24 @@ public class EmissionIdempotencyStoreTests
     }
 
     [Fact]
+    public void AbandonedBeforeSubmission_EsEstadoDurableExplicito()
+    {
+        var parsed = Enum.TryParse<EmissionIdempotencyState>(
+            "AbandonedBeforeSubmission",
+            out var state);
+
+        Assert.True(parsed);
+        Assert.Equal("AbandonedBeforeSubmission", state.ToString());
+    }
+
+    [Fact]
+    public void StoreConAbandonoPreSubmission_UsaSchemaOperacionV4()
+    {
+        Assert.Equal(4, FileSystemEmissionIdempotencyStore.CurrentSchemaVersion);
+        Assert.Equal(2, FileSystemEmissionIdempotencyStore.CurrentContextSchemaVersion);
+    }
+
+    [Fact]
     public async Task JsonCorrupto_FallaCerrado()
     {
         using var temp = new TempDirectory();
