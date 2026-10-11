@@ -27,7 +27,9 @@ public static class ArcaMcpToolErrorBoundary
     /// Register after AddAuthorizationFilters so protocol authorization behavior remains unchanged.
     /// </summary>
     public static IMcpServerBuilder AddFiscalToolErrorBoundary(this IMcpServerBuilder builder)
-        => builder.WithRequestFilters(filters =>
+    {
+        builder.Services.AddHttpContextAccessor();
+        return builder.WithRequestFilters(filters =>
             filters.AddCallToolFilter(next => async (context, cancellationToken) =>
             {
                 try
@@ -65,6 +67,7 @@ public static class ArcaMcpToolErrorBoundary
                     return Error(InternalErrorCode, InternalErrorMessage);
                 }
             }));
+    }
 
     private static CallToolResult Error(string code, string safeMessage)
     {
