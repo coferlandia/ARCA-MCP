@@ -103,6 +103,33 @@ public sealed class PreSubmissionAbandonmentTests
     }
 
     [Fact]
+    public async Task AbandonoGanaCarrera_ReservaPosteriorDelMismoOwnerEsRechazada()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemEmissionIdempotencyStore(temp.Path);
+        using var coordinator = new FileSystemFiscalSeriesCoordinator(temp.Path);
+        await coordinator.InitializeAsync(store);
+        var identity = Identity();
+        var key = new string('a', 64);
+        var request = Request();
+        await store.GetOrCreateAsync(
+            key,
+            EmissionRequestFingerprint.RequestHash(request),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            identity,
+            StoredFiscalEvidence.FromRequest(request));
+
+        await new PreSubmissionAbandonmentService(store, coordinator)
+            .AbandonAsync(key, "admin-test", "race_recovery");
+
+        var exception = await Assert.ThrowsAsync<FiscalSeriesBlockedException>(() =>
+            coordinator.ReserveAsync(identity, key, 31));
+
+        Assert.Equal("SERIES_OWNER_CLOSED", exception.Message);
+        Assert.Null(await coordinator.GetActiveAsync(identity));
+    }
+
+    [Fact]
     public async Task RepetirAbandono_EsIdempotenteYConservaAuditoriaOriginal()
     {
         using var temp = new TempDirectory();
