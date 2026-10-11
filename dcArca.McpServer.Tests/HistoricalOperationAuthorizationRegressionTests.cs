@@ -218,6 +218,18 @@ public sealed class HistoricalOperationAuthorizationRegressionTests : IDisposabl
 
         Assert.Equal("FISCAL_REPRESENTATION_FORBIDDEN", activeReplacement.Code);
         Assert.Equal(0, materializer.Calls);
+
+        var emissionRetry = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
+            resolver.ResolveForEmissionAsync(
+                Principal("consumer-a", ("operator-homo", "facturar")),
+                "operator-homo",
+                "revoked-payment",
+                dcTipoComprobante.FacturaB,
+                20123456786,
+                7));
+
+        Assert.Equal("FISCAL_REPRESENTATION_FORBIDDEN", emissionRetry.Code);
+        Assert.Equal(0, materializer.Calls);
     }
 
     [Fact]
