@@ -257,7 +257,12 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
             {
                 if (rep.Status != FiscalRepresentationStatus.Verified || string.IsNullOrWhiteSpace(rep.VerificationEvidence))
                     throw new InvalidOperationException("FISCAL_REPRESENTATION_NOT_VERIFIED");
-                return rep with { Status = FiscalRepresentationStatus.Active, ActivatedAt = DateTimeOffset.UtcNow, ActivatedBy = actor };
+                return rep with
+                {
+                    Status = FiscalRepresentationStatus.Active,
+                    ActivatedAt = rep.ActivatedAt ?? DateTimeOffset.UtcNow,
+                    ActivatedBy = rep.ActivatedBy ?? actor
+                };
             });
         }, cancellationToken);
     }
