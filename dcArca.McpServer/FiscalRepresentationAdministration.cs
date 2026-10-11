@@ -50,8 +50,11 @@ public sealed class FiscalRepresentationAdministration
             throw;
         }
 
-        return (await _catalog.GetRepresentationAsync(
-            contextId, consumerId, representedCuit, 0, cancellationToken))!;
+        // Selection may move the candidate from PV=0 to PV>0 between the
+        // register write and this read. Resolve by the live identity, not PV=0.
+        return await FindLiveRepresentationAsync(
+            contextId, consumerId, representedCuit, pointOfSale: null, cancellationToken)
+            ?? throw new InvalidOperationException("FISCAL_REPRESENTATION_NOT_FOUND_AFTER_REGISTER");
     }
 
     public async Task<dcPointOfSaleListingResult> ListPointsOfSaleAsync(
