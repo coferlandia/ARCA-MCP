@@ -12,7 +12,8 @@ public enum EmissionIdempotencyState
     Submitting,
     Authorized,
     FiscalRejected,
-    Uncertain
+    Uncertain,
+    AbandonedBeforeSubmission
 }
 
 public enum FiscalEvidenceState
@@ -35,6 +36,11 @@ public sealed record StoredFiscalEvidence(
     public static StoredFiscalEvidence LegacyUnavailable()
         => new(EmissionRequestFingerprint.FiscalProjectionVersion, FiscalEvidenceState.LegacyUnavailable, null);
 }
+
+public sealed record PreSubmissionAbandonmentAudit(
+    string ActorReference,
+    string ReasonCode,
+    DateTimeOffset AbandonedAt);
 
 public sealed record StoredFiscalResult(
     bool Success,
@@ -88,6 +94,7 @@ public sealed record EmissionIdempotencyRecord(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt)
 {
+    public PreSubmissionAbandonmentAudit? AbandonmentAudit { get; init; }
     public int TipoComprobante => Identity.TipoComprobante;
     public int PuntoVenta => Identity.PuntoVenta;
 }
@@ -105,6 +112,14 @@ public sealed class EmissionIdempotencyConflictException : Exception
 {
     public EmissionIdempotencyConflictException()
         : base("IDEMPOTENCY_KEY_REUSED") { }
+}
+
+public sealed class PreSubmissionAbandonmentException : Exception
+{
+    public string Code { get; }
+
+    public PreSubmissionAbandonmentException(string code)
+        : base(code) => Code = code;
 }
 
 public sealed class EmissionTerminalStateConflictException : Exception
@@ -137,12 +152,20 @@ public interface IEmissionIdempotencyStore
     Task SaveAsync(
         EmissionIdempotencyRecord record,
         CancellationToken cancellationToken = default);
+
+    Task<EmissionIdempotencyRecord> AbandonBeforeSubmissionAsync(
+        string keyHash,
+        long? reservedNumber,
+        PreSubmissionAbandonmentAudit audit,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("PRE_SUBMISSION_ABANDONMENT_UNSUPPORTED");
 }
 
 public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencyStore
 {
     public const int LegacyOperationSchemaVersion = 2;
-    public const int CurrentSchemaVersion = 3;
+    public const int ProvenanceOperationSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
     public const int CurrentContextSchemaVersion = 2;
     private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(25);
     private readonly string _directory;
@@ -299,6 +322,52 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
         });
     }
 
+    public async Task<EmissionIdempotencyRecord> AbandonBeforeSubmissionAsync(
+        string keyHash,
+        long? reservedNumber,
+        PreSubmissionAbandonmentAudit audit,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateHash(keyHash, nameof(keyHash));
+        ValidateAbandonmentAudit(audit);
+        if (reservedNumber is <= 0)
+            throw new ArgumentOutOfRangeException(nameof(reservedNumber));
+
+        var path = RecordPath(keyHash);
+        await using var handle = await AcquireAsync(path, cancellationToken);
+        if (!File.Exists(path))
+            throw new PreSubmissionAbandonmentException("OPERATION_NOT_FOUND");
+
+        var existing = await ReadUnlockedAsync(path, cancellationToken);
+        if (existing.State == EmissionIdempotencyState.AbandonedBeforeSubmission)
+            return existing;
+
+        if (existing.State is not (EmissionIdempotencyState.Created or EmissionIdempotencyState.NumberAssigned))
+            throw new PreSubmissionAbandonmentException("OPERATION_ABANDON_NOT_ALLOWED");
+
+        if (existing.NumeroComprobante.HasValue
+            && reservedNumber.HasValue
+            && existing.NumeroComprobante.Value != reservedNumber.Value)
+            throw new PreSubmissionAbandonmentException("OPERATION_RESERVATION_MISMATCH");
+
+        if (existing.State == EmissionIdempotencyState.NumberAssigned
+            && !existing.NumeroComprobante.HasValue)
+            throw new InvalidDataException("NumberAssigned sin número durable.");
+
+        var abandoned = existing with
+        {
+            SchemaVersion = CurrentSchemaVersion,
+            NumeroComprobante = existing.NumeroComprobante ?? reservedNumber,
+            State = EmissionIdempotencyState.AbandonedBeforeSubmission,
+            FiscalResult = null,
+            UpdatedAt = audit.AbandonedAt,
+            AbandonmentAudit = audit
+        };
+        ValidateRecord(abandoned);
+        WriteAtomic(path, abandoned);
+        return abandoned;
+    }
+
     private string RecordPath(string keyHash) => Path.Combine(_directory, keyHash + ".json");
 
     private string ContextPath(string contextId)
@@ -372,7 +441,9 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
     }
 
     private static bool IsTerminal(EmissionIdempotencyState state)
-        => state is EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected;
+        => state is EmissionIdempotencyState.Authorized
+            or EmissionIdempotencyState.FiscalRejected
+            or EmissionIdempotencyState.AbandonedBeforeSubmission;
 
     private static bool FiscalEvidenceEquals(StoredFiscalEvidence left, StoredFiscalEvidence right)
         => string.Equals(
@@ -383,12 +454,20 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
     public static void ValidateRecord(EmissionIdempotencyRecord record)
     {
         if (record is null) throw new InvalidDataException("Registro de idempotencia nulo.");
-        if (record.SchemaVersion is not (LegacyOperationSchemaVersion or CurrentSchemaVersion))
+        if (record.SchemaVersion is not (LegacyOperationSchemaVersion
+            or ProvenanceOperationSchemaVersion
+            or CurrentSchemaVersion))
             throw new InvalidDataException($"STORE_SCHEMA_UNSUPPORTED:{record.SchemaVersion}");
         ValidateIdentity(record.Identity);
         if (record.SchemaVersion == LegacyOperationSchemaVersion
             && record.Identity.RepresentationProvenance is not null)
             throw new InvalidDataException("STORE_SCHEMA_PROVENANCE_REQUIRES_V3");
+        if (record.SchemaVersion < CurrentSchemaVersion
+            && (record.State == EmissionIdempotencyState.AbandonedBeforeSubmission
+                || record.AbandonmentAudit is not null))
+            throw new InvalidDataException("STORE_SCHEMA_ABANDONMENT_REQUIRES_V4");
+        if (!Enum.IsDefined(record.State))
+            throw new InvalidDataException("Registro de idempotencia con estado desconocido.");
         ValidateHash(record.KeyHash, nameof(record.KeyHash));
         ValidateHash(record.RequestHash, nameof(record.RequestHash));
         if (record.RequestCanonicalizationVersion <= 0)
@@ -399,6 +478,18 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
         if ((record.State is EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected)
             && record.FiscalResult is null)
             throw new InvalidDataException("Registro terminal de idempotencia sin resultado fiscal.");
+        if (record.State == EmissionIdempotencyState.AbandonedBeforeSubmission)
+        {
+            if (record.AbandonmentAudit is null)
+                throw new InvalidDataException("Operación abandonada sin auditoría durable.");
+            if (record.FiscalResult is not null)
+                throw new InvalidDataException("Operación abandonada no puede contener resultado fiscal.");
+            ValidateAbandonmentAudit(record.AbandonmentAudit);
+        }
+        else if (record.AbandonmentAudit is not null)
+        {
+            throw new InvalidDataException("Auditoría de abandono presente en un estado incompatible.");
+        }
     }
 
     public static void ValidateContext(FiscalContextDescriptor context)
@@ -452,6 +543,22 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
             throw new InvalidDataException("Registro con evidencia fiscal completa pero sin proyección.");
         if (evidence.State == FiscalEvidenceState.LegacyUnavailable && evidence.Projection is not null)
             throw new InvalidDataException("Registro legacy no puede declarar una proyección fiscal inexistente.");
+    }
+
+    private static void ValidateAbandonmentAudit(PreSubmissionAbandonmentAudit audit)
+    {
+        if (audit is null || audit.AbandonedAt == default)
+            throw new InvalidDataException("Auditoría de abandono inválida.");
+        ValidateAuditToken(audit.ActorReference, "actorReference", 128);
+        ValidateAuditToken(audit.ReasonCode, "reasonCode", 96);
+    }
+
+    private static void ValidateAuditToken(string value, string field, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value)
+            || value.Length > maxLength
+            || value.Any(ch => !(char.IsLetterOrDigit(ch) || ch is '-' or '_' or '.' or ':' or '/')))
+            throw new InvalidDataException($"Auditoría de abandono con {field} inválido.");
     }
 
     private static void ValidateHash(string value, string parameterName)
