@@ -24,6 +24,7 @@ public sealed class TerminalEmissionReplayTransportTests : IClassFixture<WebAppl
         "arca-terminal-replay-" + Guid.NewGuid().ToString("N"));
     private readonly WebApplicationFactory<Program> _factory;
     private readonly FileSystemEmissionIdempotencyStore _store;
+    private readonly InMemoryFiscalSeriesCoordinator _coordinator = new();
     private readonly ActionRequiredReplayResolver _resolver = new();
     private readonly TestCertificatePlaceholder _certificate = new();
 
@@ -50,8 +51,7 @@ public sealed class TerminalEmissionReplayTransportTests : IClassFixture<WebAppl
                     new FileSystemEmissionOperationInspector(_store));
 
                 services.RemoveAll<IFiscalSeriesCoordinator>();
-                services.AddSingleton<IFiscalSeriesCoordinator>(
-                    new InMemoryFiscalSeriesCoordinator());
+                services.AddSingleton<IFiscalSeriesCoordinator>(_coordinator);
 
                 services.RemoveAll<IFiscalContextRuntimeResolver>();
                 services.AddSingleton<IFiscalContextRuntimeResolver>(_resolver);
@@ -104,6 +104,7 @@ public sealed class TerminalEmissionReplayTransportTests : IClassFixture<WebAppl
             FiscalResult = StoredFiscalResult.FromResponse(AuthorizedResponse(request)),
             UpdatedAt = DateTimeOffset.UtcNow
         });
+        await _coordinator.ReserveAsync(identity, keyHash, 123);
 
         using var client = _factory.CreateClient();
         var response = await client.SendAsync(JsonRpc("tools/call", new
@@ -141,6 +142,7 @@ public sealed class TerminalEmissionReplayTransportTests : IClassFixture<WebAppl
         Assert.Equal(0, _resolver.CurrentEmissionResolveCalls);
         Assert.Equal(1, _resolver.HistoricalEmissionAuthorizeCalls);
         Assert.Equal(0, _resolver.WsfeCalls);
+        Assert.Null(await _coordinator.GetActiveAsync(identity));
     }
 
     [Fact]
