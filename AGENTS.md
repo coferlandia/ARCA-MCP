@@ -99,6 +99,7 @@ The command must produce no tracked sensitive-key/certificate files.
 
 - GitHub Issues: planned, active, blocked and completed project work.
 - Pull Requests and Git history: implementation/review evidence.
+- When merging a PR should close a tracked issue, the PR body must use a GitHub closing keyword such as `Closes #N`, `Fixes #N`, or `Resolves #N`. Use `Refs #N` deliberately only when the issue must remain open after merge because a post-merge gate still exists (for example, homologation smoke, deployment validation, or operational acceptance).
 - Do not mirror this state into repository-local TODO/HISTORY files.
 
 ### Agent Tooling
