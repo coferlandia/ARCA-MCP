@@ -306,7 +306,10 @@ public static class EmissionStoreMigration
     }
 
     private static bool IsPending(EmissionIdempotencyState state)
-        => state is not (EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected);
+        => state is not (
+            EmissionIdempotencyState.Authorized
+            or EmissionIdempotencyState.FiscalRejected
+            or EmissionIdempotencyState.AbandonedBeforeSubmission);
 
     private static void ValidateHash(string value, string field)
     {
