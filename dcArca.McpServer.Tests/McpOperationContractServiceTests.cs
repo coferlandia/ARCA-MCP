@@ -148,6 +148,130 @@ public class McpOperationContractServiceTests
     }
 
     [Fact]
+    public async Task V2_ReconciliarTrasRotacionYActionRequired_UsaAutorizacionHistoricaRealSinReemitir()
+    {
+        using var temp = new TempDirectory();
+        var contextsDirectory = System.IO.Path.Combine(temp.Path, "v2-contexts");
+        var operationsDirectory = System.IO.Path.Combine(temp.Path, "v2-operations");
+        var catalog = new FileSystemFiscalTechnicalContextStore(contextsDirectory);
+
+        await catalog.AddContextAsync(new FiscalTechnicalContextRecord(
+            "operator-homo",
+            "homologacion",
+            FiscalContextOperationalState.Disabled,
+            1,
+            []));
+        await catalog.AddCandidateAssignmentAsync("operator-homo", "rev-1", "cred-original", "admin");
+        await catalog.MarkAssignmentValidatedAsync("operator-homo", "rev-1", "wsaa-ok", "admin");
+        await catalog.ActivateAssignmentAsync("operator-homo", "rev-1", "admin");
+        await catalog.SetContextStateAsync("operator-homo", FiscalContextOperationalState.Active, "admin");
+        await catalog.RegisterCandidateAsync("operator-homo", "consumer-a", 20123456786, "admin");
+        await catalog.SelectPointOfSaleAsync("operator-homo", "consumer-a", 20123456786, 7, "admin");
+        await catalog.MarkRepresentationVerifiedAsync(
+            "operator-homo",
+            "consumer-a",
+            20123456786,
+            7,
+            "FEParamGetPtosVenta|context=operator-homo|env=homologacion|cuit=20123456786|pv=7|rev=rev-1|checked=2026-10-11T00:00:00Z",
+            "admin");
+        await catalog.ActivateRepresentationAsync(
+            "operator-homo",
+            "consumer-a",
+            20123456786,
+            7,
+            "admin");
+
+        var store = new FileSystemEmissionIdempotencyStore(operationsDirectory);
+        var request = ValidRequest();
+        var identity = new FiscalOperationIdentity(
+            "consumer-a",
+            "operator-homo",
+            "homologacion",
+            20123456786,
+            7,
+            (int)dcTipoComprobante.FacturaB,
+            1,
+            "rev-1");
+        var operationId = EmissionRequestFingerprint.OperationKeyHash(
+            identity.ConsumerId,
+            identity.ContextId,
+            identity.Cuit,
+            identity.PuntoVenta,
+            "rotate-reconcile");
+        await CreateUncertainAsync(store, request, identity, operationId, 123);
+
+        await catalog.AddCandidateAssignmentAsync("operator-homo", "rev-2", "cred-new", "admin");
+        await catalog.MarkAssignmentValidatedAsync("operator-homo", "rev-2", "wsaa-new", "admin");
+        await catalog.ActivateAssignmentAsync("operator-homo", "rev-2", "admin");
+        await catalog.MarkRepresentationVerifiedAsync(
+            "operator-homo",
+            "consumer-a",
+            20123456786,
+            7,
+            "FEParamGetPtosVenta|context=operator-homo|env=homologacion|cuit=20123456786|pv=7|rev=rev-2|checked=2026-10-11T00:05:00Z",
+            "admin");
+        await catalog.ActivateRepresentationAsync(
+            "operator-homo",
+            "consumer-a",
+            20123456786,
+            7,
+            "admin");
+        await catalog.MarkRepresentationActionRequiredAsync(
+            "operator-homo",
+            "consumer-a",
+            20123456786,
+            7,
+            "WSFE_601",
+            "admin");
+
+        var materializer = new ThrowingMaterializer();
+        var realResolver = new FiscalContextRuntimeResolver(
+            catalog,
+            store,
+            new SingleFiscalContextOptions("legacy", "legacy", "homologacion", 1, "legacy"),
+            materializer,
+            OpenEmissionRecoveryGate.Instance);
+        var wsfe = new FakeWsfeClient
+        {
+            ConsultResponse = AuthorizedResponse(request, 123)
+        };
+        var resolver = new HistoricalAuthorizationRuntimeAdapter(realResolver, wsfe);
+        var service = Service(store, resolver);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ArcaClaimTypes.ConsumerId, "consumer-a"),
+            new Claim("scope", "arca:consultar"),
+            new Claim(
+                ArcaClaimTypes.ContextGrant,
+                ArcaClaimTypes.GrantValue("operator-homo", "consultar"))
+        ], "test"));
+
+        var result = await service.ReconcileAsync(
+            principal,
+            "operator-homo",
+            operationId,
+            idempotencyKey: null,
+            representedCuit: identity.Cuit,
+            pointOfSale: identity.PuntoVenta);
+
+        Assert.True(result.Found);
+        Assert.Equal(EmissionIdempotencyState.Authorized.ToString(), result.State);
+        Assert.Equal(dcEmissionOutcome.RecoveredSuccess, result.EmissionOutcome);
+        Assert.Equal("rev-1", resolver.LastHistoricalAssignmentRevision);
+        Assert.Equal(1, wsfe.ConsultCalls);
+        Assert.Equal(0, wsfe.EmitCalls);
+        Assert.Equal(0, materializer.Calls);
+
+        var fresh = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
+            realResolver.ResolveForReadAsync(
+                principal,
+                "operator-homo",
+                identity.Cuit,
+                identity.PuntoVenta));
+        Assert.Equal("FISCAL_REPRESENTATION_FORBIDDEN", fresh.Code);
+    }
+
+    [Fact]
     public async Task ConsultarOperacionTerminal_UsaAutorizacionHistoricaEnLugarDeAutorizacionActual()
     {
         using var temp = new TempDirectory();
@@ -335,6 +459,135 @@ public class McpOperationContractServiceTests
                 }
             ]
         };
+
+    private sealed class HistoricalAuthorizationRuntimeAdapter : IFiscalContextRuntimeResolver
+    {
+        private readonly FiscalContextRuntimeResolver _inner;
+        private readonly FakeWsfeClient _wsfe;
+
+        public string? LastHistoricalAssignmentRevision { get; private set; }
+
+        public HistoricalAuthorizationRuntimeAdapter(
+            FiscalContextRuntimeResolver inner,
+            FakeWsfeClient wsfe)
+        {
+            _inner = inner;
+            _wsfe = wsfe;
+        }
+
+        public Task<AuthorizedFiscalContext> AuthorizeAsync(
+            ClaimsPrincipal principal,
+            string? requestedContextId,
+            string operation,
+            CancellationToken cancellationToken = default)
+            => _inner.AuthorizeAsync(
+                principal,
+                requestedContextId,
+                operation,
+                cancellationToken);
+
+        public Task<AuthorizedFiscalContext> AuthorizeAsync(
+            ClaimsPrincipal principal,
+            string? requestedContextId,
+            string operation,
+            long? representedCuit,
+            int? pointOfSale,
+            CancellationToken cancellationToken = default)
+            => _inner.AuthorizeAsync(
+                principal,
+                requestedContextId,
+                operation,
+                representedCuit,
+                pointOfSale,
+                cancellationToken);
+
+        public Task<AuthorizedFiscalContext> AuthorizeHistoricalOperationAsync(
+            ClaimsPrincipal principal,
+            EmissionIdempotencyRecord operation,
+            CancellationToken cancellationToken = default)
+            => _inner.AuthorizeHistoricalOperationAsync(
+                principal,
+                operation,
+                cancellationToken);
+
+        public Task<FiscalContextRuntime> ResolveForReadAsync(
+            ClaimsPrincipal principal,
+            string? requestedContextId,
+            CancellationToken cancellationToken = default)
+            => _inner.ResolveForReadAsync(
+                principal,
+                requestedContextId,
+                cancellationToken);
+
+        public Task<FiscalContextRuntime> ResolveForEmissionAsync(
+            ClaimsPrincipal principal,
+            string? requestedContextId,
+            string idempotencyKey,
+            dcTipoComprobante tipoComprobante,
+            CancellationToken cancellationToken = default)
+            => _inner.ResolveForEmissionAsync(
+                principal,
+                requestedContextId,
+                idempotencyKey,
+                tipoComprobante,
+                cancellationToken);
+
+        public async Task<FiscalContextRuntime> ResolveForHistoricalOperationAsync(
+            ClaimsPrincipal principal,
+            EmissionIdempotencyRecord operation,
+            CancellationToken cancellationToken = default)
+        {
+            var authorized = await _inner.AuthorizeHistoricalOperationAsync(
+                principal,
+                operation,
+                cancellationToken);
+            var assignment = authorized.Context.Assignments.Single(x =>
+                string.Equals(
+                    x.AssignmentRevision,
+                    operation.Identity.CredentialAssignmentRevision,
+                    StringComparison.Ordinal));
+            LastHistoricalAssignmentRevision = assignment.AssignmentRevision;
+
+            var config = new dcArcaConfig
+            {
+                Cuit = authorized.Context.RepresentedCuit.ToString(),
+                PuntoVenta = authorized.Context.PointOfSale,
+                WsaaUrl = "https://example.invalid/wsaa",
+                WsfeUrl = "https://example.invalid/wsfe",
+                PadronUrl = "https://example.invalid/padron"
+            };
+            var identityProvider = new SingleFiscalOperationIdentityProvider(
+                config,
+                new SingleFiscalContextOptions(
+                    authorized.ConsumerId,
+                    authorized.Context.ContextId,
+                    authorized.Context.Environment,
+                    authorized.Context.ContextRevision,
+                    assignment.AssignmentRevision));
+            return new FiscalContextRuntime(
+                authorized.ConsumerId,
+                authorized.Context,
+                assignment,
+                config,
+                _wsfe,
+                new FakePadronClient(),
+                identityProvider);
+        }
+    }
+
+    private sealed class ThrowingMaterializer : IFiscalCredentialMaterializer
+    {
+        public int Calls { get; private set; }
+
+        public FiscalCredentialMaterialization Materialize(
+            RepresentedFiscalContextRecord context,
+            CredentialAssignmentRecord assignment)
+        {
+            Calls++;
+            throw new InvalidOperationException(
+                "La autorización histórica del test no debe materializar credenciales.");
+        }
+    }
 
     private sealed class HistoricalOnlyRuntimeResolver : IFiscalContextRuntimeResolver
     {
