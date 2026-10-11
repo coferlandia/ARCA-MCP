@@ -263,9 +263,27 @@ public sealed class FileSystemFiscalSeriesCoordinator : IFiscalSeriesCoordinator
             if (!string.Equals(owner.Identity.SeriesKey, reservation.SeriesKey, StringComparison.Ordinal))
                 throw new InvalidDataException("SERIES_RESERVATION_OPERATION_MISMATCH");
 
+            if (owner.State == EmissionIdempotencyState.AbandonedBeforeSubmission)
+            {
+                if (owner.NumeroComprobante.HasValue
+                    && owner.NumeroComprobante.Value != reservation.NumeroComprobante)
+                    throw new InvalidDataException("SERIES_RESERVATION_OPERATION_MISMATCH");
+
+                if (!owner.NumeroComprobante.HasValue)
+                {
+                    owner = await store.CaptureAbandonedReservationAsync(
+                        owner.KeyHash,
+                        reservation.NumeroComprobante,
+                        cancellationToken);
+                    records[owner.KeyHash] = owner;
+                }
+
+                File.Delete(path);
+                continue;
+            }
+
             if (owner.State is EmissionIdempotencyState.Authorized
-                or EmissionIdempotencyState.FiscalRejected
-                or EmissionIdempotencyState.AbandonedBeforeSubmission)
+                or EmissionIdempotencyState.FiscalRejected)
             {
                 File.Delete(path);
                 continue;
