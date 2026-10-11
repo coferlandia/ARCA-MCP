@@ -174,10 +174,15 @@ public class McpOperationContractServiceTests
 
         var resolver = new HistoricalOnlyRuntimeResolver(Context());
         var service = Service(store, resolver);
+        var principal = Principal();
+        ((ClaimsIdentity)principal.Identity!).AddClaim(
+            new Claim(
+                ArcaClaimTypes.ContextGrant,
+                ArcaClaimTypes.GrantValue("ctx-b", "consultar")));
 
         var result = await service.GetOperationAsync(
-            Principal(),
-            "ctx-a",
+            principal,
+            contextId: null,
             operationId,
             idempotencyKey: null,
             representedCuit: identity.Cuit,
