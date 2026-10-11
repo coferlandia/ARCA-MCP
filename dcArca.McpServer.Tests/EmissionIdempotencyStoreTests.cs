@@ -232,6 +232,104 @@ public class EmissionIdempotencyStoreTests
     }
 
     [Fact]
+    public async Task NuevaOperacionConProvenance_UsaSchema3_SinCambiarManifestDeContextoV2()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemEmissionIdempotencyStore(temp.Path);
+        var keyHash = new string('d', 64);
+        var provenance = new FiscalRepresentationProvenance(
+            DateTimeOffset.Parse("2026-10-11T12:00:00+00:00"),
+            DateTimeOffset.Parse("2026-10-11T12:01:00+00:00"));
+
+        var created = await store.GetOrCreateAsync(
+            keyHash,
+            new string('e', 64),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            Identity() with { RepresentationProvenance = provenance },
+            StoredFiscalEvidence.FromRequest(Request()));
+
+        Assert.Equal(3, created.SchemaVersion);
+        var operationJson = await File.ReadAllTextAsync(
+            System.IO.Path.Combine(temp.Path, keyHash + ".json"));
+        Assert.Contains("\"SchemaVersion\":3", operationJson, StringComparison.Ordinal);
+
+        var manifest = Assert.Single(
+            Directory.GetFiles(System.IO.Path.Combine(temp.Path, ".contexts"), "*.json"));
+        var manifestJson = await File.ReadAllTextAsync(manifest);
+        Assert.Contains("\"SchemaVersion\":2", manifestJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RegistroSchema2ConProvenance_FallaCerrado()
+    {
+        using var temp = new TempDirectory();
+        var keyHash = new string('d', 64);
+        var provenance = new FiscalRepresentationProvenance(
+            DateTimeOffset.Parse("2026-10-11T12:00:00+00:00"),
+            DateTimeOffset.Parse("2026-10-11T12:01:00+00:00"));
+        var record = new EmissionIdempotencyRecord(
+            2,
+            keyHash,
+            new string('e', 64),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            Identity() with { RepresentationProvenance = provenance },
+            StoredFiscalEvidence.FromRequest(Request()),
+            null,
+            EmissionIdempotencyState.Created,
+            null,
+            DateTimeOffset.Parse("2026-10-11T12:02:00+00:00"),
+            DateTimeOffset.Parse("2026-10-11T12:02:00+00:00"));
+
+        await File.WriteAllTextAsync(
+            System.IO.Path.Combine(temp.Path, keyHash + ".json"),
+            System.Text.Json.JsonSerializer.Serialize(record));
+
+        var store = new FileSystemEmissionIdempotencyStore(temp.Path);
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            store.GetAsync(keyHash));
+
+        Assert.Contains("STORE_SCHEMA_PROVENANCE_REQUIRES_V3", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RegistroSchema2SinProvenance_SeLeeBackwardCompatible_YSeActualizaAV3AlEscribir()
+    {
+        using var temp = new TempDirectory();
+        var keyHash = new string('d', 64);
+        var createdAt = DateTimeOffset.Parse("2026-10-11T12:02:00+00:00");
+        var record = new EmissionIdempotencyRecord(
+            2,
+            keyHash,
+            new string('e', 64),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            Identity(),
+            StoredFiscalEvidence.FromRequest(Request()),
+            123,
+            EmissionIdempotencyState.NumberAssigned,
+            null,
+            createdAt,
+            createdAt);
+
+        await File.WriteAllTextAsync(
+            System.IO.Path.Combine(temp.Path, keyHash + ".json"),
+            System.Text.Json.JsonSerializer.Serialize(record));
+
+        var store = new FileSystemEmissionIdempotencyStore(temp.Path);
+        var legacy = await store.GetAsync(keyHash);
+
+        Assert.NotNull(legacy);
+        Assert.Equal(2, legacy!.SchemaVersion);
+        Assert.Null(legacy.Identity.RepresentationProvenance);
+
+        await store.SaveAsync(legacy with { UpdatedAt = createdAt.AddMinutes(1) });
+        var upgraded = await store.GetAsync(keyHash);
+
+        Assert.NotNull(upgraded);
+        Assert.Equal(3, upgraded!.SchemaVersion);
+        Assert.Null(upgraded.Identity.RepresentationProvenance);
+    }
+
+    [Fact]
     public async Task JsonCorrupto_FallaCerrado()
     {
         using var temp = new TempDirectory();
