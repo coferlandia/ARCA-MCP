@@ -85,6 +85,7 @@ Submitting
 Authorized
 FiscalRejected
 Uncertain
+AbandonedBeforeSubmission
 ```
 
 Antes de iniciar el side effect fiscal debe existir una reserva durable de serie y un número persistido. Inmediatamente antes de `FECAESolicitar` el servidor revalida `FECompUltimoAutorizado`; luego persiste `Submitting`.
