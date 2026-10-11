@@ -196,6 +196,28 @@ public sealed class HistoricalOperationAuthorizationRegressionTests : IDisposabl
 
         Assert.Equal("FISCAL_REPRESENTATION_FORBIDDEN", exception.Code);
         Assert.Equal(0, materializer.Calls);
+
+        await catalog.MarkRepresentationVerifiedAsync(
+            "operator-homo",
+            "consumer-a",
+            20123456786,
+            7,
+            "FEParamGetPtosVenta|context=operator-homo|env=homologacion|cuit=20123456786|pv=7|rev=rev-1|checked=2026-10-11T00:10:00Z",
+            "admin");
+        await catalog.ActivateRepresentationAsync(
+            "operator-homo",
+            "consumer-a",
+            20123456786,
+            7,
+            "admin");
+
+        var activeReplacement = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
+            resolver.ResolveForHistoricalOperationAsync(
+                Principal("consumer-a", ("operator-homo", "consultar")),
+                operation));
+
+        Assert.Equal("FISCAL_REPRESENTATION_FORBIDDEN", activeReplacement.Code);
+        Assert.Equal(0, materializer.Calls);
     }
 
     private static ClaimsPrincipal Principal(
