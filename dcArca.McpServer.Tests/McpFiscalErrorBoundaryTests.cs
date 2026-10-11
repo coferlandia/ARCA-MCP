@@ -91,8 +91,8 @@ public sealed class McpFiscalErrorBoundaryTests : IClassFixture<WebApplicationFa
             pointOfSale = PointOfSale
         }, grant: $"{ContextId}|administrar");
 
-        AssertStructuredError(body, "FISCAL_CONTEXT_NOT_ACTIVE");
-        Assert.Contains("No existe credencial técnica activa", body);
+        var safeMessage = AssertStructuredError(body, "FISCAL_CONTEXT_NOT_ACTIVE");
+        Assert.Equal("No existe credencial técnica activa.", safeMessage);
     }
 
     [Fact]
@@ -220,8 +220,8 @@ public sealed class McpFiscalErrorBoundaryTests : IClassFixture<WebApplicationFa
             pointOfSale = PointOfSale
         }, grant: $"{ContextId}|administrar");
 
-        AssertStructuredError(body, ArcaMcpToolErrorBoundary.InternalErrorCode);
-        Assert.Contains(ArcaMcpToolErrorBoundary.InternalErrorMessage, body);
+        var safeMessage = AssertStructuredError(body, ArcaMcpToolErrorBoundary.InternalErrorCode);
+        Assert.Equal(ArcaMcpToolErrorBoundary.InternalErrorMessage, safeMessage);
         Assert.DoesNotContain(ThrowingMaterializer.InternalDetail, body, StringComparison.Ordinal);
         Assert.DoesNotContain(nameof(InvalidOperationException), body, StringComparison.Ordinal);
         Assert.DoesNotContain(" at ", body, StringComparison.Ordinal);
@@ -301,14 +301,16 @@ public sealed class McpFiscalErrorBoundaryTests : IClassFixture<WebApplicationFa
         return body;
     }
 
-    private static void AssertStructuredError(string body, string expectedCode)
+    private static string AssertStructuredError(string body, string expectedCode)
     {
         using var document = ParseJsonRpcResponse(body);
         var result = document.RootElement.GetProperty("result");
         Assert.True(result.GetProperty("isError").GetBoolean());
         var structured = result.GetProperty("structuredContent");
         Assert.Equal(expectedCode, structured.GetProperty("code").GetString());
-        Assert.False(string.IsNullOrWhiteSpace(structured.GetProperty("safeMessage").GetString()));
+        var safeMessage = structured.GetProperty("safeMessage").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(safeMessage));
+        return safeMessage!;
     }
 
     private static JsonDocument ParseJsonRpcResponse(string body)
