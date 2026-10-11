@@ -28,9 +28,33 @@ public sealed class FiscalRepresentationAdministration
         CancellationToken cancellationToken)
     {
         DemandAdministrator(principal, contextId);
-        await _catalog.RegisterCandidateAsync(contextId, consumerId, representedCuit,
-            Actor(principal), cancellationToken);
-        return (await _catalog.GetRepresentationAsync(contextId, consumerId, representedCuit, 0, cancellationToken))!;
+        var existing = await FindLiveRepresentationAsync(
+            contextId, consumerId, representedCuit, pointOfSale: null, cancellationToken);
+        if (existing is not null)
+            return existing;
+
+        try
+        {
+            await _catalog.RegisterCandidateAsync(contextId, consumerId, representedCuit,
+                Actor(principal), cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            // The list/register window can race with another authorized retry.
+            // Treat the winner as success only when this same live representation
+            // now exists; unrelated store failures still propagate.
+            existing = await FindLiveRepresentationAsync(
+                contextId, consumerId, representedCuit, pointOfSale: null, cancellationToken);
+            if (existing is not null)
+                return existing;
+            throw;
+        }
+
+        // Selection may move the candidate from PV=0 to PV>0 between the
+        // register write and this read. Resolve by the live identity, not PV=0.
+        return await FindLiveRepresentationAsync(
+            contextId, consumerId, representedCuit, pointOfSale: null, cancellationToken)
+            ?? throw new InvalidOperationException("FISCAL_REPRESENTATION_NOT_FOUND_AFTER_REGISTER");
     }
 
     public async Task<dcPointOfSaleListingResult> ListPointsOfSaleAsync(
@@ -40,7 +64,8 @@ public sealed class FiscalRepresentationAdministration
         DemandAdministrator(principal, contextId);
         var registrations = await _catalog.ListRepresentationsAsync(contextId, cancellationToken);
         if (!registrations.Any(x => x.ConsumerId == consumerId && x.RepresentedCuit == representedCuit &&
-            x.Status is FiscalRepresentationStatus.Pending or FiscalRepresentationStatus.Verified or FiscalRepresentationStatus.Active))
+            x.Status is FiscalRepresentationStatus.Pending or FiscalRepresentationStatus.Verified
+                or FiscalRepresentationStatus.Active or FiscalRepresentationStatus.ActionRequired))
             throw new FiscalContextAccessException("FISCAL_REPRESENTATION_CANDIDATE_REQUIRED",
                 "No existe representación candidata autorizada para este consumidor/CUIT.");
 
@@ -56,11 +81,49 @@ public sealed class FiscalRepresentationAdministration
         int pointOfSale, CancellationToken cancellationToken)
     {
         DemandAdministrator(principal, contextId);
-        // Selection itself never implies remote authorization.
-        await _catalog.SelectPointOfSaleAsync(contextId, consumerId, representedCuit,
-            pointOfSale, Actor(principal), cancellationToken);
+        if (pointOfSale <= 0)
+            throw new FiscalContextAccessException("POINT_OF_SALE_INVALID",
+                "El punto de venta debe ser positivo.");
+
+        // Selection itself never implies remote authorization. Repeating the
+        // same authorized target is a no-op so callers can resume safely.
+        var existing = await FindLiveRepresentationAsync(
+            contextId, consumerId, representedCuit, pointOfSale, cancellationToken);
+        if (existing is not null)
+            return existing;
+
+        try
+        {
+            await _catalog.SelectPointOfSaleAsync(contextId, consumerId, representedCuit,
+                pointOfSale, Actor(principal), cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            existing = await FindLiveRepresentationAsync(
+                contextId, consumerId, representedCuit, pointOfSale, cancellationToken);
+            if (existing is not null)
+                return existing;
+            throw;
+        }
+
         return (await _catalog.GetRepresentationAsync(contextId, consumerId,
             representedCuit, pointOfSale, cancellationToken))!;
+    }
+
+    private async Task<FiscalRepresentationRecord?> FindLiveRepresentationAsync(
+        string contextId, string consumerId, long representedCuit, int? pointOfSale,
+        CancellationToken cancellationToken)
+    {
+        var representations = await _catalog.ListRepresentationsAsync(contextId, cancellationToken);
+        return representations
+            .Where(x =>
+                string.Equals(x.ConsumerId, consumerId, StringComparison.Ordinal)
+                && x.RepresentedCuit == representedCuit
+                && x.Status != FiscalRepresentationStatus.Revoked
+                && (!pointOfSale.HasValue || x.PointOfSale == pointOfSale.Value))
+            .OrderByDescending(x => x.PointOfSale > 0)
+            .ThenByDescending(x => x.ActivatedAt ?? x.VerifiedAt ?? x.CreatedAt)
+            .FirstOrDefault();
     }
 
     public async Task<FiscalRepresentationRecord> VerifyAndActivateAsync(

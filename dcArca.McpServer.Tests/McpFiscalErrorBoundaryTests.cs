@@ -131,7 +131,7 @@ public sealed class McpFiscalErrorBoundaryTests : IClassFixture<WebApplicationFa
     }
 
     [Fact]
-    public async Task RegistroDuplicado_ExponeCodigoEstableMientrasSeaErrorDeDominio()
+    public async Task RegistroDuplicadoIdempotente_NoDevuelveErrorDeDominio()
     {
         using var temp = new TempCatalog();
         var catalog = new FileSystemFiscalTechnicalContextStore(temp.Path);
@@ -156,7 +156,7 @@ public sealed class McpFiscalErrorBoundaryTests : IClassFixture<WebApplicationFa
             representedCuit = RepresentedCuit
         }, grant: $"{ContextId}|administrar");
 
-        AssertStructuredError(duplicate, "FISCAL_REPRESENTATION_ALREADY_EXISTS");
+        Assert.DoesNotContain("\"isError\":true", duplicate, StringComparison.Ordinal);
     }
 
     [Theory]
