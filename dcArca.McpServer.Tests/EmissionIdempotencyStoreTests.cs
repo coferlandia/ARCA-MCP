@@ -232,7 +232,7 @@ public class EmissionIdempotencyStoreTests
     }
 
     [Fact]
-    public async Task NuevaOperacionConProvenance_UsaSchema3_SinCambiarManifestDeContextoV2()
+    public async Task NuevaOperacionConProvenance_UsaSchemaActual_SinCambiarManifestDeContextoV2()
     {
         using var temp = new TempDirectory();
         var store = new FileSystemEmissionIdempotencyStore(temp.Path);
@@ -248,15 +248,53 @@ public class EmissionIdempotencyStoreTests
             Identity() with { RepresentationProvenance = provenance },
             StoredFiscalEvidence.FromRequest(Request()));
 
-        Assert.Equal(3, created.SchemaVersion);
+        Assert.Equal(4, created.SchemaVersion);
         var operationJson = await File.ReadAllTextAsync(
             System.IO.Path.Combine(temp.Path, keyHash + ".json"));
-        Assert.Contains("\"SchemaVersion\":3", operationJson, StringComparison.Ordinal);
+        Assert.Contains("\"SchemaVersion\":4", operationJson, StringComparison.Ordinal);
 
         var manifest = Assert.Single(
             Directory.GetFiles(System.IO.Path.Combine(temp.Path, ".contexts"), "*.json"));
         var manifestJson = await File.ReadAllTextAsync(manifest);
         Assert.Contains("\"SchemaVersion\":2", manifestJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RegistroSchema3ConProvenance_SeLeeBackwardCompatible_YSeActualizaAV4AlEscribir()
+    {
+        using var temp = new TempDirectory();
+        var keyHash = new string('f', 64);
+        var createdAt = DateTimeOffset.Parse("2026-10-11T12:02:00+00:00");
+        var provenance = new FiscalRepresentationProvenance(
+            DateTimeOffset.Parse("2026-10-11T12:00:00+00:00"),
+            DateTimeOffset.Parse("2026-10-11T12:01:00+00:00"));
+        var record = new EmissionIdempotencyRecord(
+            3,
+            keyHash,
+            new string('e', 64),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            Identity() with { RepresentationProvenance = provenance },
+            StoredFiscalEvidence.FromRequest(Request()),
+            null,
+            EmissionIdempotencyState.Created,
+            null,
+            createdAt,
+            createdAt);
+
+        await File.WriteAllTextAsync(
+            System.IO.Path.Combine(temp.Path, keyHash + ".json"),
+            System.Text.Json.JsonSerializer.Serialize(record));
+
+        var store = new FileSystemEmissionIdempotencyStore(temp.Path);
+        var legacy = await store.GetAsync(keyHash);
+        Assert.NotNull(legacy);
+        Assert.Equal(3, legacy!.SchemaVersion);
+        Assert.NotNull(legacy.Identity.RepresentationProvenance);
+
+        await store.SaveAsync(legacy with { UpdatedAt = createdAt.AddMinutes(1) });
+        var upgraded = await store.GetAsync(keyHash);
+        Assert.NotNull(upgraded);
+        Assert.Equal(4, upgraded!.SchemaVersion);
     }
 
     [Fact]
@@ -292,7 +330,7 @@ public class EmissionIdempotencyStoreTests
     }
 
     [Fact]
-    public async Task RegistroSchema2SinProvenance_SeLeeBackwardCompatible_YSeActualizaAV3AlEscribir()
+    public async Task RegistroSchema2SinProvenance_SeLeeBackwardCompatible_YSeActualizaAV4AlEscribir()
     {
         using var temp = new TempDirectory();
         var keyHash = new string('d', 64);
@@ -325,7 +363,7 @@ public class EmissionIdempotencyStoreTests
         var upgraded = await store.GetAsync(keyHash);
 
         Assert.NotNull(upgraded);
-        Assert.Equal(3, upgraded!.SchemaVersion);
+        Assert.Equal(4, upgraded!.SchemaVersion);
         Assert.Null(upgraded.Identity.RepresentationProvenance);
     }
 
