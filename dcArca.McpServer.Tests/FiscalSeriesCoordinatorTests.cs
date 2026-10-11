@@ -142,6 +142,45 @@ public class FiscalSeriesCoordinatorTests
         Assert.Null(await restarted.GetActiveAsync(identity));
     }
 
+    [Fact]
+    public async Task Restart_CleansReservationOwnedByAbandonedBeforeSubmission()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemEmissionIdempotencyStore(temp.Path);
+        var identity = Identity();
+        var keyHash = new string('c', 64);
+        var request = Request();
+        await store.GetOrCreateAsync(
+            keyHash,
+            EmissionRequestFingerprint.RequestHash(request),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            identity,
+            StoredFiscalEvidence.FromRequest(request));
+
+        using (var first = new FileSystemFiscalSeriesCoordinator(temp.Path))
+        {
+            await first.InitializeAsync(store);
+            await first.ReserveAsync(identity, keyHash, 9);
+            await store.AbandonBeforeSubmissionAsync(
+                keyHash,
+                9,
+                new PreSubmissionAbandonmentAudit(
+                    "admin-test",
+                    "manual_recovery",
+                    DateTimeOffset.UtcNow));
+            // Simulate crash after the terminal transition but before reservation cleanup.
+        }
+
+        using var restarted = new FileSystemFiscalSeriesCoordinator(temp.Path);
+        await restarted.InitializeAsync(store);
+
+        var record = await store.GetAsync(keyHash);
+        Assert.NotNull(record);
+        Assert.Equal(EmissionIdempotencyState.AbandonedBeforeSubmission, record!.State);
+        Assert.Equal(9, record.NumeroComprobante);
+        Assert.Null(await restarted.GetActiveAsync(identity));
+    }
+
     private static FiscalOperationIdentity Identity() => new(
         "consumer",
         "context",
