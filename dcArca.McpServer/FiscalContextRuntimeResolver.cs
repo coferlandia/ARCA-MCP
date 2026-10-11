@@ -110,6 +110,18 @@ public interface IFiscalContextRuntimeResolver
             operation.Identity.PuntoVenta,
             cancellationToken);
 
+    Task<AuthorizedFiscalContext> AuthorizeHistoricalEmissionAsync(
+        ClaimsPrincipal principal,
+        EmissionIdempotencyRecord operation,
+        CancellationToken cancellationToken = default)
+        => AuthorizeAsync(
+            principal,
+            operation.Identity.ContextId,
+            "facturar",
+            operation.Identity.Cuit,
+            operation.Identity.PuntoVenta,
+            cancellationToken);
+
     Task<FiscalContextRuntime> ResolveForHistoricalOperationAsync(
         ClaimsPrincipal principal,
         EmissionIdempotencyRecord operation,
@@ -261,10 +273,23 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         return CreateRuntime(consumerId, context, assignment);
     }
 
-    public async Task<AuthorizedFiscalContext> AuthorizeHistoricalOperationAsync(
+    public Task<AuthorizedFiscalContext> AuthorizeHistoricalOperationAsync(
         ClaimsPrincipal principal,
         EmissionIdempotencyRecord operation,
         CancellationToken cancellationToken = default)
+        => AuthorizeHistoricalAsync(principal, operation, "consultar", cancellationToken);
+
+    public Task<AuthorizedFiscalContext> AuthorizeHistoricalEmissionAsync(
+        ClaimsPrincipal principal,
+        EmissionIdempotencyRecord operation,
+        CancellationToken cancellationToken = default)
+        => AuthorizeHistoricalAsync(principal, operation, "facturar", cancellationToken);
+
+    private async Task<AuthorizedFiscalContext> AuthorizeHistoricalAsync(
+        ClaimsPrincipal principal,
+        EmissionIdempotencyRecord operation,
+        string requiredOperation,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(operation);
         AuthorizedFiscalContext authorized;
@@ -273,7 +298,7 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
             authorized = await AuthorizeAsync(
                 principal,
                 operation.Identity.ContextId,
-                "consultar",
+                requiredOperation,
                 cancellationToken);
         }
         else
@@ -281,6 +306,7 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
             var (consumerId, context) = await ResolveHistoricalTechnicalRepresentationAsync(
                 principal,
                 operation,
+                requiredOperation,
                 cancellationToken);
             authorized = new AuthorizedFiscalContext(consumerId, context);
         }
@@ -318,6 +344,7 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
     private async Task<(string ConsumerId, RepresentedFiscalContextRecord Context)> ResolveHistoricalTechnicalRepresentationAsync(
         ClaimsPrincipal principal,
         EmissionIdempotencyRecord operation,
+        string requiredOperation,
         CancellationToken cancellationToken)
     {
         var consumerId = principal.FindFirstValue(ArcaClaimTypes.ConsumerId);
@@ -332,13 +359,13 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
 
         var allowedContexts = principal.FindAll(ArcaClaimTypes.ContextGrant)
             .Select(x => ParseGrant(x.Value))
-            .Where(x => x.Operation == "consultar")
+            .Where(x => x.Operation == requiredOperation)
             .Select(x => x.ContextId)
             .ToHashSet(StringComparer.Ordinal);
         if (!allowedContexts.Contains(operation.Identity.ContextId))
             throw new FiscalContextAccessException(
                 "FISCAL_CONTEXT_FORBIDDEN",
-                "El consumidor no tiene grant de consulta para el contexto técnico histórico.");
+                $"El consumidor no tiene grant de {requiredOperation} para el contexto técnico histórico.");
 
         var catalog = _catalog ?? throw new InvalidOperationException("TECHNICAL_CONTEXT_STORE_UNCONFIGURED");
         var technical = await catalog.GetContextAsync(operation.Identity.ContextId, cancellationToken)

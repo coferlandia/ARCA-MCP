@@ -69,7 +69,9 @@ public sealed class ArcaTools
     }
 
     private async Task CheckFiscalAuthorizationBeforeEmissionAsync(
-        FiscalContextRuntime runtime, CancellationToken cancellationToken)
+        FiscalContextRuntime runtime,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
     {
         var authorized = await _runtimeResolver.AuthorizeAsync(Principal, runtime.Context.ContextId,
             "facturar", runtime.Context.RepresentedCuit, runtime.Context.PointOfSale, cancellationToken);
@@ -80,6 +82,33 @@ public sealed class ArcaTools
             !string.Equals(authorized.Context.Environment, runtime.Context.Environment, StringComparison.Ordinal))
             throw new FiscalContextAccessException("FISCAL_ASSIGNMENT_CHANGED",
                 "La credencial técnica o ambiente cambió antes de la emisión. La operación se mantiene protegida.");
+
+        var keyHash = EmissionRequestFingerprint.OperationKeyHash(
+            runtime.ConsumerId,
+            runtime.Context.ContextId,
+            runtime.Context.RepresentedCuit,
+            runtime.Context.PointOfSale,
+            idempotencyKey);
+        var operation = await _operationStore.GetAsync(keyHash, cancellationToken)
+            ?? throw new FiscalContextAccessException(
+                "IDEMPOTENCY_OPERATION_MISSING",
+                "La operación durable desapareció antes del límite fiscal de envío.");
+
+        var historical = await _runtimeResolver.AuthorizeHistoricalEmissionAsync(
+            Principal,
+            operation,
+            cancellationToken);
+        if (!string.Equals(historical.ConsumerId, runtime.ConsumerId, StringComparison.Ordinal)
+            || !string.Equals(historical.Context.ContextId, runtime.Context.ContextId, StringComparison.Ordinal)
+            || historical.Context.RepresentedCuit != runtime.Context.RepresentedCuit
+            || historical.Context.PointOfSale != runtime.Context.PointOfSale
+            || !string.Equals(
+                operation.Identity.CredentialAssignmentRevision,
+                runtime.Assignment.AssignmentRevision,
+                StringComparison.Ordinal))
+            throw new FiscalContextAccessException(
+                "FISCAL_ASSIGNMENT_CHANGED",
+                "La operación durable ya no coincide con la autorización fiscal que llegó al límite de envío.");
     }
 
 
@@ -159,7 +188,7 @@ public sealed class ArcaTools
             _operationStore,
             runtime.IdentityProvider,
             _seriesCoordinator,
-            ct => CheckFiscalAuthorizationBeforeEmissionAsync(runtime, ct));
+            ct => CheckFiscalAuthorizationBeforeEmissionAsync(runtime, idempotencyKey, ct));
         var service = new InvoicePdfService(sequencer, _pdfRenderer, runtime.Config);
         var result = await service.EmitAsync(
             factura,
@@ -286,7 +315,7 @@ public sealed class ArcaTools
             _operationStore,
             runtime.IdentityProvider,
             _seriesCoordinator,
-            ct => CheckFiscalAuthorizationBeforeEmissionAsync(runtime, ct));
+            ct => CheckFiscalAuthorizationBeforeEmissionAsync(runtime, idempotencyKey, ct));
         var response = await sequencer.EmitAsync(factura, idempotencyKey, cancellationToken);
         await FlagRemoteAuthorizationFailureAsync(runtime, response, cancellationToken);
         await _contract.DecorateEmissionResponseAsync(
@@ -329,7 +358,7 @@ public sealed class ArcaTools
             _operationStore,
             runtime.IdentityProvider,
             _seriesCoordinator,
-            ct => CheckFiscalAuthorizationBeforeEmissionAsync(runtime, ct));
+            ct => CheckFiscalAuthorizationBeforeEmissionAsync(runtime, idempotencyKey, ct));
         var response = await sequencer.EmitAsync(factura, idempotencyKey, cancellationToken);
         await FlagRemoteAuthorizationFailureAsync(runtime, response, cancellationToken);
         await _contract.DecorateEmissionResponseAsync(

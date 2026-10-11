@@ -43,7 +43,7 @@ Los endpoints administrativos MCP cumplen las mismas etapas y exigen `arca:admin
 
 ## Emisión, aislamiento y recuperación
 
-Los contratos de emisión y consulta aceptan `contextId`, `representedCuit` y `pointOfSale`. Si el consumidor tiene una única representación activa, CUIT/PV pueden inferirse; si tiene varias, especificarlos es obligatorio. Se revalida la representación antes del side effect de CAE, con aislamiento por consumidor.
+Los contratos de emisión y consulta aceptan `contextId`, `representedCuit` y `pointOfSale`. Si el consumidor tiene una única representación activa, CUIT/PV pueden inferirse; si tiene varias, especificarlos es obligatorio. Se revalida la representación antes del side effect de CAE, con aislamiento por consumidor. En ese último boundary también se relee la operación durable por su idempotency key y se vuelve a exigir la provenance histórica de la representación que existía y estaba activada cuando nació la operación; una revocación/reemplazo ocurrido durante la consulta de numeración falla cerrado antes de `FECAESolicitar`.
 
 La identidad durable es `consumerId + contextId + environment + representedCuit + pointOfSale + tipoComprobante` y snapshot de `assignmentRevision`. La clave idempotente incorpora consumidor, contexto, CUIT y PV. La serie fiscal continúa siendo `environment + representedCuit + pointOfSale + tipoComprobante`, incluso si varios contextos comparten identidad fiscal.
 
