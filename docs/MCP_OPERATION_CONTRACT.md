@@ -20,7 +20,7 @@ La reserva de numeración queda por `(ambiente, CUIT representado, PV, tipo)` y 
 
 `consultar_operacion` acepta un `operationId` o la `idempotencyKey` junto con la representación autorizada. `reconciliar_operacion` no emite ni reserva números: en `Submitting`/`Uncertain` consulta el número histórico con `FECompConsultar`, compara evidencia y recupera sólo ante equivalencia estricta. No se usa `FECAESolicitar` durante reconciliación.
 
-Los estados `Authorized`, `FiscalRejected`, `Created`, `NumberAssigned`, `Submitting` y `Uncertain` retienen las reglas documentadas en `docs/MCP_IDEMPOTENCY.md` y `docs/WSFE_RECONCILIATION.md`. El PDF es posterior al CAE; un fallo documental no causa reemisión.
+Los estados `Authorized`, `FiscalRejected`, `Created`, `NumberAssigned`, `Submitting`, `Uncertain` y `AbandonedBeforeSubmission` retienen las reglas documentadas en `docs/MCP_IDEMPOTENCY.md` y `docs/WSFE_RECONCILIATION.md`. `AbandonedBeforeSubmission` es terminal y demuestra únicamente que la operación fue cerrada antes de persistir `Submitting`; conserva número si ya había sido reservado, consume definitivamente la idempotency key y no equivale a un rechazo fiscal. El PDF es posterior al CAE; un fallo documental no causa reemisión.
 
 ## Administración y descubrimiento
 
