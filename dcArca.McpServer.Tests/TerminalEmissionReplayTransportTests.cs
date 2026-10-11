@@ -143,6 +143,182 @@ public sealed class TerminalEmissionReplayTransportTests : IClassFixture<WebAppl
         Assert.Equal(0, _resolver.WsfeCalls);
     }
 
+    [Fact]
+    public async Task TerminalSameKey_DifferentRequest_DevuelveConflictoAntesDeAutorizacionActual()
+    {
+        var request = Request();
+        const string idempotencyKey = "terminal-conflict";
+        await SeedAsync(
+            idempotencyKey,
+            request,
+            EmissionIdempotencyState.Authorized,
+            AuthorizedResponse(request));
+
+        using var client = _factory.CreateClient();
+        var response = await client.SendAsync(JsonRpc("tools/call", new
+        {
+            name = "emitir_comprobante_avanzado",
+            arguments = new
+            {
+                factura = new
+                {
+                    tipoComprobante = "FacturaB",
+                    concepto = "Productos",
+                    cuitReceptor = RepresentedCuit,
+                    tipoDocReceptor = 80,
+                    condicionIvaReceptor = "ResponsableInscripto",
+                    importeNeto = 200m,
+                    importeIva = 42m,
+                    importeTotal = 242m,
+                    alicuotaIva = "Veintiuno",
+                    monedaId = "PES",
+                    monedaCotizacion = 1m,
+                    fechaComprobante = "20261011"
+                },
+                idempotencyKey,
+                contextId = ContextId,
+                representedCuit = RepresentedCuit,
+                pointOfSale = PointOfSale
+            }
+        }));
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("IDEMPOTENCY_KEY_REUSED", body, StringComparison.Ordinal);
+        Assert.Equal(0, _resolver.CurrentEmissionResolveCalls);
+        Assert.Equal(1, _resolver.HistoricalEmissionAuthorizeCalls);
+        Assert.Equal(0, _resolver.WsfeCalls);
+    }
+
+    [Fact]
+    public async Task UnknownKey_ActionRequired_SigueBloqueadoComoTrabajoNuevo()
+    {
+        using var client = _factory.CreateClient();
+        var response = await client.SendAsync(JsonRpc("tools/call", new
+        {
+            name = "emitir_comprobante_avanzado",
+            arguments = new
+            {
+                factura = new
+                {
+                    tipoComprobante = "FacturaB",
+                    concepto = "Productos",
+                    cuitReceptor = RepresentedCuit,
+                    tipoDocReceptor = 80,
+                    condicionIvaReceptor = "ResponsableInscripto",
+                    importeNeto = 100m,
+                    importeIva = 21m,
+                    importeTotal = 121m,
+                    alicuotaIva = "Veintiuno",
+                    monedaId = "PES",
+                    monedaCotizacion = 1m,
+                    fechaComprobante = "20261011"
+                },
+                idempotencyKey = "unknown-action-required",
+                contextId = ContextId,
+                representedCuit = RepresentedCuit,
+                pointOfSale = PointOfSale
+            }
+        }));
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("FISCAL_REPRESENTATION_FORBIDDEN", body, StringComparison.Ordinal);
+        Assert.Equal(1, _resolver.CurrentEmissionResolveCalls);
+        Assert.Equal(0, _resolver.HistoricalEmissionAuthorizeCalls);
+        Assert.Equal(0, _resolver.WsfeCalls);
+    }
+
+    [Fact]
+    public async Task UncertainSameKey_ActionRequired_DevuelveEstadoDurableSinReemitir()
+    {
+        var request = Request();
+        const string idempotencyKey = "uncertain-action-required";
+        var uncertain = new dcFacturaResponse
+        {
+            Success = false,
+            NumeroComprobante = 123,
+            Codigo = "FECAE_OUTCOME_UNCERTAIN",
+            Mensaje = "Resultado incierto.",
+            EmissionOutcome = dcEmissionOutcome.Uncertain,
+            Errores = ["Resultado incierto."]
+        };
+        await SeedAsync(
+            idempotencyKey,
+            request,
+            EmissionIdempotencyState.Uncertain,
+            uncertain);
+
+        using var client = _factory.CreateClient();
+        var response = await client.SendAsync(JsonRpc("tools/call", new
+        {
+            name = "emitir_comprobante_avanzado",
+            arguments = new
+            {
+                factura = new
+                {
+                    tipoComprobante = "FacturaB",
+                    concepto = "Productos",
+                    cuitReceptor = RepresentedCuit,
+                    tipoDocReceptor = 80,
+                    condicionIvaReceptor = "ResponsableInscripto",
+                    importeNeto = 100m,
+                    importeIva = 21m,
+                    importeTotal = 121m,
+                    alicuotaIva = "Veintiuno",
+                    monedaId = "PES",
+                    monedaCotizacion = 1m,
+                    fechaComprobante = "20261011"
+                },
+                idempotencyKey,
+                contextId = ContextId,
+                representedCuit = RepresentedCuit,
+                pointOfSale = PointOfSale
+            }
+        }));
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("FECAE_OUTCOME_UNCERTAIN", body, StringComparison.Ordinal);
+        Assert.Contains("reconcile", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, _resolver.CurrentEmissionResolveCalls);
+        Assert.Equal(1, _resolver.HistoricalEmissionAuthorizeCalls);
+        Assert.Equal(0, _resolver.WsfeCalls);
+    }
+
+    private async Task SeedAsync(
+        string idempotencyKey,
+        dcFacturaRequest request,
+        EmissionIdempotencyState state,
+        dcFacturaResponse response)
+    {
+        var identity = new FiscalOperationIdentity(
+            ConsumerId,
+            ContextId,
+            "homologacion",
+            RepresentedCuit,
+            PointOfSale,
+            (int)dcTipoComprobante.FacturaB,
+            1,
+            "test-credential-1");
+        var keyHash = EmissionRequestFingerprint.OperationKeyHash(
+            ConsumerId,
+            ContextId,
+            RepresentedCuit,
+            PointOfSale,
+            idempotencyKey);
+        var created = await _store.GetOrCreateAsync(
+            keyHash,
+            EmissionRequestFingerprint.RequestHash(request),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            identity,
+            StoredFiscalEvidence.FromRequest(request));
+        await _store.SaveAsync(created with
+        {
+            NumeroComprobante = 123,
+            State = state,
+            FiscalResult = StoredFiscalResult.FromResponse(response),
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+    }
+
     private static dcFacturaRequest Request() => new()
     {
         TipoComprobante = dcTipoComprobante.FacturaB,
