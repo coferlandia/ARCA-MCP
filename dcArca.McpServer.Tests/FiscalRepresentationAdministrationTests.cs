@@ -36,6 +36,71 @@ public sealed class FiscalRepresentationAdministrationTests
     }
 
     [Fact]
+    public async Task RegistroYSeleccionDelMismoTargetSonIdempotentes()
+    {
+        using var temp = new TempCatalog();
+        var catalog = new FileSystemFiscalTechnicalContextStore(temp.Path);
+        await catalog.AddContextAsync(new FiscalTechnicalContextRecord(
+            "operator-homo", "homologacion", FiscalContextOperationalState.Disabled, 1, []));
+        var administration = new FiscalRepresentationAdministration(
+            catalog, new NoRemoteMaterializer(), new NoRemoteClientFactory());
+        var principal = Principal("admin", "arca:administrar", true);
+
+        var first = await administration.RegisterCandidateAsync(
+            principal, "operator-homo", "consumer-a", 20123456786, default);
+        var repeated = await administration.RegisterCandidateAsync(
+            principal, "operator-homo", "consumer-a", 20123456786, default);
+
+        Assert.Equal(first.CreatedAt, repeated.CreatedAt);
+        Assert.Single((await catalog.ListRepresentationsAsync("operator-homo"))
+            .Where(x => x.ConsumerId == "consumer-a" && x.RepresentedCuit == 20123456786));
+
+        var selected = await administration.SelectPointOfSaleAsync(
+            principal, "operator-homo", "consumer-a", 20123456786, 7, default);
+        var selectedAgain = await administration.SelectPointOfSaleAsync(
+            principal, "operator-homo", "consumer-a", 20123456786, 7, default);
+        var registerAfterSelection = await administration.RegisterCandidateAsync(
+            principal, "operator-homo", "consumer-a", 20123456786, default);
+
+        Assert.Equal(7, selected.PointOfSale);
+        Assert.Equal(selected.CreatedAt, selectedAgain.CreatedAt);
+        Assert.Equal(7, registerAfterSelection.PointOfSale);
+        Assert.Single((await catalog.ListRepresentationsAsync("operator-homo"))
+            .Where(x => x.ConsumerId == "consumer-a" && x.RepresentedCuit == 20123456786));
+    }
+
+    [Fact]
+    public async Task RegistroYSeleccionConcurrentesConvergenEnUnaRepresentacion()
+    {
+        using var temp = new TempCatalog();
+        var catalog = new FileSystemFiscalTechnicalContextStore(temp.Path);
+        await catalog.AddContextAsync(new FiscalTechnicalContextRecord(
+            "operator-homo", "homologacion", FiscalContextOperationalState.Disabled, 1, []));
+        var administration = new FiscalRepresentationAdministration(
+            catalog, new NoRemoteMaterializer(), new NoRemoteClientFactory());
+        var principal = Principal("admin", "arca:administrar", true);
+
+        await Task.WhenAll(
+            administration.RegisterCandidateAsync(
+                principal, "operator-homo", "consumer-a", 20123456786, default),
+            administration.RegisterCandidateAsync(
+                principal, "operator-homo", "consumer-a", 20123456786, default));
+
+        await Task.WhenAll(
+            administration.SelectPointOfSaleAsync(
+                principal, "operator-homo", "consumer-a", 20123456786, 7, default),
+            administration.SelectPointOfSaleAsync(
+                principal, "operator-homo", "consumer-a", 20123456786, 7, default));
+
+        var records = (await catalog.ListRepresentationsAsync("operator-homo"))
+            .Where(x => x.ConsumerId == "consumer-a" && x.RepresentedCuit == 20123456786)
+            .ToArray();
+        Assert.Single(records);
+        Assert.Equal(7, records[0].PointOfSale);
+        Assert.Equal(FiscalRepresentationStatus.Pending, records[0].Status);
+    }
+
+    [Fact]
     public async Task DescubrimientoRequiereCandidatoDelConsumidorAntesDeUsarLaCredencial()
     {
         using var temp = new TempCatalog();
