@@ -61,7 +61,8 @@ public sealed class FiscalRepresentationAdministration
         DemandAdministrator(principal, contextId);
         var registrations = await _catalog.ListRepresentationsAsync(contextId, cancellationToken);
         if (!registrations.Any(x => x.ConsumerId == consumerId && x.RepresentedCuit == representedCuit &&
-            x.Status is FiscalRepresentationStatus.Pending or FiscalRepresentationStatus.Verified or FiscalRepresentationStatus.Active))
+            x.Status is FiscalRepresentationStatus.Pending or FiscalRepresentationStatus.Verified
+                or FiscalRepresentationStatus.Active or FiscalRepresentationStatus.ActionRequired))
             throw new FiscalContextAccessException("FISCAL_REPRESENTATION_CANDIDATE_REQUIRED",
                 "No existe representación candidata autorizada para este consumidor/CUIT.");
 
