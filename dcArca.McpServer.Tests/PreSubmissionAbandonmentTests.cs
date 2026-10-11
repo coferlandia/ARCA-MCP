@@ -71,6 +71,38 @@ public sealed class PreSubmissionAbandonmentTests
     }
 
     [Fact]
+    public async Task ReservaCreadaEntreObservacionYPersistencia_AbandonoConservaNumero()
+    {
+        using var temp = new TempDirectory();
+        var durableStore = new FileSystemEmissionIdempotencyStore(temp.Path);
+        using var coordinator = new FileSystemFiscalSeriesCoordinator(temp.Path);
+        await coordinator.InitializeAsync(durableStore);
+        var identity = Identity();
+        var key = new string('a', 64);
+        var request = Request();
+        await durableStore.GetOrCreateAsync(
+            key,
+            EmissionRequestFingerprint.RequestHash(request),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            identity,
+            StoredFiscalEvidence.FromRequest(request));
+
+        var pausingStore = new PausingAbandonStore(durableStore);
+        var service = new PreSubmissionAbandonmentService(pausingStore, coordinator);
+        var abandon = service.AbandonAsync(key, "admin-test", "race_recovery");
+
+        await pausingStore.AbandonEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await coordinator.ReserveAsync(identity, key, 31);
+        pausingStore.ResumeAbandon.TrySetResult();
+
+        var result = await abandon;
+
+        Assert.Equal(EmissionIdempotencyState.AbandonedBeforeSubmission, result.Operation.State);
+        Assert.Equal(31, result.Operation.NumeroComprobante);
+        Assert.Null(await coordinator.GetActiveAsync(identity));
+    }
+
+    [Fact]
     public async Task RepetirAbandono_EsIdempotenteYConservaAuditoriaOriginal()
     {
         using var temp = new TempDirectory();
@@ -243,6 +275,63 @@ public sealed class PreSubmissionAbandonmentTests
         MonedaCotizacion = 1m,
         FechaComprobante = "20261011"
     };
+
+    private sealed class PausingAbandonStore : IEmissionIdempotencyStore
+    {
+        private readonly IEmissionIdempotencyStore _inner;
+        public TaskCompletionSource AbandonEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ResumeAbandon { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public PausingAbandonStore(IEmissionIdempotencyStore inner)
+            => _inner = inner;
+
+        public Task EnsureContextAsync(
+            FiscalContextDescriptor context,
+            CancellationToken cancellationToken = default)
+            => _inner.EnsureContextAsync(context, cancellationToken);
+
+        public Task<EmissionIdempotencyRecord> GetOrCreateAsync(
+            string keyHash,
+            string requestHash,
+            int requestCanonicalizationVersion,
+            FiscalOperationIdentity identity,
+            StoredFiscalEvidence fiscalEvidence,
+            CancellationToken cancellationToken = default)
+            => _inner.GetOrCreateAsync(
+                keyHash,
+                requestHash,
+                requestCanonicalizationVersion,
+                identity,
+                fiscalEvidence,
+                cancellationToken);
+
+        public Task<EmissionIdempotencyRecord?> GetAsync(
+            string keyHash,
+            CancellationToken cancellationToken = default)
+            => _inner.GetAsync(keyHash, cancellationToken);
+
+        public Task SaveAsync(
+            EmissionIdempotencyRecord record,
+            CancellationToken cancellationToken = default)
+            => _inner.SaveAsync(record, cancellationToken);
+
+        public async Task<EmissionIdempotencyRecord> AbandonBeforeSubmissionAsync(
+            string keyHash,
+            long? reservedNumber,
+            PreSubmissionAbandonmentAudit audit,
+            CancellationToken cancellationToken = default)
+        {
+            AbandonEntered.TrySetResult();
+            await ResumeAbandon.Task.WaitAsync(cancellationToken);
+            return await _inner.AbandonBeforeSubmissionAsync(
+                keyHash,
+                reservedNumber,
+                audit,
+                cancellationToken);
+        }
+    }
 
     private sealed class TempDirectory : IDisposable
     {
