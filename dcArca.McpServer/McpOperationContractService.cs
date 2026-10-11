@@ -441,9 +441,25 @@ public sealed class McpOperationContractService
         CancellationToken cancellationToken)
     {
         if (!IsTerminal(record.State)) return;
-        var active = await _seriesCoordinator.GetActiveAsync(record.Identity, cancellationToken);
-        if (active is not null && string.Equals(active.OwnerKeyHash, record.KeyHash, StringComparison.Ordinal))
-            await _seriesCoordinator.ReleaseAsync(record.Identity, record.KeyHash, cancellationToken);
+        try
+        {
+            // ReleaseAsync performs the owner check while holding the coordinator's
+            // series lock. Avoid a separate GetActive check: a newer owner may appear
+            // between observation and deletion.
+            await _seriesCoordinator.ReleaseAsync(
+                record.Identity,
+                record.KeyHash,
+                cancellationToken);
+        }
+        catch (FiscalSeriesBlockedException exception)
+            when (string.Equals(
+                exception.Message,
+                "SERIES_RESERVATION_OWNER_MISMATCH",
+                StringComparison.Ordinal))
+        {
+            // A newer owner already controls the series. The terminal replay must not
+            // delete it and must not fail merely because cleanup lost this race.
+        }
     }
 
     private async Task<(string ContextId, EmissionIdempotencyRecord? Record)> LocateAsync(
