@@ -359,7 +359,23 @@ public sealed class McpOperationContractService
             return new McpExistingEmissionReplay(record, conflict);
         }
 
-        if (IsTerminal(record.State))
+        if (record.State == EmissionIdempotencyState.AbandonedBeforeSubmission)
+        {
+            await ReleaseReservationIfOwnedAsync(record, cancellationToken);
+            var response = new dcFacturaResponse
+            {
+                Success = false,
+                NumeroComprobante = record.NumeroComprobante ?? 0,
+                Codigo = "OPERATION_ABANDONED_BEFORE_SUBMISSION",
+                Mensaje = "La operación fue abandonada explícitamente antes del envío fiscal; use una nueva idempotencyKey para una nueva intención.",
+                EmissionOutcome = dcEmissionOutcome.FailedBeforeSubmission,
+                Errores = ["La operación durable está cerrada sin side effect fiscal."]
+            };
+            DecorateStoredResponse(record, response);
+            return new McpExistingEmissionReplay(record, response);
+        }
+
+        if (IsFiscalTerminal(record.State))
         {
             await ReleaseReservationIfOwnedAsync(record, cancellationToken);
             var response = record.FiscalResult?.ToResponse()
@@ -742,6 +758,11 @@ public sealed class McpOperationContractService
             null);
 
     private static bool IsTerminal(EmissionIdempotencyState state)
+        => state is EmissionIdempotencyState.Authorized
+            or EmissionIdempotencyState.FiscalRejected
+            or EmissionIdempotencyState.AbandonedBeforeSubmission;
+
+    private static bool IsFiscalTerminal(EmissionIdempotencyState state)
         => state is EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected;
 
     private static string[] AllowedActions(EmissionIdempotencyRecord record)
@@ -753,6 +774,7 @@ public sealed class McpOperationContractService
             EmissionIdempotencyState.Uncertain => ["consult", "reconcile", "manual-review"],
             EmissionIdempotencyState.Authorized => ["consult", "render-pdf"],
             EmissionIdempotencyState.FiscalRejected => ["consult", "correct-with-new-operation"],
+            EmissionIdempotencyState.AbandonedBeforeSubmission => ["consult", "create-new-operation"],
             _ => Array.Empty<string>()
         };
 
@@ -765,6 +787,7 @@ public sealed class McpOperationContractService
             EmissionIdempotencyState.Uncertain => "El resultado fiscal no está demostrado; la serie permanece protegida hasta reconciliación o revisión manual.",
             EmissionIdempotencyState.Authorized => "La operación está autorizada y puede consultarse o regenerar su documento.",
             EmissionIdempotencyState.FiscalRejected => "La operación fue rechazada fiscalmente; corregir requiere una nueva operación.",
+            EmissionIdempotencyState.AbandonedBeforeSubmission => "La operación fue abandonada antes del envío fiscal; la key queda consumida y una nueva intención requiere otra operación.",
             _ => "Estado durable disponible."
         };
 
