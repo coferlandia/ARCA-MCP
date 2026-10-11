@@ -156,7 +156,7 @@ public sealed class McpFiscalErrorBoundaryTests : IClassFixture<WebApplicationFa
             representedCuit = RepresentedCuit
         }, grant: $"{ContextId}|administrar");
 
-        Assert.DoesNotContain("\\"isError\\":true", duplicate, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"isError\":true", duplicate, StringComparison.Ordinal);
     }
 
     [Theory]
