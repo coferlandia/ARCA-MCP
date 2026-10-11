@@ -251,7 +251,9 @@ public sealed class FileSystemFiscalSeriesCoordinator : IFiscalSeriesCoordinator
             if (!string.Equals(owner.Identity.SeriesKey, reservation.SeriesKey, StringComparison.Ordinal))
                 throw new InvalidDataException("SERIES_RESERVATION_OPERATION_MISMATCH");
 
-            if (owner.State is EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected)
+            if (owner.State is EmissionIdempotencyState.Authorized
+                or EmissionIdempotencyState.FiscalRejected
+                or EmissionIdempotencyState.AbandonedBeforeSubmission)
             {
                 File.Delete(path);
                 continue;
