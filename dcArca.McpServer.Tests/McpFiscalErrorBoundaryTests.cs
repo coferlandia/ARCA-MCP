@@ -147,7 +147,7 @@ public sealed class McpFiscalErrorBoundaryTests : IClassFixture<WebApplicationFa
             consumerId = ConsumerId,
             representedCuit = RepresentedCuit
         }, grant: $"{ContextId}|administrar");
-        Assert.DoesNotContain(""isError":true", first, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"isError\":true", first, StringComparison.Ordinal);
 
         var duplicate = await CallAsync(client, "arca:administrar", "registrar_representacion_fiscal", new
         {
