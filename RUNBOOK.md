@@ -148,7 +148,7 @@ docker exec dcarca-mcpserver curl -fsS http://127.0.0.1:8080/health/ready
 
 Esperado: contenedor `healthy`, `{"status":"alive"}`, `{"status":"ready"}`. La advertencia sobre Docker Bake/buildx no fue bloqueante. Los avisos ASP.NET DataProtection observados no bloquearon el arranque y deberán evaluarse si el proceso necesita persistir esas claves.
 
-No usar `docker compose down -v`. No recrear con `docker run` manual: se perderían los montajes y la definición real de redes/Traefik. Para rollback binario revisar compatibilidad de schema; no restaurar `/data` antiguo automáticamente.
+No usar `docker compose down -v`. No recrear con `docker run` manual: se perderían los montajes y la definición real de redes/Traefik. Para rollback binario revisar compatibilidad de schema; no restaurar `/data` antiguo automáticamente. Las operaciones nuevas con provenance se escriben en schema v3 y un binario anterior debe fallar cerrado al encontrarlas; no bajar manualmente `SchemaVersion` ni quitar provenance para forzar compatibilidad.
 
 ## 6. Provisionamiento V2 (homologación actual)
 

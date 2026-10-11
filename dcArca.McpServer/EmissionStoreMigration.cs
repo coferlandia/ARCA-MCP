@@ -226,10 +226,7 @@ public static class EmissionStoreMigration
             {
                 if (document.RootElement.TryGetProperty("SchemaVersion", out var schemaElement))
                 {
-                    var schemaVersion = schemaElement.GetInt32();
-                    if (schemaVersion != FileSystemEmissionIdempotencyStore.CurrentSchemaVersion)
-                        throw new InvalidDataException($"STORE_SCHEMA_UNSUPPORTED:{schemaVersion}");
-
+                    _ = schemaElement.GetInt32();
                     var current = JsonSerializer.Deserialize<EmissionIdempotencyRecord>(json)
                         ?? throw new InvalidDataException($"Registro vacío: {Path.GetFileName(path)}");
                     FileSystemEmissionIdempotencyStore.ValidateRecord(current);

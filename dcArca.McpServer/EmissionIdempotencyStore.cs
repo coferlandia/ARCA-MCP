@@ -141,7 +141,9 @@ public interface IEmissionIdempotencyStore
 
 public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencyStore
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int LegacyOperationSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
+    public const int CurrentContextSchemaVersion = 2;
     private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(25);
     private readonly string _directory;
 
@@ -197,7 +199,7 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
         }
 
         WriteAtomic(path, new FiscalContextManifest(
-            CurrentSchemaVersion,
+            CurrentContextSchemaVersion,
             context.ContextId,
             context.Environment,
             context.Cuit,
@@ -381,8 +383,11 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
     public static void ValidateRecord(EmissionIdempotencyRecord record)
     {
         if (record is null) throw new InvalidDataException("Registro de idempotencia nulo.");
-        if (record.SchemaVersion != CurrentSchemaVersion)
+        if (record.SchemaVersion is not (LegacyOperationSchemaVersion or CurrentSchemaVersion))
             throw new InvalidDataException($"STORE_SCHEMA_UNSUPPORTED:{record.SchemaVersion}");
+        if (record.SchemaVersion == LegacyOperationSchemaVersion
+            && record.Identity.RepresentationProvenance is not null)
+            throw new InvalidDataException("STORE_SCHEMA_PROVENANCE_REQUIRES_V3");
         ValidateHash(record.KeyHash, nameof(record.KeyHash));
         ValidateHash(record.RequestHash, nameof(record.RequestHash));
         if (record.RequestCanonicalizationVersion <= 0)
@@ -410,7 +415,7 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
 
     private static void ValidateContextManifest(FiscalContextManifest manifest)
     {
-        if (manifest.SchemaVersion != CurrentSchemaVersion)
+        if (manifest.SchemaVersion != CurrentContextSchemaVersion)
             throw new InvalidDataException($"CONTEXT_SCHEMA_UNSUPPORTED:{manifest.SchemaVersion}");
         ValidateContext(new FiscalContextDescriptor(
             manifest.ContextId,

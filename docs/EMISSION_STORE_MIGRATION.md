@@ -1,6 +1,8 @@
 # Migración del store idempotente de emisiones
 
-El schema versionado de operaciones fiscales incorpora identidad durable de consumidor y contexto fiscal. Un store legacy no se interpreta usando silenciosamente la configuración actual: debe mapearse de forma explícita antes de habilitar el escritor.
+El schema versionado de operaciones fiscales incorpora identidad durable de consumidor y contexto fiscal. Desde el hardening posterior a #62, las operaciones nuevas se escriben en **schema v3**, que hace durable la provenance de la representación fiscal que admitió el request. El lector actual conserva compatibilidad con operaciones **schema v2 sin provenance**; un registro v2 que contenga provenance es inválido, porque esa combinación permitiría que un binario anterior ignore silenciosamente el binding. Los manifests de contexto bajo `.contexts` continúan en schema v2 y tienen versionado independiente.
+
+Un store legacy sin `SchemaVersion` no se interpreta usando silenciosamente la configuración actual: debe mapearse de forma explícita antes de habilitar el escritor.
 
 ## Precondiciones
 
@@ -66,9 +68,9 @@ Una segunda ejecución sobre un store ya migrado es idempotente: valida el mappi
 
 ## Rollback
 
-Rollback sólo con el escritor detenido. Si todavía no hubo nuevas operaciones en schema v2, retirar el directorio actual y restaurar el backup por rename.
+Rollback sólo con el escritor detenido. La versión actual puede **leer** operaciones schema v2 históricas sin provenance, pero toda operación nueva o reescrita se persiste como schema v3. Un binario anterior a este cambio debe rechazar schema v3; esa incompatibilidad es deliberada para impedir que ignore `RepresentationProvenance`.
 
-Si hubo cualquier side effect fiscal posterior al backup, no hacer downgrade ciego: primero identificar y conciliar esas operaciones. Una versión antigua no debe arrancarse sobre schema v2 ni interpretar el store nuevo como vacío.
+Si todavía no hubo nuevas operaciones ni reescrituras en schema v3, puede evaluarse restaurar el backup por rename siguiendo el procedimiento de recuperación. Si existe cualquier registro v3 o hubo cualquier side effect fiscal posterior al backup, no hacer downgrade ciego: primero identificar y conciliar esas operaciones. Nunca editar `SchemaVersion` manualmente ni eliminar `RepresentationProvenance` para forzar un rollback.
 
 ## Cambio de credencial
 
