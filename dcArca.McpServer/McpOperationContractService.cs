@@ -361,6 +361,7 @@ public sealed class McpOperationContractService
 
         if (IsTerminal(record.State))
         {
+            await ReleaseReservationIfOwnedAsync(record, cancellationToken);
             var response = record.FiscalResult?.ToResponse()
                 ?? throw new InvalidDataException("Registro terminal sin resultado fiscal durable.");
             DecorateStoredResponse(record, response);
