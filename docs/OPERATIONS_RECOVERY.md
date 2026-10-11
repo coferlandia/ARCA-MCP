@@ -148,6 +148,8 @@ Ante `Uncertain`, `RECONCILIATION_MISMATCH` o `RECONCILIATION_EVIDENCE_INSUFFICI
 4. mantener bloqueada la serie si no se demuestra equivalencia;
 5. escalar manualmente cuando la credencial histórica esté revocada/expirada o la evidencia sea insuficiente.
 
+Para una operación que **no** cruzó `Submitting`, existe una transición explícita de abandono pre-submission: sólo `Created` o `NumberAssigned` pueden pasar a `AbandonedBeforeSubmission`. La transición conserva el número si ya estaba reservado, registra una referencia de actor, reason code y timestamp, se persiste antes de liberar la reserva y es idempotente. Nunca aplica a `Submitting` ni `Uncertain`.
+
 Acciones prohibidas como recuperación automática:
 
 - borrar el JSON idempotente;
