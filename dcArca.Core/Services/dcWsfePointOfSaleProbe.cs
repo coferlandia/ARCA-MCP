@@ -147,6 +147,7 @@ public sealed class dcWsfePointOfSaleProbe
                 binding.CredentialId,
                 assignment.CredentialId,
                 StringComparison.Ordinal)
+            || !authService.MatchesHostBinding(binding, "wsfe")
             || !string.Equals(
                 binding.Config.Environment,
                 context.Environment,
