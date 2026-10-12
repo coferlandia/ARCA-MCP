@@ -66,60 +66,6 @@ public class WsfePointOfSaleDiscoveryTests
     }
 
     [Fact]
-    public async Task ProbeBound_AuthenticadorDeOtraCredencial_FallaAntesDeRed()
-    {
-        var context = new FiscalTechnicalContextRecord(
-            "operator-homo",
-            "homologacion",
-            FiscalContextOperationalState.Active,
-            1,
-            [
-                new CredentialAssignmentRecord(
-                    "rev-1",
-                    "cred-a",
-                    CredentialAssignmentStatus.Active,
-                    "validated",
-                    DateTimeOffset.UtcNow.AddMinutes(-2),
-                    DateTimeOffset.UtcNow.AddMinutes(-2),
-                    DateTimeOffset.UtcNow.AddMinutes(-1),
-                    "admin")
-            ]);
-        var assignment = context.ActiveAssignment!;
-        var binding = new FiscalCredentialHostBinding(
-            "cred-a",
-            "homologacion:cred-a",
-            new dcArcaConfig
-            {
-                Environment = "homologacion",
-                Cuit = "20123456786",
-                PuntoVenta = 7,
-                CertificatePath = "cred-a.pfx",
-                CertificatePassword = "secret-a",
-                WsaaUrl = "https://wsaa.example.invalid",
-                WsfeUrl = "https://wsfe.example.invalid",
-                PadronUrl = "https://padron.example.invalid"
-            });
-        var wrongAuthenticator = new dcArcaAuthService(
-            "https://wsaa.example.invalid",
-            "cred-b.pfx",
-            "secret-b",
-            "homologacion:cred-b",
-            serviceName: "wsfe");
-
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            new dcWsfePointOfSaleProbe().ProbeBoundAsync(
-                context,
-                assignment,
-                20123456786,
-                7,
-                binding,
-                wrongAuthenticator,
-                new HttpClient(new ThrowIfCalledHandler())));
-
-        Assert.Equal("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH", error.Message);
-    }
-
-    [Fact]
     public void PvManual_EsPermitidoSoloPara602SinResultados()
     {
         var listing = dcWsfePointOfSaleProbe.ParseListingResponse(
@@ -156,14 +102,6 @@ public class WsfePointOfSaleDiscoveryTests
         var result = dcWsfePointOfSaleProbe.EvaluatePointOfSale(77, listing);
         Assert.False(result.CanActivate);
         Assert.Equal("POINT_OF_SALE_BLOCKED", result.Code);
-    }
-
-    private sealed class ThrowIfCalledHandler : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request,
-            CancellationToken cancellationToken)
-            => throw new InvalidOperationException("HTTP_SHOULD_NOT_BE_CALLED");
     }
 
     private static string Envelope(string body) =>

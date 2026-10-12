@@ -237,6 +237,8 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
         Assert.Contains(typeof(FiscalTechnicalContextRecord), boundParameterTypes);
         Assert.Contains(typeof(CredentialAssignmentRecord), boundParameterTypes);
         Assert.Contains(typeof(FiscalCredentialHostBinding), boundParameterTypes);
+        Assert.DoesNotContain(typeof(dcArcaAuthService), boundParameterTypes);
+        Assert.DoesNotContain(typeof(IWsaaTokenStore), boundParameterTypes);
     }
 
     [Fact]

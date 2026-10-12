@@ -95,7 +95,6 @@ public sealed class FiscalRepresentationAdministration
                 representedCuit,
                 pointOfSale,
                 material.HostBinding,
-                material.WsfeAuth,
                 _clients.CreateClient(nameof(FiscalAssignmentAuthorizationValidator)),
                 cancellationToken);
             lifecycle = await _lifecycle.ApplyAsync(

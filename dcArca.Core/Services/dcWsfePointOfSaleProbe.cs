@@ -120,14 +120,12 @@ public sealed class dcWsfePointOfSaleProbe
         long representedCuit,
         int pointOfSale,
         FiscalCredentialHostBinding binding,
-        dcArcaAuthService authService,
         HttpClient httpClient,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(assignment);
         ArgumentNullException.ThrowIfNull(binding);
-        ArgumentNullException.ThrowIfNull(authService);
         ArgumentNullException.ThrowIfNull(httpClient);
 
         var activeAssignment = context.ActiveAssignment;
@@ -147,7 +145,6 @@ public sealed class dcWsfePointOfSaleProbe
                 binding.CredentialId,
                 assignment.CredentialId,
                 StringComparison.Ordinal)
-            || !authService.MatchesHostBinding(binding, "wsfe")
             || !string.Equals(
                 binding.Config.Environment,
                 context.Environment,
@@ -165,6 +162,12 @@ public sealed class dcWsfePointOfSaleProbe
             representedCuit,
             pointOfSale,
             assignment.AssignmentRevision);
+        var authService = new dcArcaAuthService(
+            binding.Config.WsaaUrl,
+            binding.Config.CertificatePath,
+            binding.Config.CertificatePassword,
+            binding.CacheIdentity,
+            serviceName: "wsfe");
         var result = await ProbeAsync(
             binding.Config,
             authService,
