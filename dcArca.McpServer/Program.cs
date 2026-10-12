@@ -28,6 +28,9 @@ if (builder.Environment.EnvironmentName == "Testing")
     recoveryDirectory ??= Path.Combine(testHostRoot, "recovery");
 }
 
+fiscalContextsDirectory =
+    FileSystemFiscalTechnicalContextStore.ResolveDirectoryPath(fiscalContextsDirectory);
+
 if (string.IsNullOrWhiteSpace(recoveryDirectory))
 {
     var dataRoot = string.IsNullOrWhiteSpace(emissionIdempotencyDirectory)

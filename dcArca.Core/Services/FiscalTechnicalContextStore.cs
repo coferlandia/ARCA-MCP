@@ -108,15 +108,21 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
 
     public FileSystemFiscalTechnicalContextStore(string? directory = null)
     {
-        var dir = string.IsNullOrWhiteSpace(directory)
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dcArca", "fiscal-contexts")
-            : Path.GetFullPath(directory);
+        var dir = ResolveDirectoryPath(directory);
         Directory.CreateDirectory(dir);
         TryHardenDirectory(dir);
         DirectoryPath = dir;
         _path = Path.Combine(dir, "fiscal-catalog-v2.json");
         _legacyPath = Path.Combine(dir, "contexts.json");
     }
+
+    public static string ResolveDirectoryPath(string? directory)
+        => string.IsNullOrWhiteSpace(directory)
+            ? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "dcArca",
+                "fiscal-contexts")
+            : Path.GetFullPath(directory);
 
     public async Task<IReadOnlyList<FiscalTechnicalContextRecord>> ListContextsAsync(CancellationToken cancellationToken = default)
         => (await ReadAsync(cancellationToken)).Contexts;

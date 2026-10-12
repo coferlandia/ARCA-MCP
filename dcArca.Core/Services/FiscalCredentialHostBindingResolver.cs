@@ -5,6 +5,8 @@ namespace dcArca.Core.Services;
 
 public sealed class FiscalCredentialHostBinding
 {
+    private readonly dcArcaConfig _config;
+
     internal FiscalCredentialHostBinding(
         string credentialId,
         string cacheIdentity,
@@ -12,12 +14,27 @@ public sealed class FiscalCredentialHostBinding
     {
         CredentialId = credentialId;
         CacheIdentity = cacheIdentity;
-        Config = config ?? throw new ArgumentNullException(nameof(config));
+        _config = Clone(config ?? throw new ArgumentNullException(nameof(config)));
     }
 
     public string CredentialId { get; }
     public string CacheIdentity { get; }
-    public dcArcaConfig Config { get; }
+
+    // Never expose the resolver-owned mutable configuration instance.
+    public dcArcaConfig Config => Clone(_config);
+
+    private static dcArcaConfig Clone(dcArcaConfig source)
+        => new()
+        {
+            Environment = source.Environment,
+            Cuit = source.Cuit,
+            CertificatePath = source.CertificatePath,
+            CertificatePassword = source.CertificatePassword,
+            WsaaUrl = source.WsaaUrl,
+            WsfeUrl = source.WsfeUrl,
+            PadronUrl = source.PadronUrl,
+            PuntoVenta = source.PuntoVenta
+        };
 }
 
 /// <summary>
