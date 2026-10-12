@@ -107,6 +107,62 @@ public class McpHealthTests : IClassFixture<WebApplicationFactory<Program>>, IDi
     }
 
     [Fact]
+    public async Task DirectorioDeCatalogoInvalido_KeepsLiveButReadyReturnsSafe503()
+    {
+        using var temp = new TempDirectory();
+        var notDirectory = System.IO.Path.Combine(temp.Path, "catalog-is-a-file");
+        await File.WriteAllTextAsync(notDirectory, "not a directory");
+
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("FiscalContexts:Directory", notDirectory);
+        });
+        var client = factory.CreateClient();
+
+        var live = await client.GetAsync("/health/live");
+        var ready = await client.GetAsync("/health/ready");
+        var body = await ready.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, live.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
+        Assert.Contains("FISCAL_CATALOG_UNREADABLE", body);
+        Assert.DoesNotContain(notDirectory, body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CatalogoVacioNoEsReadySiDirectorioNoEsProvisionable()
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        using var temp = new TempDirectory();
+        File.SetUnixFileMode(
+            temp.Path,
+            UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            using var factory = _factory.WithWebHostBuilder(builder =>
+            {
+                builder.UseSetting("FiscalContexts:Directory", temp.Path);
+            });
+            var client = factory.CreateClient();
+
+            var ready = await client.GetAsync("/health/ready");
+            var body = await ready.Content.ReadAsStringAsync();
+
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
+            Assert.Contains("FISCAL_CATALOG_UNREADABLE", body);
+            Assert.DoesNotContain(temp.Path, body, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.SetUnixFileMode(
+                temp.Path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
     public async Task EnvironmentReferenciadoSinConfig_Returns503()
     {
         using var temp = new TempDirectory();

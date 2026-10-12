@@ -104,6 +104,8 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
     private readonly string _path;
     private readonly string _legacyPath;
 
+    public string DirectoryPath { get; }
+
     public FileSystemFiscalTechnicalContextStore(string? directory = null)
     {
         var dir = string.IsNullOrWhiteSpace(directory)
@@ -111,6 +113,7 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
             : Path.GetFullPath(directory);
         Directory.CreateDirectory(dir);
         TryHardenDirectory(dir);
+        DirectoryPath = dir;
         _path = Path.Combine(dir, "fiscal-catalog-v2.json");
         _legacyPath = Path.Combine(dir, "contexts.json");
     }

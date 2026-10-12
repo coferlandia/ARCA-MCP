@@ -14,16 +14,13 @@ public sealed record FiscalLocalReadinessResult(
 public sealed class FiscalLocalReadinessValidator
 {
     private readonly IEmissionRecoveryGate _recoveryGate;
-    private readonly IFiscalTechnicalContextStore _catalog;
     private readonly IConfiguration _configuration;
 
     public FiscalLocalReadinessValidator(
         IEmissionRecoveryGate recoveryGate,
-        IFiscalTechnicalContextStore catalog,
         IConfiguration configuration)
     {
         _recoveryGate = recoveryGate;
-        _catalog = catalog;
         _configuration = configuration;
     }
 
@@ -47,9 +44,18 @@ public sealed class FiscalLocalReadinessValidator
                 block);
 
         IReadOnlyList<FiscalTechnicalContextRecord> contexts;
+        FileSystemFiscalTechnicalContextStore catalog;
         try
         {
-            contexts = await _catalog.ListContextsAsync(cancellationToken);
+            catalog = new FileSystemFiscalTechnicalContextStore(
+                _configuration["FiscalContexts:Directory"]);
+            contexts = await catalog.ListContextsAsync(cancellationToken);
+            if (contexts.Count == 0)
+                VerifyProvisionableCatalog(catalog.DirectoryPath);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
@@ -83,6 +89,35 @@ public sealed class FiscalLocalReadinessValidator
         }
 
         return new FiscalLocalReadinessResult(true);
+    }
+
+    private static void VerifyProvisionableCatalog(string directory)
+    {
+        var probe = Path.Combine(directory, ".readiness-write-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using (new FileStream(
+                probe,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 1,
+                FileOptions.DeleteOnClose))
+            {
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(probe))
+                    File.Delete(probe);
+            }
+            catch
+            {
+                // The readiness result is determined by the original write attempt.
+            }
+        }
     }
 
     private static FiscalLocalReadinessResult NotReady(string code)
