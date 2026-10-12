@@ -3,10 +3,22 @@ using Microsoft.Extensions.Configuration;
 
 namespace dcArca.Core.Services;
 
-public sealed record FiscalCredentialHostBinding(
-    string CredentialId,
-    string CacheIdentity,
-    dcArcaConfig Config);
+public sealed class FiscalCredentialHostBinding
+{
+    internal FiscalCredentialHostBinding(
+        string credentialId,
+        string cacheIdentity,
+        dcArcaConfig config)
+    {
+        CredentialId = credentialId;
+        CacheIdentity = cacheIdentity;
+        Config = config ?? throw new ArgumentNullException(nameof(config));
+    }
+
+    public string CredentialId { get; }
+    public string CacheIdentity { get; }
+    public dcArcaConfig Config { get; }
+}
 
 /// <summary>
 /// Resolves an opaque credential reference and a server-owned fiscal environment into an

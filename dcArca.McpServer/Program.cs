@@ -87,7 +87,10 @@ builder.Services.AddSingleton<FiscalRepresentationAdministration>();
 builder.Services.AddSingleton<PreSubmissionAbandonmentService>();
 builder.Services.AddSingleton<FiscalOperationAdministration>();
 builder.Services.AddSingleton<McpOperationContractService>();
-builder.Services.AddSingleton<FiscalLocalReadinessValidator>();
+builder.Services.AddSingleton(sp => new FiscalLocalReadinessValidator(
+    sp.GetRequiredService<IEmissionRecoveryGate>(),
+    fiscalContextsDirectory!,
+    builder.Configuration));
 
 builder.Services.AddSingleton<PdfDocumentRenderer>();
 builder.Services.AddSingleton<ObservablePdfDocumentRenderer>();

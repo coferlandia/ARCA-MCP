@@ -14,13 +14,18 @@ public sealed record FiscalLocalReadinessResult(
 public sealed class FiscalLocalReadinessValidator
 {
     private readonly IEmissionRecoveryGate _recoveryGate;
+    private readonly string _catalogDirectory;
     private readonly IConfiguration _configuration;
 
     public FiscalLocalReadinessValidator(
         IEmissionRecoveryGate recoveryGate,
+        string catalogDirectory,
         IConfiguration configuration)
     {
         _recoveryGate = recoveryGate;
+        _catalogDirectory = string.IsNullOrWhiteSpace(catalogDirectory)
+            ? throw new ArgumentException("El directorio de catálogo fiscal es obligatorio.", nameof(catalogDirectory))
+            : catalogDirectory;
         _configuration = configuration;
     }
 
@@ -47,8 +52,7 @@ public sealed class FiscalLocalReadinessValidator
         FileSystemFiscalTechnicalContextStore catalog;
         try
         {
-            catalog = new FileSystemFiscalTechnicalContextStore(
-                _configuration["FiscalContexts:Directory"]);
+            catalog = new FileSystemFiscalTechnicalContextStore(_catalogDirectory);
             contexts = await catalog.ListContextsAsync(cancellationToken);
             if (contexts.Count == 0)
                 VerifyProvisionableCatalog(catalog.DirectoryPath);

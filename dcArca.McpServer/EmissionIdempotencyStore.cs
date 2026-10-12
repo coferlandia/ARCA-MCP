@@ -503,6 +503,9 @@ public sealed class FileSystemEmissionIdempotencyStore : IEmissionIdempotencySto
         if (record.SchemaVersion == LegacyOperationSchemaVersion
             && record.Identity.RepresentationProvenance is not null)
             throw new InvalidDataException("STORE_SCHEMA_PROVENANCE_REQUIRES_V3");
+        if (record.SchemaVersion == ProvenanceOperationSchemaVersion
+            && record.Identity.RepresentationProvenance is null)
+            throw new InvalidDataException("STORE_SCHEMA_V3_REQUIRES_PROVENANCE");
         if (record.SchemaVersion < CurrentSchemaVersion
             && (record.State == EmissionIdempotencyState.AbandonedBeforeSubmission
                 || record.AbandonmentAudit is not null))
