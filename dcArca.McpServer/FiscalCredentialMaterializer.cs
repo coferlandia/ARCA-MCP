@@ -38,7 +38,8 @@ public sealed class FiscalCredentialMaterializer : IFiscalCredentialMaterializer
     {
         _bindingResolver = new FiscalCredentialHostBindingResolver(
             configuration,
-            new dcArcaConfig(), "__v2_no_fallback__");
+            new dcArcaConfig(),
+            FiscalCredentialHostBindingResolver.NoLegacyFallback);
         _logger = logger;
     }
 

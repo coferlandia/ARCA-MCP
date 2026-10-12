@@ -14,6 +14,8 @@ public sealed record FiscalCredentialHostBinding(
 /// </summary>
 public sealed class FiscalCredentialHostBindingResolver
 {
+    public const string NoLegacyFallback = "__v2_no_fallback__";
+
     private readonly IConfiguration _configuration;
     private readonly dcArcaConfig _legacyConfig;
     private readonly string _legacyEnvironment;
@@ -25,7 +27,12 @@ public sealed class FiscalCredentialHostBindingResolver
     {
         _configuration = configuration;
         _legacyConfig = legacyConfig;
-        _legacyEnvironment = FiscalEnvironmentId.Normalize(legacyEnvironment);
+        _legacyEnvironment = string.Equals(
+            legacyEnvironment,
+            NoLegacyFallback,
+            StringComparison.Ordinal)
+            ? NoLegacyFallback
+            : FiscalEnvironmentId.Normalize(legacyEnvironment);
     }
 
     public FiscalCredentialHostBinding Resolve(
