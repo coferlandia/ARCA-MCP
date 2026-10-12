@@ -429,7 +429,8 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
         FiscalRepresentationRecord representation,
         FiscalRepresentationProbeIdentity expectedIdentity)
     {
-        if (representation.CreatedAt != expectedIdentity.RepresentationCreatedAt)
+        if (!expectedIdentity.RepresentationCreatedAt.HasValue
+            || representation.CreatedAt != expectedIdentity.RepresentationCreatedAt.Value)
             throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
 
         if (representation.Status is not (

@@ -106,9 +106,19 @@ public class WsfePointOfSaleDiscoveryTests
 
         try
         {
+            var representation = new FiscalRepresentationRecord(
+                "operator-homo",
+                "consumer-a",
+                20123456786,
+                7,
+                FiscalRepresentationStatus.Pending,
+                DateTimeOffset.UtcNow.AddMinutes(-1),
+                "admin");
+
             var result = await new dcWsfePointOfSaleProbe().ProbeBoundAsync(
                 context,
                 assignment,
+                representation,
                 20123456786,
                 7,
                 binding,

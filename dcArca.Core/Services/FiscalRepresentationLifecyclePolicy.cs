@@ -20,7 +20,7 @@ public sealed record FiscalRepresentationProbeIdentity(
     long RepresentedCuit,
     int PointOfSale,
     string AssignmentRevision,
-    DateTimeOffset RepresentationCreatedAt);
+    DateTimeOffset? RepresentationCreatedAt = null);
 
 /// <summary>
 /// Canonical Core policy that converts a non-emitting point-of-sale probe into
@@ -64,7 +64,6 @@ public sealed class FiscalRepresentationLifecyclePolicy
             || string.IsNullOrWhiteSpace(identity.ContextId)
             || string.IsNullOrWhiteSpace(identity.Environment)
             || string.IsNullOrWhiteSpace(identity.AssignmentRevision)
-            || identity.RepresentationCreatedAt == default
             || probe.PointOfSale != identity.PointOfSale)
             throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
         if (probe.CheckedAt == default)
@@ -78,18 +77,23 @@ public sealed class FiscalRepresentationLifecyclePolicy
             cancellationToken)
             ?? throw new InvalidOperationException("FISCAL_REPRESENTATION_NOT_FOUND");
 
-        if (candidate.CreatedAt != identity.RepresentationCreatedAt)
+        if (identity.RepresentationCreatedAt.HasValue
+            && candidate.CreatedAt != identity.RepresentationCreatedAt.Value)
             throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
+
+        var effectiveIdentity = identity.RepresentationCreatedAt.HasValue
+            ? identity
+            : identity with { RepresentationCreatedAt = candidate.CreatedAt };
 
         if (!IsRevalidableStatus(candidate.Status))
             throw new InvalidOperationException("FISCAL_REPRESENTATION_STATE_INVALID");
 
         if (IsVerifiedActivation(probe) || IsManual602Activation(probe))
         {
-            var evidence = BuildEvidence(probe, identity);
+            var evidence = BuildEvidence(probe, effectiveIdentity);
             var active = await _store.ActivateRepresentationFromProbeAsync(
                 consumerId,
-                identity,
+                effectiveIdentity,
                 evidence,
                 actor,
                 cancellationToken);
@@ -106,7 +110,7 @@ public sealed class FiscalRepresentationLifecyclePolicy
             var actionRequired =
                 await _store.MarkRepresentationActionRequiredFromProbeAsync(
                     consumerId,
-                    identity,
+                    effectiveIdentity,
                     probe.Code,
                     actor,
                     cancellationToken);
@@ -130,11 +134,11 @@ public sealed class FiscalRepresentationLifecyclePolicy
             ?? throw new InvalidOperationException("ACTIVE_ASSIGNMENT_REQUIRED");
         if (!string.Equals(
                 context.Environment,
-                identity.Environment,
+                effectiveIdentity.Environment,
                 StringComparison.Ordinal)
             || !string.Equals(
                 assignment.AssignmentRevision,
-                identity.AssignmentRevision,
+                effectiveIdentity.AssignmentRevision,
                 StringComparison.Ordinal))
             throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
 
