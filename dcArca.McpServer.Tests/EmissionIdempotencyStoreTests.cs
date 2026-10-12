@@ -298,6 +298,39 @@ public class EmissionIdempotencyStoreTests
     }
 
     [Fact]
+    public async Task RegistroSchema3SinProvenance_FallaCerrado()
+    {
+        using var temp = new TempDirectory();
+        var keyHash = new string('c', 64);
+        var createdAt = DateTimeOffset.Parse("2026-10-11T12:02:00+00:00");
+        var record = new EmissionIdempotencyRecord(
+            3,
+            keyHash,
+            new string('e', 64),
+            EmissionRequestFingerprint.CanonicalizationVersion,
+            Identity(),
+            StoredFiscalEvidence.FromRequest(Request()),
+            null,
+            EmissionIdempotencyState.Created,
+            null,
+            createdAt,
+            createdAt);
+
+        await File.WriteAllTextAsync(
+            System.IO.Path.Combine(temp.Path, keyHash + ".json"),
+            System.Text.Json.JsonSerializer.Serialize(record));
+
+        var store = new FileSystemEmissionIdempotencyStore(temp.Path);
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            store.GetAsync(keyHash));
+
+        Assert.Contains(
+            "STORE_SCHEMA_V3_REQUIRES_PROVENANCE",
+            exception.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RegistroSchema2ConProvenance_FallaCerrado()
     {
         using var temp = new TempDirectory();

@@ -6,6 +6,12 @@ namespace dcArca.Core.Tests;
 
 public class WsfePointOfSaleDiscoveryTests
 {
+    [Fact]
+    public void CredentialHostBinding_NoExponeConstructorPublicoForjable()
+    {
+        Assert.Empty(typeof(FiscalCredentialHostBinding).GetConstructors());
+    }
+
     [Theory]
     [InlineData("600", "token")]
     [InlineData("601", "CUIT")]

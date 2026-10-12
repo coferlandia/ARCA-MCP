@@ -25,6 +25,16 @@ public class McpHealthTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         });
     }
 
+    [Fact]
+    public void ReadinessValidator_RecibePathDeCatalogoRuntimeExplicito()
+    {
+        Assert.Contains(
+            typeof(FiscalLocalReadinessValidator).GetConstructors(),
+            constructor => constructor.GetParameters().Any(
+                parameter => parameter.ParameterType == typeof(string)
+                    && parameter.Name == "catalogDirectory"));
+    }
+
     [Theory]
     [InlineData("/health/live", "alive")]
     [InlineData("/health/ready", "ready")]
