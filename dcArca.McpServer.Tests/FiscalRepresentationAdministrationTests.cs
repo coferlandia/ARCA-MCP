@@ -14,7 +14,10 @@ public sealed class FiscalRepresentationAdministrationTests
         await catalog.AddContextAsync(new FiscalTechnicalContextRecord(
             "operator-homo", "homologacion", FiscalContextOperationalState.Disabled, 1, []));
         var administration = new FiscalRepresentationAdministration(
-            catalog, new NoRemoteMaterializer(), new NoRemoteClientFactory());
+            catalog,
+            new FiscalRepresentationLifecyclePolicy(catalog),
+            new NoRemoteMaterializer(),
+            new NoRemoteClientFactory());
 
         var keyWithOnlyFiscalScope = Principal("admin", "arca:facturar", true);
         var missingAdminScope = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
@@ -44,7 +47,10 @@ public sealed class FiscalRepresentationAdministrationTests
             "operator-homo", "homologacion", FiscalContextOperationalState.Disabled, 1, []));
         await catalog.RegisterCandidateAsync("operator-homo", "consumer-a", 20123456786, "admin");
         var administration = new FiscalRepresentationAdministration(
-            catalog, new NoRemoteMaterializer(), new NoRemoteClientFactory());
+            catalog,
+            new FiscalRepresentationLifecyclePolicy(catalog),
+            new NoRemoteMaterializer(),
+            new NoRemoteClientFactory());
 
         var forbidden = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
             administration.ListPointsOfSaleAsync(Principal("admin", "arca:administrar", true),
@@ -91,7 +97,10 @@ public sealed class FiscalRepresentationAdministrationTests
         await tokenStore.WriteAsync(cacheKey + "_wsfe",
             new WsaaTokenEntry("test-token", "test-sign", DateTime.UtcNow.AddHours(1)));
         var administration = new FiscalRepresentationAdministration(
-            catalog, new ProbeMaterializer(cacheKey, tokenStore), new ErrorWsfeClientFactory(wsfeCode));
+            catalog,
+            new FiscalRepresentationLifecyclePolicy(catalog),
+            new ProbeMaterializer(cacheKey, tokenStore),
+            new ErrorWsfeClientFactory(wsfeCode));
 
         var exception = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
             administration.VerifyAndActivateAsync(
@@ -226,6 +235,7 @@ public sealed class FiscalRepresentationAdministrationTests
 
         return new FiscalRepresentationAdministration(
             catalog,
+            new FiscalRepresentationLifecyclePolicy(catalog),
             new ProbeMaterializer(cacheKey, tokenStore),
             clients);
     }

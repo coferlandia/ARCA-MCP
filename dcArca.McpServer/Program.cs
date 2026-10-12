@@ -82,6 +82,7 @@ builder.Services.AddSingleton<IFiscalAssignmentAuthorizationValidator>(sp => new
     sp.GetRequiredService<IFiscalTechnicalContextStore>(),
     sp.GetRequiredService<IFiscalCredentialMaterializer>(),
     sp.GetRequiredService<IHttpClientFactory>()));
+builder.Services.AddSingleton<FiscalRepresentationLifecyclePolicy>();
 builder.Services.AddSingleton<FiscalRepresentationAdministration>();
 builder.Services.AddSingleton<PreSubmissionAbandonmentService>();
 builder.Services.AddSingleton<FiscalOperationAdministration>();

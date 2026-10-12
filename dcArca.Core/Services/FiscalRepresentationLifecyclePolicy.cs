@@ -76,11 +76,7 @@ public sealed class FiscalRepresentationLifecyclePolicy
             cancellationToken)
             ?? throw new InvalidOperationException("FISCAL_REPRESENTATION_NOT_FOUND");
 
-        if (candidate.Status is not (
-            FiscalRepresentationStatus.Pending
-            or FiscalRepresentationStatus.Verified
-            or FiscalRepresentationStatus.Active
-            or FiscalRepresentationStatus.ActionRequired))
+        if (!IsRevalidableStatus(candidate.Status))
             throw new InvalidOperationException("FISCAL_REPRESENTATION_STATE_INVALID");
 
         var context = await _store.GetContextAsync(contextId, cancellationToken)
@@ -170,6 +166,12 @@ public sealed class FiscalRepresentationLifecyclePolicy
             candidate,
             null);
     }
+
+    public static bool IsRevalidableStatus(FiscalRepresentationStatus status)
+        => status is FiscalRepresentationStatus.Pending
+            or FiscalRepresentationStatus.Verified
+            or FiscalRepresentationStatus.Active
+            or FiscalRepresentationStatus.ActionRequired;
 
     private async Task<FiscalRepresentationRecord> RequireRepresentationAsync(
         string contextId,

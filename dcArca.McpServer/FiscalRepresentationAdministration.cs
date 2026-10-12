@@ -10,15 +10,19 @@ namespace dcArca.McpServer;
 public sealed class FiscalRepresentationAdministration
 {
     private readonly IFiscalTechnicalContextStore _catalog;
+    private readonly FiscalRepresentationLifecyclePolicy _lifecycle;
     private readonly IFiscalCredentialMaterializer _materializer;
     private readonly IHttpClientFactory _clients;
     private readonly dcWsfePointOfSaleProbe _probe = new();
 
     public FiscalRepresentationAdministration(
-        IFiscalTechnicalContextStore catalog, IFiscalCredentialMaterializer materializer,
+        IFiscalTechnicalContextStore catalog,
+        FiscalRepresentationLifecyclePolicy lifecycle,
+        IFiscalCredentialMaterializer materializer,
         IHttpClientFactory clients)
     {
         _catalog = catalog;
+        _lifecycle = lifecycle;
         _materializer = materializer;
         _clients = clients;
     }
@@ -68,33 +72,58 @@ public sealed class FiscalRepresentationAdministration
         int pointOfSale, CancellationToken cancellationToken)
     {
         DemandAdministrator(principal, contextId);
-        var candidate = await _catalog.GetRepresentationAsync(contextId, consumerId,
-            representedCuit, pointOfSale, cancellationToken)
-            ?? throw new FiscalContextAccessException("FISCAL_REPRESENTATION_NOT_FOUND",
+        var candidate = await _catalog.GetRepresentationAsync(
+            contextId, consumerId, representedCuit, pointOfSale, cancellationToken)
+            ?? throw new FiscalContextAccessException(
+                "FISCAL_REPRESENTATION_NOT_FOUND",
                 "La representación no está registrada.");
-        if (candidate.Status is not (FiscalRepresentationStatus.Pending or FiscalRepresentationStatus.Verified or FiscalRepresentationStatus.Active or FiscalRepresentationStatus.ActionRequired))
-            throw new FiscalContextAccessException("FISCAL_REPRESENTATION_STATE_INVALID",
+        if (!FiscalRepresentationLifecyclePolicy.IsRevalidableStatus(candidate.Status))
+            throw new FiscalContextAccessException(
+                "FISCAL_REPRESENTATION_STATE_INVALID",
                 "La representación no está pendiente de verificación.");
+
         var (context, assignment) = await ActiveContextAsync(contextId, cancellationToken);
-        var material = _materializer.Materialize(Project(context, representedCuit, pointOfSale), assignment);
-        var probe = await _probe.ProbeAsync(material.Config, material.WsfeAuth,
-            _clients.CreateClient(nameof(FiscalAssignmentAuthorizationValidator)), cancellationToken);
-        if (!probe.CanActivate)
+        var probeIdentity = new FiscalRepresentationProbeIdentity(
+            context.ContextId,
+            context.Environment,
+            representedCuit,
+            pointOfSale,
+            assignment.AssignmentRevision);
+        var material = _materializer.Materialize(
+            Project(context, representedCuit, pointOfSale),
+            assignment);
+        var probe = await _probe.ProbeAsync(
+            material.Config,
+            material.WsfeAuth,
+            _clients.CreateClient(nameof(FiscalAssignmentAuthorizationValidator)),
+            cancellationToken);
+
+        FiscalRepresentationLifecycleResult lifecycle;
+        try
         {
-            if (probe.Code is "WSFE_600" or "WSFE_601")
-                await _catalog.MarkRepresentationActionRequiredAsync(contextId, consumerId,
-                    representedCuit, pointOfSale, probe.Code, Actor(principal), cancellationToken);
-            throw new FiscalContextAccessException(probe.Code, probe.SafeMessage);
+            lifecycle = await _lifecycle.ApplyAsync(
+                contextId,
+                consumerId,
+                representedCuit,
+                pointOfSale,
+                probeIdentity,
+                probe,
+                Actor(principal),
+                cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            var mapped = MapLifecycleFailure(exception);
+            if (mapped is null) throw;
+            throw mapped;
         }
 
-        // Evidence binds the concrete CUIT/PV/context/environment/credential revision.
-        var evidence = $"{(probe.Verified ? "FEParamGetPtosVenta" : "MANUAL_PV_UNVERIFIED_602")}|context={contextId}|env={context.Environment}|cuit={representedCuit}|pv={pointOfSale}|rev={assignment.AssignmentRevision}|checked={probe.CheckedAt:O}";
-        await _catalog.MarkRepresentationVerifiedAsync(contextId, consumerId,
-            representedCuit, pointOfSale, evidence, Actor(principal), cancellationToken);
-        await _catalog.ActivateRepresentationAsync(contextId, consumerId,
-            representedCuit, pointOfSale, Actor(principal), cancellationToken);
-        return (await _catalog.GetRepresentationAsync(contextId, consumerId,
-            representedCuit, pointOfSale, cancellationToken))!;
+        if (lifecycle.Disposition == FiscalRepresentationLifecycleDisposition.Activated)
+            return lifecycle.Representation;
+
+        throw new FiscalContextAccessException(
+            lifecycle.Code,
+            lifecycle.SafeMessage);
     }
 
     public async Task<FiscalRepresentationRecord> RevokeAsync(
@@ -107,6 +136,32 @@ public sealed class FiscalRepresentationAdministration
         return (await _catalog.GetRepresentationAsync(contextId, consumerId,
             representedCuit, pointOfSale, cancellationToken))!;
     }
+
+    private static FiscalContextAccessException? MapLifecycleFailure(
+        InvalidOperationException exception)
+        => exception.Message switch
+        {
+            "FISCAL_REPRESENTATION_NOT_FOUND" => new FiscalContextAccessException(
+                "FISCAL_REPRESENTATION_NOT_FOUND",
+                "La representación no está registrada."),
+            "FISCAL_REPRESENTATION_STATE_INVALID" => new FiscalContextAccessException(
+                "FISCAL_REPRESENTATION_STATE_INVALID",
+                "La representación no está pendiente de verificación."),
+            "FISCAL_CONTEXT_NOT_FOUND" => new FiscalContextAccessException(
+                "FISCAL_CONTEXT_NOT_FOUND",
+                "No existe el contexto técnico."),
+            "FISCAL_CONTEXT_NOT_ACTIVE" or "ACTIVE_ASSIGNMENT_REQUIRED" =>
+                new FiscalContextAccessException(
+                    "FISCAL_CONTEXT_NOT_ACTIVE",
+                    "No existe credencial técnica activa."),
+            "POINT_OF_SALE_PROBE_IDENTITY_MISMATCH" => new FiscalContextAccessException(
+                "POINT_OF_SALE_PROBE_IDENTITY_MISMATCH",
+                "El contexto fiscal cambió durante la verificación; repita la operación."),
+            "POINT_OF_SALE_PROBE_INVALID" => new FiscalContextAccessException(
+                "POINT_OF_SALE_PROBE_INVALID",
+                "La evidencia de verificación remota no es válida."),
+            _ => null
+        };
 
     private async Task<(FiscalTechnicalContextRecord, CredentialAssignmentRecord)> ActiveContextAsync(
         string contextId, CancellationToken cancellationToken)
