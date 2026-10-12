@@ -60,21 +60,6 @@ public class dcArcaAuthService
         _tokenStore = tokenStore ?? MemoryWsaaTokenStore.Shared;
     }
 
-    public bool MatchesHostBinding(
-        FiscalCredentialHostBinding binding,
-        string serviceName)
-    {
-        ArgumentNullException.ThrowIfNull(binding);
-        if (string.IsNullOrWhiteSpace(serviceName))
-            return false;
-
-        return string.Equals(_wsaaUrl, binding.Config.WsaaUrl, StringComparison.Ordinal)
-            && string.Equals(_certificatePath, binding.Config.CertificatePath, StringComparison.Ordinal)
-            && string.Equals(_certificatePassword, binding.Config.CertificatePassword, StringComparison.Ordinal)
-            && string.Equals(_cuit, binding.CacheIdentity, StringComparison.Ordinal)
-            && string.Equals(_serviceName, serviceName, StringComparison.Ordinal);
-    }
-
     /// <summary>
     /// Obtiene un token válido. Si el token actual expiró, solicita uno nuevo.
     /// </summary>
