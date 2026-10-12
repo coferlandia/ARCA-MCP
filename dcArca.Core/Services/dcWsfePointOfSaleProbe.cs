@@ -147,6 +147,10 @@ public sealed class dcWsfePointOfSaleProbe
                 binding.CredentialId,
                 assignment.CredentialId,
                 StringComparison.Ordinal)
+            || !string.Equals(
+                binding.Config.Environment,
+                context.Environment,
+                StringComparison.Ordinal)
             || representedCuit <= 0
             || pointOfSale <= 0
             || !long.TryParse(binding.Config.Cuit, out var configuredCuit)

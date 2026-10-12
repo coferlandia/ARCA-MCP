@@ -410,6 +410,7 @@ public sealed class McpFiscalErrorBoundaryTests : IClassFixture<WebApplicationFa
         {
             var config = new dcArcaConfig
             {
+                Environment = context.Environment,
                 Cuit = context.RepresentedCuit.ToString(),
                 PuntoVenta = context.PointOfSale,
                 CertificatePath = "unused.pfx",

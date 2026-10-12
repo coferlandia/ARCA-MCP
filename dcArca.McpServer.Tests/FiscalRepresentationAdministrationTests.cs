@@ -381,6 +381,7 @@ public sealed class FiscalRepresentationAdministrationTests
         {
             var config = new dcArca.Core.Models.dcArcaConfig
             {
+                Environment = context.Environment,
                 Cuit = context.RepresentedCuit.ToString(),
                 PuntoVenta = context.PointOfSale,
                 CertificatePath = "unused.pfx",
