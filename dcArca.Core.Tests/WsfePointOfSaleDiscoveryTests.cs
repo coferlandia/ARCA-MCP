@@ -52,6 +52,17 @@ public class WsfePointOfSaleDiscoveryTests
     }
 
     [Fact]
+    public void ProbeBound_NoConservaTokenStoreEntreInvocaciones()
+    {
+        Assert.DoesNotContain(
+            typeof(dcWsfePointOfSaleProbe).GetFields(
+                System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.NonPublic
+                | System.Reflection.BindingFlags.Public),
+            field => typeof(IWsaaTokenStore).IsAssignableFrom(field.FieldType));
+    }
+
+    [Fact]
     public async Task ProbeBound_IgnoraTicketPresembradoEnSharedCache()
     {
         var context = new FiscalTechnicalContextRecord(
