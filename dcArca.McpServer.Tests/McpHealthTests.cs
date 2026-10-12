@@ -132,34 +132,22 @@ public class McpHealthTests : IClassFixture<WebApplicationFactory<Program>>, IDi
     [Fact]
     public async Task CatalogoVacioNoEsReadySiDirectorioNoEsProvisionable()
     {
-        if (OperatingSystem.IsWindows())
+        if (!OperatingSystem.IsLinux())
             return;
 
-        using var temp = new TempDirectory();
-        File.SetUnixFileMode(
-            temp.Path,
-            UnixFileMode.UserRead | UnixFileMode.UserExecute);
-        try
+        const string nonProvisionableDirectory = "/proc";
+        using var factory = _factory.WithWebHostBuilder(builder =>
         {
-            using var factory = _factory.WithWebHostBuilder(builder =>
-            {
-                builder.UseSetting("FiscalContexts:Directory", temp.Path);
-            });
-            var client = factory.CreateClient();
+            builder.UseSetting("FiscalContexts:Directory", nonProvisionableDirectory);
+        });
+        var client = factory.CreateClient();
 
-            var ready = await client.GetAsync("/health/ready");
-            var body = await ready.Content.ReadAsStringAsync();
+        var ready = await client.GetAsync("/health/ready");
+        var body = await ready.Content.ReadAsStringAsync();
 
-            Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
-            Assert.Contains("FISCAL_CATALOG_UNREADABLE", body);
-            Assert.DoesNotContain(temp.Path, body, StringComparison.OrdinalIgnoreCase);
-        }
-        finally
-        {
-            File.SetUnixFileMode(
-                temp.Path,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
+        Assert.Contains("FISCAL_CATALOG_UNREADABLE", body);
+        Assert.DoesNotContain(nonProvisionableDirectory, body, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
