@@ -14,6 +14,13 @@ public sealed record FiscalRepresentationLifecycleResult(
     FiscalRepresentationRecord Representation,
     string? VerificationEvidence);
 
+public sealed record FiscalRepresentationProbeIdentity(
+    string ContextId,
+    string Environment,
+    long RepresentedCuit,
+    int PointOfSale,
+    string AssignmentRevision);
+
 /// <summary>
 /// Canonical Core policy that converts a non-emitting point-of-sale probe into
 /// durable representation lifecycle state. It is intentionally independent of
@@ -42,16 +49,21 @@ public sealed class FiscalRepresentationLifecyclePolicy
         string consumerId,
         long representedCuit,
         int pointOfSale,
+        FiscalRepresentationProbeIdentity probeIdentity,
         dcPointOfSaleAccessProbeResult probe,
         string actor,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(probeIdentity);
         ArgumentNullException.ThrowIfNull(probe);
         if (string.IsNullOrWhiteSpace(actor))
             throw new ArgumentException("El actor es obligatorio.", nameof(actor));
         if (pointOfSale <= 0)
             throw new ArgumentOutOfRangeException(nameof(pointOfSale));
-        if (probe.PointOfSale != pointOfSale)
+        if (probe.PointOfSale != pointOfSale
+            || !string.Equals(probeIdentity.ContextId, contextId, StringComparison.Ordinal)
+            || probeIdentity.RepresentedCuit != representedCuit
+            || probeIdentity.PointOfSale != pointOfSale)
             throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
         if (probe.CheckedAt == default)
             throw new InvalidOperationException("POINT_OF_SALE_PROBE_INVALID");
@@ -77,15 +89,21 @@ public sealed class FiscalRepresentationLifecyclePolicy
             throw new InvalidOperationException("FISCAL_CONTEXT_NOT_ACTIVE");
         var assignment = context.ActiveAssignment
             ?? throw new InvalidOperationException("ACTIVE_ASSIGNMENT_REQUIRED");
+        if (!string.Equals(
+                probeIdentity.Environment,
+                context.Environment,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                probeIdentity.AssignmentRevision,
+                assignment.AssignmentRevision,
+                StringComparison.Ordinal))
+            throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
 
         if (IsVerifiedActivation(probe) || IsManual602Activation(probe))
         {
             var evidence = BuildEvidence(
                 probe,
-                context,
-                representedCuit,
-                pointOfSale,
-                assignment.AssignmentRevision);
+                probeIdentity);
 
             await _store.MarkRepresentationVerifiedAsync(
                 contextId,
@@ -177,14 +195,11 @@ public sealed class FiscalRepresentationLifecyclePolicy
 
     private static string BuildEvidence(
         dcPointOfSaleAccessProbeResult probe,
-        FiscalTechnicalContextRecord context,
-        long representedCuit,
-        int pointOfSale,
-        string assignmentRevision)
+        FiscalRepresentationProbeIdentity identity)
     {
         var prefix = IsVerifiedActivation(probe)
             ? "FEParamGetPtosVenta"
             : "MANUAL_PV_UNVERIFIED_602";
-        return $"{prefix}|context={context.ContextId}|env={context.Environment}|cuit={representedCuit}|pv={pointOfSale}|rev={assignmentRevision}|checked={probe.CheckedAt:O}";
+        return $"{prefix}|context={identity.ContextId}|env={identity.Environment}|cuit={identity.RepresentedCuit}|pv={identity.PointOfSale}|rev={identity.AssignmentRevision}|checked={probe.CheckedAt:O}";
     }
 }

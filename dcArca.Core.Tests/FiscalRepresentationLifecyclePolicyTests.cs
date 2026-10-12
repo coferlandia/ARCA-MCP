@@ -25,6 +25,7 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
 
         var result = await policy.ApplyAsync(
             ContextId, ConsumerId, RepresentedCuit, PointOfSale,
+            ProbeIdentity(),
             probe, "admin");
 
         Assert.Equal(FiscalRepresentationLifecycleDisposition.Activated, result.Disposition);
@@ -49,6 +50,7 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
 
         var result = await policy.ApplyAsync(
             ContextId, ConsumerId, RepresentedCuit, PointOfSale,
+            ProbeIdentity(),
             probe, "admin");
 
         Assert.Equal(FiscalRepresentationLifecycleDisposition.Activated, result.Disposition);
@@ -76,6 +78,7 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
 
         var result = await policy.ApplyAsync(
             ContextId, ConsumerId, RepresentedCuit, PointOfSale,
+            ProbeIdentity(),
             probe, "admin");
 
         Assert.Equal(FiscalRepresentationLifecycleDisposition.ActionRequired, result.Disposition);
@@ -100,6 +103,7 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
 
         var result = await policy.ApplyAsync(
             ContextId, ConsumerId, RepresentedCuit, PointOfSale,
+            ProbeIdentity(),
             probe, "admin");
 
         Assert.Equal(FiscalRepresentationLifecycleDisposition.Inconclusive, result.Disposition);
@@ -123,6 +127,7 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
         var policy = new FiscalRepresentationLifecyclePolicy(store);
         var result = await policy.ApplyAsync(
             ContextId, ConsumerId, RepresentedCuit, PointOfSale,
+            ProbeIdentity(),
             Probe(dcPointOfSaleProbeStatus.NotVerified,
                 "WSFE_ACCESS_NOT_VERIFIED", "network"),
             "admin");
@@ -144,6 +149,7 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             policy.ApplyAsync(
                 ContextId, ConsumerId, RepresentedCuit, PointOfSale,
+                ProbeIdentity(),
                 Probe(dcPointOfSaleProbeStatus.Verified,
                     "POINT_OF_SALE_AUTHORIZATION_VERIFIED", "ok"),
                 "admin"));
@@ -242,6 +248,7 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             policy.ApplyAsync(
                 ContextId, ConsumerId, RepresentedCuit, PointOfSale,
+                ProbeIdentity(),
                 mismatched, "admin"));
 
         Assert.Equal("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH", error.Message);
@@ -263,6 +270,7 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
 
         var result = await policy.ApplyAsync(
             ContextId, ConsumerId, RepresentedCuit, PointOfSale,
+            ProbeIdentity(),
             probe, "admin");
 
         Assert.NotNull(result.VerificationEvidence);
@@ -271,6 +279,18 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
         Assert.DoesNotContain("xml", result.VerificationEvidence, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("secret", result.VerificationEvidence, StringComparison.OrdinalIgnoreCase);
     }
+
+    private static FiscalRepresentationProbeIdentity ProbeIdentity(
+        string assignmentRevision = "rev-1",
+        long representedCuit = RepresentedCuit,
+        int pointOfSale = PointOfSale,
+        string environment = "homologacion")
+        => new(
+            ContextId,
+            environment,
+            representedCuit,
+            pointOfSale,
+            assignmentRevision);
 
     private static dcPointOfSaleAccessProbeResult Probe(
         dcPointOfSaleProbeStatus status,
