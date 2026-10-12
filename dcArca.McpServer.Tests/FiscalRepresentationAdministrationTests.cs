@@ -203,11 +203,13 @@ public sealed class FiscalRepresentationAdministrationTests
         var tokenStore = new MemoryWsaaTokenStore();
         await tokenStore.WriteAsync(cacheKey + "_wsfe",
             new WsaaTokenEntry("test-token", "test-sign", DateTime.UtcNow.AddHours(1)));
+        var materializer = new ProbeMaterializer(cacheKey, tokenStore);
         var administration = new FiscalRepresentationAdministration(
             catalog,
             new FiscalRepresentationLifecyclePolicy(catalog),
-            new ProbeMaterializer(cacheKey, tokenStore),
-            new ErrorWsfeClientFactory(wsfeCode));
+            materializer,
+            new ErrorWsfeClientFactory(wsfeCode),
+            materializer.CreateBoundProbe());
 
         var exception = await Assert.ThrowsAsync<FiscalContextAccessException>(() =>
             administration.VerifyAndActivateAsync(
@@ -340,11 +342,13 @@ public sealed class FiscalRepresentationAdministrationTests
                 "test-sign",
                 DateTime.UtcNow.AddHours(1)));
 
+        var materializer = new ProbeMaterializer(cacheKey, tokenStore);
         return new FiscalRepresentationAdministration(
             catalog,
             new FiscalRepresentationLifecyclePolicy(catalog),
-            new ProbeMaterializer(cacheKey, tokenStore),
-            clients);
+            materializer,
+            clients,
+            materializer.CreateBoundProbe());
     }
 
     private static async Task ProvisionRepresentationAsync(
@@ -483,6 +487,15 @@ public sealed class FiscalRepresentationAdministrationTests
     private sealed class ProbeMaterializer(string cacheKey, IWsaaTokenStore tokenStore)
         : IFiscalCredentialMaterializer
     {
+        public dcWsfePointOfSaleProbe CreateBoundProbe()
+            => new(binding => new dcArcaAuthService(
+                binding.Config.WsaaUrl,
+                binding.Config.CertificatePath,
+                binding.Config.CertificatePassword,
+                cacheKey,
+                serviceName: "wsfe",
+                tokenStore: tokenStore));
+
         public FiscalCredentialMaterialization Materialize(
             RepresentedFiscalContextRecord context, CredentialAssignmentRecord assignment)
         {

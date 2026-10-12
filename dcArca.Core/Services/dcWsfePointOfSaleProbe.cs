@@ -61,6 +61,26 @@ public sealed record dcPointOfSaleListingResult(
 /// </summary>
 public sealed class dcWsfePointOfSaleProbe
 {
+    private readonly Func<FiscalCredentialHostBinding, dcArcaAuthService> _boundAuthFactory;
+
+    public dcWsfePointOfSaleProbe()
+        : this(binding => new dcArcaAuthService(
+            binding.Config.WsaaUrl,
+            binding.Config.CertificatePath,
+            binding.Config.CertificatePassword,
+            binding.CacheIdentity,
+            serviceName: "wsfe",
+            tokenStore: new MemoryWsaaTokenStore()))
+    {
+    }
+
+    internal dcWsfePointOfSaleProbe(
+        Func<FiscalCredentialHostBinding, dcArcaAuthService> boundAuthFactory)
+    {
+        _boundAuthFactory = boundAuthFactory
+            ?? throw new ArgumentNullException(nameof(boundAuthFactory));
+    }
+
     public async Task<dcPointOfSaleListingResult> ListAsync(
         dcArcaConfig config,
         dcArcaAuthService authService,
@@ -172,13 +192,7 @@ public sealed class dcWsfePointOfSaleProbe
             pointOfSale,
             assignment.AssignmentRevision,
             representation.CreatedAt);
-        var authService = new dcArcaAuthService(
-            binding.Config.WsaaUrl,
-            binding.Config.CertificatePath,
-            binding.Config.CertificatePassword,
-            binding.CacheIdentity,
-            serviceName: "wsfe",
-            tokenStore: new MemoryWsaaTokenStore());
+        var authService = _boundAuthFactory(binding);
         var result = await ProbeAsync(
             binding.Config,
             authService,

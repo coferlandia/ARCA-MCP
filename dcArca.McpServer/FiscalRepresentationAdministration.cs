@@ -13,18 +13,29 @@ public sealed class FiscalRepresentationAdministration
     private readonly FiscalRepresentationLifecyclePolicy _lifecycle;
     private readonly IFiscalCredentialMaterializer _materializer;
     private readonly IHttpClientFactory _clients;
-    private readonly dcWsfePointOfSaleProbe _probe = new();
+    private readonly dcWsfePointOfSaleProbe _probe;
 
     public FiscalRepresentationAdministration(
         IFiscalTechnicalContextStore catalog,
         FiscalRepresentationLifecyclePolicy lifecycle,
         IFiscalCredentialMaterializer materializer,
         IHttpClientFactory clients)
+        : this(catalog, lifecycle, materializer, clients, new dcWsfePointOfSaleProbe())
+    {
+    }
+
+    public FiscalRepresentationAdministration(
+        IFiscalTechnicalContextStore catalog,
+        FiscalRepresentationLifecyclePolicy lifecycle,
+        IFiscalCredentialMaterializer materializer,
+        IHttpClientFactory clients,
+        dcWsfePointOfSaleProbe probe)
     {
         _catalog = catalog;
         _lifecycle = lifecycle;
         _materializer = materializer;
         _clients = clients;
+        _probe = probe ?? throw new ArgumentNullException(nameof(probe));
     }
 
     public async Task<FiscalRepresentationRecord> RegisterCandidateAsync(
