@@ -113,6 +113,11 @@ public sealed class FiscalTechnicalContextStoreTests
         await store.RegisterCandidateAsync("operator-homo", "secretaria", 20123456786, "admin");
         await ActivateAsync(store, 20123456786, 7);
 
+        var originallyActive = (await store.GetRepresentationAsync(
+            "operator-homo", "secretaria", 20123456786, 7))!;
+        Assert.NotNull(originallyActive.ActivatedAt);
+        Assert.Equal("admin", originallyActive.ActivatedBy);
+
         await store.MarkRepresentationActionRequiredAsync(
             "operator-homo", "secretaria", 20123456786, 7, "WSFE_601", "ARCA-WSFE");
         var suspended = (await store.GetRepresentationAsync("operator-homo", "secretaria", 20123456786, 7))!;
@@ -121,9 +126,13 @@ public sealed class FiscalTechnicalContextStoreTests
         Assert.Equal("WSFE_601", suspended.ActionRequiredReasonCode);
 
         await store.MarkRepresentationVerifiedAsync(
-            "operator-homo", "secretaria", 20123456786, 7, "new-remote-evidence", "admin");
-        await store.ActivateRepresentationAsync("operator-homo", "secretaria", 20123456786, 7, "admin");
-        Assert.True((await store.GetRepresentationAsync("operator-homo", "secretaria", 20123456786, 7))!.CanReadOrEmit);
+            "operator-homo", "secretaria", 20123456786, 7, "new-remote-evidence", "other-admin");
+        await store.ActivateRepresentationAsync("operator-homo", "secretaria", 20123456786, 7, "other-admin");
+        var reactivated = (await store.GetRepresentationAsync(
+            "operator-homo", "secretaria", 20123456786, 7))!;
+        Assert.True(reactivated.CanReadOrEmit);
+        Assert.Equal(originallyActive.ActivatedAt, reactivated.ActivatedAt);
+        Assert.Equal(originallyActive.ActivatedBy, reactivated.ActivatedBy);
     }
 
     [Fact]

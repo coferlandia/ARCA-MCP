@@ -1,3 +1,4 @@
+using dcArca.Core.Services;
 using System.Net;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -22,6 +23,29 @@ public class McpHealthTests : IClassFixture<WebApplicationFactory<Program>>, IDi
             builder.UseEnvironment("Testing");
             _certificate.Apply(builder);
         });
+    }
+
+    [Fact]
+    public void Store_ResuelveUnicoDirectorioEfectivoParaRuntimeYReadiness()
+    {
+        var effective = FileSystemFiscalTechnicalContextStore.ResolveDirectoryPath(null);
+
+        Assert.False(string.IsNullOrWhiteSpace(effective));
+        Assert.True(Path.IsPathFullyQualified(effective));
+        Assert.EndsWith(
+            Path.Combine("dcArca", "fiscal-contexts"),
+            effective,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ReadinessValidator_RecibePathDeCatalogoRuntimeExplicito()
+    {
+        Assert.Contains(
+            typeof(FiscalLocalReadinessValidator).GetConstructors(),
+            constructor => constructor.GetParameters().Any(
+                parameter => parameter.ParameterType == typeof(string)
+                    && parameter.Name == "catalogDirectory"));
     }
 
     [Theory]
@@ -79,6 +103,186 @@ public class McpHealthTests : IClassFixture<WebApplicationFactory<Program>>, IDi
         Assert.DoesNotContain("pfx", readyBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("token", readyBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("password", readyBody, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CatalogoCorrupto_KeepsLiveButReadyReturnsSafe503()
+    {
+        using var temp = new TempDirectory();
+        await File.WriteAllTextAsync(
+            System.IO.Path.Combine(temp.Path, "fiscal-catalog-v2.json"),
+            "{invalid-json");
+
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("FiscalContexts:Directory", temp.Path);
+        });
+        var client = factory.CreateClient();
+
+        var live = await client.GetAsync("/health/live");
+        var ready = await client.GetAsync("/health/ready");
+        var body = await ready.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, live.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
+        Assert.Contains("FISCAL_CATALOG_UNREADABLE", body);
+        Assert.DoesNotContain(temp.Path, body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PathDeCatalogoSintacticamenteInvalido_NoTumbaLiveYReadyFallaSeguro()
+    {
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("FiscalContexts:Directory", "invalid\0catalog");
+        });
+        var client = factory.CreateClient();
+
+        var live = await client.GetAsync("/health/live");
+        var ready = await client.GetAsync("/health/ready");
+        var body = await ready.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, live.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
+        Assert.Contains("FISCAL_CATALOG_UNREADABLE", body);
+        Assert.DoesNotContain("invalid", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DirectorioDeCatalogoInvalido_KeepsLiveButReadyReturnsSafe503()
+    {
+        using var temp = new TempDirectory();
+        var notDirectory = System.IO.Path.Combine(temp.Path, "catalog-is-a-file");
+        await File.WriteAllTextAsync(notDirectory, "not a directory");
+
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("FiscalContexts:Directory", notDirectory);
+        });
+        var client = factory.CreateClient();
+
+        var live = await client.GetAsync("/health/live");
+        var ready = await client.GetAsync("/health/ready");
+        var body = await ready.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, live.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
+        Assert.Contains("FISCAL_CATALOG_UNREADABLE", body);
+        Assert.DoesNotContain(notDirectory, body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CatalogoVacioNoEsReadySiDirectorioNoEsProvisionable()
+    {
+        if (!OperatingSystem.IsLinux())
+            return;
+
+        const string nonProvisionableDirectory = "/proc";
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("FiscalContexts:Directory", nonProvisionableDirectory);
+        });
+        var client = factory.CreateClient();
+
+        var ready = await client.GetAsync("/health/ready");
+        var body = await ready.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
+        Assert.Contains("FISCAL_CATALOG_UNREADABLE", body);
+        Assert.DoesNotContain(nonProvisionableDirectory, body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task EnvironmentReferenciadoSinConfig_Returns503()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemFiscalTechnicalContextStore(temp.Path);
+        await store.AddContextAsync(new FiscalTechnicalContextRecord(
+            "ctx-prod",
+            "produccion",
+            FiscalContextOperationalState.Disabled,
+            1,
+            []));
+
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("FiscalContexts:Directory", temp.Path);
+        });
+        var client = factory.CreateClient();
+
+        var ready = await client.GetAsync("/health/ready");
+        var body = await ready.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
+        Assert.Contains("FISCAL_ENVIRONMENT_UNRESOLVED", body);
+        Assert.DoesNotContain("produccion", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AssignmentActivoSinCredentialRef_Returns503()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemFiscalTechnicalContextStore(temp.Path);
+        await store.AddContextAsync(new FiscalTechnicalContextRecord(
+            "ctx-homo",
+            "homologacion",
+            FiscalContextOperationalState.Disabled,
+            1,
+            []));
+        await store.AddCandidateAssignmentAsync("ctx-homo", "rev-1", "missing-cred", "setup");
+        await store.MarkAssignmentValidatedAsync("ctx-homo", "rev-1", "validated", "setup");
+        await store.ActivateAssignmentAsync("ctx-homo", "rev-1", "setup");
+        await store.SetContextStateAsync("ctx-homo", FiscalContextOperationalState.Active, "setup");
+
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("FiscalContexts:Directory", temp.Path);
+            builder.UseSetting("FiscalEnvironments:homologacion:WsaaUrl", "https://wsaa.example.invalid");
+            builder.UseSetting("FiscalEnvironments:homologacion:WsfeUrl", "https://wsfe.example.invalid");
+            builder.UseSetting("FiscalEnvironments:homologacion:PadronUrl", "https://padron.example.invalid");
+        });
+        var client = factory.CreateClient();
+
+        var ready = await client.GetAsync("/health/ready");
+        var body = await ready.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
+        Assert.Contains("CREDENTIAL_REFERENCE_UNRESOLVED", body);
+        Assert.DoesNotContain("missing-cred", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ConfigLocalValida_ReadySinConectividadArca()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemFiscalTechnicalContextStore(temp.Path);
+        await store.AddContextAsync(new FiscalTechnicalContextRecord(
+            "ctx-homo",
+            "homologacion",
+            FiscalContextOperationalState.Disabled,
+            1,
+            []));
+        await store.AddCandidateAssignmentAsync("ctx-homo", "rev-1", "cred-a", "setup");
+        await store.MarkAssignmentValidatedAsync("ctx-homo", "rev-1", "validated", "setup");
+        await store.ActivateAssignmentAsync("ctx-homo", "rev-1", "setup");
+        await store.SetContextStateAsync("ctx-homo", FiscalContextOperationalState.Active, "setup");
+
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("FiscalContexts:Directory", temp.Path);
+            builder.UseSetting("FiscalEnvironments:homologacion:WsaaUrl", "https://wsaa.example.invalid");
+            builder.UseSetting("FiscalEnvironments:homologacion:WsfeUrl", "https://wsfe.example.invalid");
+            builder.UseSetting("FiscalEnvironments:homologacion:PadronUrl", "https://padron.example.invalid");
+            builder.UseSetting("FiscalCredentials:cred-a:CertificatePath", "never-opened-placeholder.pfx");
+        });
+        var client = factory.CreateClient();
+
+        var ready = await client.GetAsync("/health/ready");
+        var body = await ready.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
+        Assert.Contains("\"ready\"", body);
+        Assert.DoesNotContain("never-opened-placeholder", body, StringComparison.OrdinalIgnoreCase);
     }
 
     public void Dispose()

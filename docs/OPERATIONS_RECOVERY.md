@@ -143,10 +143,12 @@ La completion es crash-idempotent: si el historial quedó persistido y el proces
 Ante `Uncertain`, `RECONCILIATION_MISMATCH` o `RECONCILIATION_EVIDENCE_INSUFFICIENT`:
 
 1. conservar operación, key, número y assignment histórica;
-2. consultar/reconciliar la misma operación;
+2. consultar/reconciliar la misma operación; sólo un registro de representación cuya creación y activación sean anteriores a la operación durable puede respaldar esa recuperación histórica cuando está `Active` o `ActionRequired`; `Revoked`, un `ActionRequired` nunca activado o una representación creada/activada después de la operación permanecen fail-closed;
 3. registrar evidencia y resultado de ARCA;
 4. mantener bloqueada la serie si no se demuestra equivalencia;
 5. escalar manualmente cuando la credencial histórica esté revocada/expirada o la evidencia sea insuficiente.
+
+Para una operación que **no** cruzó `Submitting`, existe una transición explícita de abandono pre-submission: sólo `Created` o `NumberAssigned` pueden pasar a `AbandonedBeforeSubmission`. La transición conserva el número si ya estaba reservado, registra una referencia de actor, reason code y timestamp, se persiste antes de liberar la reserva y es idempotente. Nunca aplica a `Submitting` ni `Uncertain`.
 
 Acciones prohibidas como recuperación automática:
 

@@ -73,6 +73,20 @@ public interface IFiscalTechnicalContextStore
     Task RevokeRepresentationAsync(string contextId, string consumerId, long representedCuit, int pointOfSale, string actor, CancellationToken cancellationToken = default);
     Task MarkRepresentationActionRequiredAsync(string contextId, string consumerId, long representedCuit,
         int pointOfSale, string reasonCode, string actor, CancellationToken cancellationToken = default);
+
+    Task<FiscalRepresentationRecord> ActivateRepresentationFromProbeAsync(
+        string consumerId,
+        FiscalRepresentationProbeIdentity expectedIdentity,
+        string evidence,
+        string actor,
+        CancellationToken cancellationToken = default);
+
+    Task<FiscalRepresentationRecord> MarkRepresentationActionRequiredFromProbeAsync(
+        string consumerId,
+        FiscalRepresentationProbeIdentity expectedIdentity,
+        string reasonCode,
+        string actor,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed record FiscalTechnicalCatalog(
@@ -90,16 +104,25 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
     private readonly string _path;
     private readonly string _legacyPath;
 
+    public string DirectoryPath { get; }
+
     public FileSystemFiscalTechnicalContextStore(string? directory = null)
     {
-        var dir = string.IsNullOrWhiteSpace(directory)
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "dcArca", "fiscal-contexts")
-            : Path.GetFullPath(directory);
+        var dir = ResolveDirectoryPath(directory);
         Directory.CreateDirectory(dir);
         TryHardenDirectory(dir);
+        DirectoryPath = dir;
         _path = Path.Combine(dir, "fiscal-catalog-v2.json");
         _legacyPath = Path.Combine(dir, "contexts.json");
     }
+
+    public static string ResolveDirectoryPath(string? directory)
+        => string.IsNullOrWhiteSpace(directory)
+            ? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "dcArca",
+                "fiscal-contexts")
+            : Path.GetFullPath(directory);
 
     public async Task<IReadOnlyList<FiscalTechnicalContextRecord>> ListContextsAsync(CancellationToken cancellationToken = default)
         => (await ReadAsync(cancellationToken)).Contexts;
@@ -109,12 +132,17 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
 
     public Task AddContextAsync(FiscalTechnicalContextRecord context, CancellationToken cancellationToken = default)
     {
-        ValidateContext(context);
+        ArgumentNullException.ThrowIfNull(context);
+        var normalized = context with
+        {
+            Environment = FiscalEnvironmentId.Normalize(context.Environment)
+        };
+        ValidateContext(normalized);
         return MutateAsync(cat =>
         {
-            if (cat.Contexts.Any(x => x.ContextId == context.ContextId))
+            if (cat.Contexts.Any(x => x.ContextId == normalized.ContextId))
                 throw new InvalidOperationException("FISCAL_CONTEXT_ALREADY_EXISTS");
-            return cat with { Contexts = [.. cat.Contexts, context] };
+            return cat with { Contexts = [.. cat.Contexts, normalized] };
         }, cancellationToken);
     }
 
@@ -257,7 +285,12 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
             {
                 if (rep.Status != FiscalRepresentationStatus.Verified || string.IsNullOrWhiteSpace(rep.VerificationEvidence))
                     throw new InvalidOperationException("FISCAL_REPRESENTATION_NOT_VERIFIED");
-                return rep with { Status = FiscalRepresentationStatus.Active, ActivatedAt = DateTimeOffset.UtcNow, ActivatedBy = actor };
+                return rep with
+                {
+                    Status = FiscalRepresentationStatus.Active,
+                    ActivatedAt = rep.ActivatedAt ?? DateTimeOffset.UtcNow,
+                    ActivatedBy = rep.ActivatedBy ?? actor
+                };
             });
         }, cancellationToken);
     }
@@ -289,6 +322,132 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
                 ActionRequiredReasonCode = reasonCode
             };
         }, cancellationToken);
+    }
+
+    public async Task<FiscalRepresentationRecord> ActivateRepresentationFromProbeAsync(
+        string consumerId,
+        FiscalRepresentationProbeIdentity expectedIdentity,
+        string evidence,
+        string actor,
+        CancellationToken cancellationToken = default)
+    {
+        Require(consumerId, nameof(consumerId));
+        ArgumentNullException.ThrowIfNull(expectedIdentity);
+        Require(evidence, nameof(evidence));
+        Require(actor, nameof(actor));
+
+        FiscalRepresentationRecord? persisted = null;
+        await MutateAsync(cat =>
+        {
+            var context = RequireContext(cat, expectedIdentity.ContextId);
+            EnsureProbeIdentityStillCurrent(context, expectedIdentity);
+            var now = DateTimeOffset.UtcNow;
+            var manual = evidence.StartsWith(
+                "MANUAL_PV_UNVERIFIED_602|",
+                StringComparison.Ordinal);
+
+            return ChangeRepresentation(
+                cat,
+                expectedIdentity.ContextId,
+                consumerId,
+                expectedIdentity.RepresentedCuit,
+                expectedIdentity.PointOfSale,
+                rep =>
+                {
+                    EnsureProbeTransitionAllowed(rep, expectedIdentity);
+                    persisted = rep with
+                    {
+                        Status = FiscalRepresentationStatus.Active,
+                        VerificationEvidence = evidence,
+                        VerifiedAt = manual ? null : now,
+                        VerifiedBy = manual ? null : actor,
+                        ActivatedAt = rep.ActivatedAt ?? now,
+                        ActivatedBy = rep.ActivatedBy ?? actor
+                    };
+                    return persisted;
+                });
+        }, cancellationToken);
+
+        return persisted
+            ?? throw new InvalidDataException("FISCAL_REPRESENTATION_PERSISTENCE_FAILED");
+    }
+
+    public async Task<FiscalRepresentationRecord> MarkRepresentationActionRequiredFromProbeAsync(
+        string consumerId,
+        FiscalRepresentationProbeIdentity expectedIdentity,
+        string reasonCode,
+        string actor,
+        CancellationToken cancellationToken = default)
+    {
+        Require(consumerId, nameof(consumerId));
+        ArgumentNullException.ThrowIfNull(expectedIdentity);
+        Require(reasonCode, nameof(reasonCode));
+        Require(actor, nameof(actor));
+
+        FiscalRepresentationRecord? persisted = null;
+        await MutateAsync(cat =>
+        {
+            var context = RequireContext(cat, expectedIdentity.ContextId);
+            EnsureProbeIdentityStillCurrent(context, expectedIdentity);
+            var now = DateTimeOffset.UtcNow;
+
+            return ChangeRepresentation(
+                cat,
+                expectedIdentity.ContextId,
+                consumerId,
+                expectedIdentity.RepresentedCuit,
+                expectedIdentity.PointOfSale,
+                rep =>
+                {
+                    EnsureProbeTransitionAllowed(rep, expectedIdentity);
+                    persisted = rep with
+                    {
+                        Status = FiscalRepresentationStatus.ActionRequired,
+                        ActionRequiredAt = now,
+                        ActionRequiredBy = actor,
+                        ActionRequiredReasonCode = reasonCode
+                    };
+                    return persisted;
+                });
+        }, cancellationToken);
+
+        return persisted
+            ?? throw new InvalidDataException("FISCAL_REPRESENTATION_PERSISTENCE_FAILED");
+    }
+
+    private static void EnsureProbeIdentityStillCurrent(
+        FiscalTechnicalContextRecord context,
+        FiscalRepresentationProbeIdentity expectedIdentity)
+    {
+        if (context.OperationalState != FiscalContextOperationalState.Active
+            || context.ActiveAssignment is null)
+            throw new InvalidOperationException("FISCAL_CONTEXT_NOT_ACTIVE");
+
+        if (!string.Equals(
+                context.Environment,
+                expectedIdentity.Environment,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                context.ActiveAssignment.AssignmentRevision,
+                expectedIdentity.AssignmentRevision,
+                StringComparison.Ordinal))
+            throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
+    }
+
+    private static void EnsureProbeTransitionAllowed(
+        FiscalRepresentationRecord representation,
+        FiscalRepresentationProbeIdentity expectedIdentity)
+    {
+        if (!expectedIdentity.RepresentationCreatedAt.HasValue
+            || representation.CreatedAt != expectedIdentity.RepresentationCreatedAt.Value)
+            throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
+
+        if (representation.Status is not (
+                FiscalRepresentationStatus.Pending
+                or FiscalRepresentationStatus.Verified
+                or FiscalRepresentationStatus.Active
+                or FiscalRepresentationStatus.ActionRequired))
+            throw new InvalidOperationException("FISCAL_REPRESENTATION_STATE_INVALID");
     }
 
     private Task UpdateContextAsync(string id, Func<FiscalTechnicalContextRecord, FiscalTechnicalContextRecord> action, CancellationToken ct)
@@ -397,8 +556,11 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
 
     private static void ValidateContext(FiscalTechnicalContextRecord context)
     {
-        if (context is null || string.IsNullOrWhiteSpace(context.ContextId) || string.IsNullOrWhiteSpace(context.Environment) ||
-            context.ContextRevision <= 0 || context.Assignments is null ||
+        if (context is null || string.IsNullOrWhiteSpace(context.ContextId))
+            throw new InvalidDataException("FISCAL_CONTEXT_INVALID");
+        if (!FiscalEnvironmentId.IsCanonical(context.Environment))
+            throw new InvalidDataException("FISCAL_ENVIRONMENT_NOT_CANONICAL");
+        if (context.ContextRevision <= 0 || context.Assignments is null ||
             context.Assignments.Count(x => x.Status == CredentialAssignmentStatus.Active) > 1 ||
             context.Assignments.Select(x => x.AssignmentRevision).Distinct(StringComparer.Ordinal).Count() != context.Assignments.Count ||
             context.Assignments.Any(x => string.IsNullOrWhiteSpace(x.AssignmentRevision) || string.IsNullOrWhiteSpace(x.CredentialId)) ||

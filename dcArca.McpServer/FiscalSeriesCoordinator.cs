@@ -101,6 +101,7 @@ public sealed class FileSystemFiscalSeriesCoordinator : IFiscalSeriesCoordinator
     private readonly string _reservationsDirectory;
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _seriesLocks = new(StringComparer.Ordinal);
     private FileStream? _writerLease;
+    private IEmissionIdempotencyStore? _store;
     private bool _initialized;
     private bool _disposed;
 
@@ -144,6 +145,7 @@ public sealed class FileSystemFiscalSeriesCoordinator : IFiscalSeriesCoordinator
         try
         {
             await RebuildAndValidateAsync(fileStore, cancellationToken);
+            _store = store;
             _initialized = true;
         }
         catch
@@ -179,6 +181,16 @@ public sealed class FileSystemFiscalSeriesCoordinator : IFiscalSeriesCoordinator
         await gate.WaitAsync(cancellationToken);
         try
         {
+            if (_store is not null)
+            {
+                var owner = await _store.GetAsync(ownerKeyHash, cancellationToken);
+                if (owner is not null
+                    && owner.State is EmissionIdempotencyState.Authorized
+                        or EmissionIdempotencyState.FiscalRejected
+                        or EmissionIdempotencyState.AbandonedBeforeSubmission)
+                    throw new FiscalSeriesBlockedException("SERIES_OWNER_CLOSED");
+            }
+
             var existing = await ReadReservationAsync(identity.SeriesKey, cancellationToken);
             if (existing is not null)
             {
@@ -251,7 +263,27 @@ public sealed class FileSystemFiscalSeriesCoordinator : IFiscalSeriesCoordinator
             if (!string.Equals(owner.Identity.SeriesKey, reservation.SeriesKey, StringComparison.Ordinal))
                 throw new InvalidDataException("SERIES_RESERVATION_OPERATION_MISMATCH");
 
-            if (owner.State is EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected)
+            if (owner.State == EmissionIdempotencyState.AbandonedBeforeSubmission)
+            {
+                if (owner.NumeroComprobante.HasValue
+                    && owner.NumeroComprobante.Value != reservation.NumeroComprobante)
+                    throw new InvalidDataException("SERIES_RESERVATION_OPERATION_MISMATCH");
+
+                if (!owner.NumeroComprobante.HasValue)
+                {
+                    owner = await store.CaptureAbandonedReservationAsync(
+                        owner.KeyHash,
+                        reservation.NumeroComprobante,
+                        cancellationToken);
+                    records[owner.KeyHash] = owner;
+                }
+
+                File.Delete(path);
+                continue;
+            }
+
+            if (owner.State is EmissionIdempotencyState.Authorized
+                or EmissionIdempotencyState.FiscalRejected)
             {
                 File.Delete(path);
                 continue;
@@ -424,6 +456,7 @@ public sealed class FileSystemFiscalSeriesCoordinator : IFiscalSeriesCoordinator
         _disposed = true;
         _writerLease?.Dispose();
         _writerLease = null;
+        _store = null;
         foreach (var gate in _seriesLocks.Values) gate.Dispose();
     }
 }

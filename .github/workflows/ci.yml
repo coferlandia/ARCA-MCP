@@ -87,6 +87,9 @@ jobs:
       - name: Restore MCP tests
         run: dotnet restore dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj
 
+      - name: Restore CLI tests
+        run: dotnet restore dcArca.Cli.Tests/dcArca.Cli.Tests.csproj
+
       - name: Build Core tests
         run: dotnet build dcArca.Core.Tests/dcArca.Core.Tests.csproj --configuration Release --no-restore
 
@@ -95,6 +98,9 @@ jobs:
 
       - name: Build CLI
         run: dotnet build dcArca.Cli/dcArca.Cli.csproj --configuration Release
+
+      - name: Build CLI tests
+        run: dotnet build dcArca.Cli.Tests/dcArca.Cli.Tests.csproj --configuration Release --no-restore
 
       - name: Validate Docker Compose
         env:
@@ -165,3 +171,6 @@ jobs:
 
       - name: Test MCP
         run: dotnet test dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj --configuration Release --no-build
+
+      - name: Test CLI
+        run: dotnet test dcArca.Cli.Tests/dcArca.Cli.Tests.csproj --configuration Release --no-build

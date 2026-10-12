@@ -1,6 +1,8 @@
 # Migración del store idempotente de emisiones
 
-El schema versionado de operaciones fiscales incorpora identidad durable de consumidor y contexto fiscal. Un store legacy no se interpreta usando silenciosamente la configuración actual: debe mapearse de forma explícita antes de habilitar el escritor.
+El schema versionado de operaciones fiscales incorpora identidad durable de consumidor y contexto fiscal. Desde el hardening posterior a #62, el lector conserva compatibilidad con operaciones **schema v2** sin provenance y **schema v3** con provenance; desde #74, toda operación nueva o reescrita se persiste en **schema v4**, que además modela el cierre durable `AbandonedBeforeSubmission`. Un registro v2 que contenga provenance es inválido, porque esa combinación permitiría que un binario anterior ignore silenciosamente el binding. Los manifests de contexto bajo `.contexts` continúan en schema v2 y tienen versionado independiente.
+
+Un store legacy sin `SchemaVersion` no se interpreta usando silenciosamente la configuración actual: debe mapearse de forma explícita antes de habilitar el escritor.
 
 ## Precondiciones
 
@@ -66,9 +68,9 @@ Una segunda ejecución sobre un store ya migrado es idempotente: valida el mappi
 
 ## Rollback
 
-Rollback sólo con el escritor detenido. Si todavía no hubo nuevas operaciones en schema v2, retirar el directorio actual y restaurar el backup por rename.
+Rollback sólo con el escritor detenido. La versión actual puede **leer** operaciones schema v2 históricas sin provenance y schema v3 con provenance, pero toda operación nueva o reescrita se persiste como schema v4. Un binario anterior a v4 debe rechazar esos registros; esa incompatibilidad es deliberada para impedir que ignore tanto `RepresentationProvenance` como el estado/auditoría de abandono pre-submission.
 
-Si hubo cualquier side effect fiscal posterior al backup, no hacer downgrade ciego: primero identificar y conciliar esas operaciones. Una versión antigua no debe arrancarse sobre schema v2 ni interpretar el store nuevo como vacío.
+Si todavía no hubo nuevas operaciones ni reescrituras en schema v4, puede evaluarse restaurar el backup por rename siguiendo el procedimiento de recuperación. Si existe cualquier registro v4 o hubo cualquier side effect fiscal posterior al backup, no hacer downgrade ciego: primero identificar y conciliar esas operaciones. Nunca editar `SchemaVersion` manualmente, eliminar provenance ni borrar el estado/auditoría de abandono para forzar un rollback.
 
 ## Cambio de credencial
 

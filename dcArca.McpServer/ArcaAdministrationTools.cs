@@ -10,11 +10,16 @@ namespace dcArca.McpServer;
 public sealed class ArcaAdministrationTools
 {
     private readonly FiscalRepresentationAdministration _admin;
+    private readonly FiscalOperationAdministration _operations;
     private readonly IHttpContextAccessor _accessor;
 
-    public ArcaAdministrationTools(FiscalRepresentationAdministration admin, IHttpContextAccessor accessor)
+    public ArcaAdministrationTools(
+        FiscalRepresentationAdministration admin,
+        FiscalOperationAdministration operations,
+        IHttpContextAccessor accessor)
     {
         _admin = admin;
+        _operations = operations;
         _accessor = accessor;
     }
 
@@ -53,4 +58,16 @@ public sealed class ArcaAdministrationTools
         string contextId, string consumerId, long representedCuit, int pointOfSale,
         CancellationToken cancellationToken = default)
         => _admin.RevokeAsync(Principal, contextId, consumerId, representedCuit, pointOfSale, cancellationToken);
+
+    [McpServerTool, Description("Abandona de forma auditada una operación Created/NumberAssigned antes del envío fiscal. Requiere operationId durable; nunca acepta idempotencyKey. reasonCode: manual_recovery, operator_cancelled, failed_before_submission o stale_pre_submission.")]
+    [Authorize(Policy = "ArcaAdministrar")]
+    public Task<AdministrativePreSubmissionAbandonmentResult> AbandonarOperacionPreSubmission(
+        string operationId,
+        string reasonCode,
+        CancellationToken cancellationToken = default)
+        => _operations.AbandonBeforeSubmissionAsync(
+            Principal,
+            operationId,
+            reasonCode,
+            cancellationToken);
 }

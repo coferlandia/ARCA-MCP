@@ -192,10 +192,12 @@ Copiar archivos antiguos directamente sobre el store no es un restore soportado.
 
 ## Health
 
-- `GET /health/live`: proceso vivo.
-- `GET /health/ready`: listo para nuevas emisiones; puede ser 503 durante recovery.
+- `GET /health/live`: proceso vivo. Sigue respondiendo aunque el catálogo fiscal local requiera intervención.
+- `GET /health/ready`: readiness **local** para operar. Valida recovery gate, catálogo V2 legible, IDs de ambiente canónicos y configurados, y referencias de credenciales activas resolubles en la configuración server-owned.
+- Un catálogo V2 vacío/provisionable puede estar `ready`: readiness no exige que ya exista una representación `Active`.
+- Los códigos 503 son seguros y acotados, por ejemplo `RESTORE_RECONCILIATION_REQUIRED`, `RECOVERY_GATE_UNREADABLE`, `FISCAL_CATALOG_UNREADABLE`, `FISCAL_ENVIRONMENT_UNRESOLVED` o `CREDENTIAL_REFERENCE_UNRESOLVED`.
 
-No llaman a ARCA ni revelan secretos/CUIT.
+Los endpoints de health no llaman a WSAA/WSFE, no prueban puntos de venta, no abren certificados y no revelan paths, passwords, CUIT, token/sign ni excepciones internas. Un 200 de `/health/ready` **no** constituye validación fiscal remota.
 
 ## Docker
 

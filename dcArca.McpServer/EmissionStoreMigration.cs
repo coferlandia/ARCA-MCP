@@ -226,10 +226,7 @@ public static class EmissionStoreMigration
             {
                 if (document.RootElement.TryGetProperty("SchemaVersion", out var schemaElement))
                 {
-                    var schemaVersion = schemaElement.GetInt32();
-                    if (schemaVersion != FileSystemEmissionIdempotencyStore.CurrentSchemaVersion)
-                        throw new InvalidDataException($"STORE_SCHEMA_UNSUPPORTED:{schemaVersion}");
-
+                    _ = schemaElement.GetInt32();
                     var current = JsonSerializer.Deserialize<EmissionIdempotencyRecord>(json)
                         ?? throw new InvalidDataException($"Registro vacío: {Path.GetFileName(path)}");
                     FileSystemEmissionIdempotencyStore.ValidateRecord(current);
@@ -309,7 +306,10 @@ public static class EmissionStoreMigration
     }
 
     private static bool IsPending(EmissionIdempotencyState state)
-        => state is not (EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected);
+        => state is not (
+            EmissionIdempotencyState.Authorized
+            or EmissionIdempotencyState.FiscalRejected
+            or EmissionIdempotencyState.AbandonedBeforeSubmission);
 
     private static void ValidateHash(string value, string field)
     {

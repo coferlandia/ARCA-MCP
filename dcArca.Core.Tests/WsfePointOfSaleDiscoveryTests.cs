@@ -1,3 +1,4 @@
+using dcArca.Core.Models;
 using dcArca.Core.Services;
 using Xunit;
 
@@ -5,6 +6,40 @@ namespace dcArca.Core.Tests;
 
 public class WsfePointOfSaleDiscoveryTests
 {
+    [Fact]
+    public void CredentialHostBinding_NoExponeConstructorPublicoForjable()
+    {
+        Assert.Empty(typeof(FiscalCredentialHostBinding).GetConstructors());
+    }
+
+    [Fact]
+    public void CredentialHostBinding_SnapshotNoPuedeMutarseDespuesDeEmitido()
+    {
+        var source = new dcArcaConfig
+        {
+            Environment = "homologacion",
+            Cuit = "20123456786",
+            PuntoVenta = 7,
+            CertificatePath = "credential-a.pfx",
+            CertificatePassword = "secret-a",
+            WsaaUrl = "https://wsaa-a.invalid",
+            WsfeUrl = "https://wsfe-a.invalid",
+            PadronUrl = "https://padron-a.invalid"
+        };
+        var binding = new FiscalCredentialHostBinding("cred-a", "cache-a", source);
+
+        source.CertificatePath = "credential-b.pfx";
+        var exposed = binding.Config;
+        exposed.CertificatePath = "credential-c.pfx";
+        exposed.CertificatePassword = "secret-c";
+        exposed.WsfeUrl = "https://wsfe-c.invalid";
+
+        var reread = binding.Config;
+        Assert.Equal("credential-a.pfx", reread.CertificatePath);
+        Assert.Equal("secret-a", reread.CertificatePassword);
+        Assert.Equal("https://wsfe-a.invalid", reread.WsfeUrl);
+    }
+
     [Theory]
     [InlineData("600", "token")]
     [InlineData("601", "CUIT")]
@@ -52,6 +87,101 @@ public class WsfePointOfSaleDiscoveryTests
     }
 
     [Fact]
+    public void ProbeBound_NoConservaTokenStoreEntreInvocaciones()
+    {
+        Assert.DoesNotContain(
+            typeof(dcWsfePointOfSaleProbe).GetFields(
+                System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.NonPublic
+                | System.Reflection.BindingFlags.Public),
+            field => typeof(IWsaaTokenStore).IsAssignableFrom(field.FieldType));
+    }
+
+    [Fact]
+    public async Task ProbeBound_IgnoraTicketPresembradoEnSharedCache()
+    {
+        var context = new FiscalTechnicalContextRecord(
+            "operator-homo",
+            "homologacion",
+            FiscalContextOperationalState.Active,
+            1,
+            [
+                new CredentialAssignmentRecord(
+                    "rev-1",
+                    "cred-a",
+                    CredentialAssignmentStatus.Active,
+                    "validated",
+                    DateTimeOffset.UtcNow.AddMinutes(-2),
+                    DateTimeOffset.UtcNow.AddMinutes(-2),
+                    DateTimeOffset.UtcNow.AddMinutes(-1),
+                    "admin")
+            ]);
+        var assignment = context.ActiveAssignment!;
+        var binding = new FiscalCredentialHostBinding(
+            "cred-a",
+            "homologacion:cred-a",
+            new dcArcaConfig
+            {
+                Environment = "homologacion",
+                Cuit = "20123456786",
+                PuntoVenta = 7,
+                CertificatePath = Path.Combine(Path.GetTempPath(), "credential-a-does-not-exist.pfx"),
+                CertificatePassword = "secret-a",
+                WsaaUrl = "https://wsaa.example.invalid",
+                WsfeUrl = "https://wsfe.example.invalid",
+                PadronUrl = "https://padron.example.invalid"
+            });
+        var sharedKey = binding.CacheIdentity + "_wsfe";
+        await MemoryWsaaTokenStore.Shared.WriteAsync(
+            sharedKey,
+            new WsaaTokenEntry(
+                "ticket-from-other-credential",
+                "sign-from-other-credential",
+                DateTime.UtcNow.AddHours(1)));
+
+        try
+        {
+            var representation = new FiscalRepresentationRecord(
+                "operator-homo",
+                "consumer-a",
+                20123456786,
+                7,
+                FiscalRepresentationStatus.Pending,
+                DateTimeOffset.UtcNow.AddMinutes(-1),
+                "admin");
+
+            var result = await new dcWsfePointOfSaleProbe().ProbeBoundAsync(
+                context,
+                assignment,
+                representation,
+                20123456786,
+                7,
+                binding,
+                new HttpClient(new ThrowIfCalledHandler()));
+
+            Assert.Equal("WSAA_AUTHORIZATION_NOT_VERIFIED", result.Probe.Code);
+        }
+        finally
+        {
+            await MemoryWsaaTokenStore.Shared.RemoveAsync(sharedKey);
+        }
+    }
+
+    [Fact]
+    public void ProbeBound_NoExponeAuthenticadorNiTokenStoreComoInputDelCaller()
+    {
+        var method = typeof(dcWsfePointOfSaleProbe).GetMethod(
+            "ProbeBoundAsync",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+
+        Assert.NotNull(method);
+        Assert.DoesNotContain(
+            method!.GetParameters(),
+            parameter => parameter.ParameterType == typeof(dcArcaAuthService)
+                || parameter.ParameterType == typeof(IWsaaTokenStore));
+    }
+
+    [Fact]
     public void PvManual_EsPermitidoSoloPara602SinResultados()
     {
         var listing = dcWsfePointOfSaleProbe.ParseListingResponse(
@@ -88,6 +218,14 @@ public class WsfePointOfSaleDiscoveryTests
         var result = dcWsfePointOfSaleProbe.EvaluatePointOfSale(77, listing);
         Assert.False(result.CanActivate);
         Assert.Equal("POINT_OF_SALE_BLOCKED", result.Code);
+    }
+
+    private sealed class ThrowIfCalledHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+            => throw new InvalidOperationException("HTTP_SHOULD_NOT_BE_CALLED");
     }
 
     private static string Envelope(string body) =>

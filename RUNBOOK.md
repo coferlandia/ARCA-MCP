@@ -71,6 +71,8 @@ git check-ignore -v dcArca.McpServer/appsettings.prod.json secrets/certificado.p
 
 Los scripts SCP **no** descargan/suben `/data`, **no** eliminan archivos sobrantes, **no** hacen rollback y **no** reinician Docker. En configuración productiva, el contenedor lee `/app/appsettings.json`. El certificado se referencia por su ruta **interna** `/certs/certificado.pfx`; no utilizar la ruta Windows/Ubuntu dentro de `FiscalCredentials`.
 
+La configuración fiscal vigente es V2. Los IDs de ambiente fiscal son estrictamente `homologacion` y `produccion`; no crear secciones alias (`homo`, `prod`, mayúsculas, espacios, etc.). La CLI puede normalizar casing/whitespace al crear un contexto nuevo, pero un catálogo persistido no canónico debe corregirse mediante procedimiento explícito y nunca se reinterpreta silenciosamente.
+
 La configuración fiscal vigente es V2:
 
 ```json
@@ -146,9 +148,11 @@ docker exec dcarca-mcpserver curl -fsS http://127.0.0.1:8080/health/live
 docker exec dcarca-mcpserver curl -fsS http://127.0.0.1:8080/health/ready
 ```
 
-Esperado: contenedor `healthy`, `{"status":"alive"}`, `{"status":"ready"}`. La advertencia sobre Docker Bake/buildx no fue bloqueante. Los avisos ASP.NET DataProtection observados no bloquearon el arranque y deberán evaluarse si el proceso necesita persistir esas claves.
+Esperado: contenedor `healthy`, `{"status":"alive"}`, `{"status":"ready"}`. `/health/ready` valida exclusivamente estructura local: recovery gate, catálogo V2, environments canónicos/configurados y referencias de credenciales activas. No llama ARCA ni abre el PFX; por lo tanto un 200 no demuestra autorización WSAA/WSFE ni habilitación del PV. Un catálogo vacío pero provisionable puede estar ready. Si devuelve 503, corregir el código seguro informado antes de habilitar nuevas emisiones.
 
-No usar `docker compose down -v`. No recrear con `docker run` manual: se perderían los montajes y la definición real de redes/Traefik. Para rollback binario revisar compatibilidad de schema; no restaurar `/data` antiguo automáticamente.
+La advertencia sobre Docker Bake/buildx no fue bloqueante. Los avisos ASP.NET DataProtection observados no bloquearon el arranque y deberán evaluarse si el proceso necesita persistir esas claves.
+
+No usar `docker compose down -v`. No recrear con `docker run` manual: se perderían los montajes y la definición real de redes/Traefik. Para rollback binario revisar compatibilidad de schema; no restaurar `/data` antiguo automáticamente. El lector actual soporta operaciones v2 legacy sin provenance y v3 con provenance; las operaciones nuevas o reescritas se escriben en schema v4 para preservar también el cierre `AbandonedBeforeSubmission`. Un binario pre-v4 debe fallar cerrado al encontrarlas; no bajar manualmente `SchemaVersion`, quitar provenance ni borrar auditoría/estado de abandono para forzar compatibilidad.
 
 ## 6. Provisionamiento V2 (homologación actual)
 
@@ -209,12 +213,23 @@ En octubre de 2026 se decidió descartar sólo el estado histórico de pruebas t
 
 ## 10. Troubleshooting y mantenimiento
 
+### Abandono administrativo pre-submission
+
+Usar `abandonar_operacion_pre_submission(operationId, reasonCode)` únicamente para cerrar trabajo que el store durable todavía marque como `Created` o `NumberAssigned` y cuya intención ya no deba continuar. La key debe tener `arca:administrar`, grant `<contextId>:administrar` para el contexto durable y el mismo `consumerId` que la operación. El `operationId` es obligatorio; no sustituirlo por una `idempotencyKey`.
+
+La operación persiste actor, timestamp y `reasonCode`, conserva cualquier número ya reservado y libera sólo la reserva cuyo owner coincide exactamente. La respuesta informa estado previo/final y si se liberó la reserva. Una repetición sobre la misma operación ya abandonada es idempotente y conserva la auditoría original.
+
+**Prohibido** usar este procedimiento sobre `Submitting` o `Uncertain`, borrar archivos del store, editar JSON durable o liberar una serie manualmente para destrabarla. Esos estados pueden haber cruzado el side effect fiscal y deben reconciliarse. El `reasonCode` no admite texto libre: debe ser exactamente uno de `manual_recovery`, `operator_cancelled`, `failed_before_submission` o `stale_pre_submission`. El servidor rechaza cualquier otro valor antes de persistirlo o loguearlo; nunca colocar secretos ni credenciales en este campo.
+
 - `docker compose config` devuelve `invalid spec :/app/appsettings.json`: falta `--env-file .env`.
 - `scp` ve carpetas vacías o `Permission denied`: el store es propiedad de root; usar backup en frío con `sudo tar`, sin cambiar propietarios.
 - `401/403`: revisar API key, scopes, `consumerId` y grants; no compartir secretos en tickets.
 - `SERIES_WRITER_BUSY`: comprobar writer concurrente; nunca borrar locks a ciegas.
 - `SERIES_RESERVATION_BLOCKED`, `Submitting`, `Uncertain`: reconciliar operación previa; nunca emitir con otra key ni saltar número.
 - `RESTORE_RECONCILIATION_REQUIRED`: el recovery gate impide nuevas emisiones hasta documentar conciliación.
+- `FISCAL_CATALOG_UNREADABLE`: catálogo V2 corrupto/schema inválido/V1 pendiente; mantener live para diagnóstico y reparar mediante procedimiento controlado, no editar JSON a ciegas.
+- `FISCAL_ENVIRONMENT_UNRESOLVED`: un contexto referencia un environment canónico que no tiene los tres endpoints locales configurados.
+- `CREDENTIAL_REFERENCE_UNRESOLVED`: una assignment activa referencia un `credentialId` sin `CertificatePath` server-owned. El health no intenta abrir ese archivo ni autenticar contra WSAA.
 - CAE autorizado pero PDF fallido: reintentar solo el render, no la emisión fiscal.
 - Comprobar fechas de expiración de PFX, backups, disco y CI.
 

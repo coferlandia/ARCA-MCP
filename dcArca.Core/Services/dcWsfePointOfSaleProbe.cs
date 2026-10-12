@@ -24,6 +24,20 @@ public sealed record dcPointOfSaleAccessProbeResult(
     public bool CanActivate => Status is dcPointOfSaleProbeStatus.Verified or dcPointOfSaleProbeStatus.ManualUnverified;
 }
 
+public sealed class FiscalRepresentationProbeOutcome
+{
+    internal FiscalRepresentationProbeOutcome(
+        FiscalRepresentationProbeIdentity identity,
+        dcPointOfSaleAccessProbeResult probe)
+    {
+        Identity = identity ?? throw new ArgumentNullException(nameof(identity));
+        Probe = probe ?? throw new ArgumentNullException(nameof(probe));
+    }
+
+    public FiscalRepresentationProbeIdentity Identity { get; }
+    public dcPointOfSaleAccessProbeResult Probe { get; }
+}
+
 public sealed record dcWsfePointOfSale(
     int Number,
     string? EmissionType,
@@ -47,6 +61,26 @@ public sealed record dcPointOfSaleListingResult(
 /// </summary>
 public sealed class dcWsfePointOfSaleProbe
 {
+    private readonly Func<FiscalCredentialHostBinding, dcArcaAuthService> _boundAuthFactory;
+
+    public dcWsfePointOfSaleProbe()
+        : this(binding => new dcArcaAuthService(
+            binding.Config.WsaaUrl,
+            binding.Config.CertificatePath,
+            binding.Config.CertificatePassword,
+            binding.CacheIdentity,
+            serviceName: "wsfe",
+            tokenStore: new MemoryWsaaTokenStore()))
+    {
+    }
+
+    internal dcWsfePointOfSaleProbe(
+        Func<FiscalCredentialHostBinding, dcArcaAuthService> boundAuthFactory)
+    {
+        _boundAuthFactory = boundAuthFactory
+            ?? throw new ArgumentNullException(nameof(boundAuthFactory));
+    }
+
     public async Task<dcPointOfSaleListingResult> ListAsync(
         dcArcaConfig config,
         dcArcaAuthService authService,
@@ -98,6 +132,73 @@ public sealed class dcWsfePointOfSaleProbe
         {
             return Failed("WSFE_ACCESS_NOT_VERIFIED", "No se pudo completar el diagnóstico remoto de WSFE.", checkedAt);
         }
+    }
+
+    public async Task<FiscalRepresentationProbeOutcome> ProbeBoundAsync(
+        FiscalTechnicalContextRecord context,
+        CredentialAssignmentRecord assignment,
+        FiscalRepresentationRecord representation,
+        long representedCuit,
+        int pointOfSale,
+        FiscalCredentialHostBinding binding,
+        HttpClient httpClient,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(assignment);
+        ArgumentNullException.ThrowIfNull(representation);
+        ArgumentNullException.ThrowIfNull(binding);
+        ArgumentNullException.ThrowIfNull(httpClient);
+
+        var activeAssignment = context.ActiveAssignment;
+        if (string.IsNullOrWhiteSpace(context.ContextId)
+            || string.IsNullOrWhiteSpace(context.Environment)
+            || context.OperationalState != FiscalContextOperationalState.Active
+            || activeAssignment is null
+            || !string.Equals(
+                activeAssignment.AssignmentRevision,
+                assignment.AssignmentRevision,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                activeAssignment.CredentialId,
+                assignment.CredentialId,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                binding.CredentialId,
+                assignment.CredentialId,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                binding.Config.Environment,
+                context.Environment,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                representation.ContextId,
+                context.ContextId,
+                StringComparison.Ordinal)
+            || representation.RepresentedCuit != representedCuit
+            || representation.PointOfSale != pointOfSale
+            || !FiscalRepresentationLifecyclePolicy.IsRevalidableStatus(representation.Status)
+            || representedCuit <= 0
+            || pointOfSale <= 0
+            || !long.TryParse(binding.Config.Cuit, out var configuredCuit)
+            || configuredCuit != representedCuit
+            || binding.Config.PuntoVenta != pointOfSale)
+            throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
+
+        var identity = new FiscalRepresentationProbeIdentity(
+            context.ContextId,
+            context.Environment,
+            representedCuit,
+            pointOfSale,
+            assignment.AssignmentRevision,
+            representation.CreatedAt);
+        var authService = _boundAuthFactory(binding);
+        var result = await ProbeAsync(
+            binding.Config,
+            authService,
+            httpClient,
+            cancellationToken);
+        return new FiscalRepresentationProbeOutcome(identity, result);
     }
 
     public async Task<dcPointOfSaleAccessProbeResult> ProbeAsync(

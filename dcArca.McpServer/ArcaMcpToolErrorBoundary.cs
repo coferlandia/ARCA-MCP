@@ -98,6 +98,25 @@ public static class ArcaMcpToolErrorBoundary
             return true;
         }
 
+        if (exception is PreSubmissionAbandonmentException abandonment)
+        {
+            switch (abandonment.Code)
+            {
+                case "OPERATION_NOT_FOUND":
+                    code = "OPERATION_NOT_FOUND";
+                    safeMessage = "No existe una operación administrable con ese identificador.";
+                    return true;
+                case "OPERATION_ABANDON_NOT_ALLOWED":
+                    code = "OPERATION_ABANDON_NOT_ALLOWED";
+                    safeMessage = "La operación ya cruzó el límite seguro de abandono o está en un estado incompatible.";
+                    return true;
+                case "OPERATION_RESERVATION_MISMATCH":
+                    code = "OPERATION_RESERVATION_MISMATCH";
+                    safeMessage = "La reserva fiscal no coincide con la operación; no se realizó ningún cambio.";
+                    return true;
+            }
+        }
+
         // The V2 filesystem catalog still exposes a small set of repository-owned
         // machine codes as InvalidOperationException.Message. Normalize only this
         // exact whitelist; never parse arbitrary exception text or use regex matching.

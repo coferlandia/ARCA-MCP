@@ -4,7 +4,7 @@ ARCA-MCP autentica mediante `Authorization: Bearer sk-arca-...` y un hash persis
 
 ## Capas de autorización
 
-1. Scope general de la key: `arca:consultar` (lectura, PDF, diagnóstico, reconciliación), `arca:facturar` (validar, emitir), o `arca:administrar` (provisionamiento y revocación).
+1. Scope general de la key: `arca:consultar` (lectura, PDF, diagnóstico, reconciliación), `arca:facturar` (validar, emitir), o `arca:administrar` (provisionamiento, revocación y recuperación administrativa pre-submission).
 2. Grant explícito para el contexto y la operación: `operador-homo:consultar`, `operador-homo:facturar` o `operador-homo:administrar`.
 3. Representación `Active` registrada para ese `consumerId + contextId + representedCuit + pointOfSale`. Un grant de contexto no permite por implicancia todos los representados del mismo certificado.
 
@@ -28,5 +28,8 @@ El backend de SecretarIA controla tenant→CUIT/PV, aceptación humana y estado 
 - `seleccionar_punto_venta(contextId,consumerId,representedCuit,pointOfSale)`: conserva estado pendiente.
 - `activar_representacion_fiscal(contextId,consumerId,representedCuit,pointOfSale)`: revalida PV ante ARCA y activa con evidencia.
 - `revocar_representacion_fiscal(contextId,consumerId,representedCuit,pointOfSale)`: revocación local inmediata.
+- `abandonar_operacion_pre_submission(operationId,reasonCode)`: cierra de forma auditada una operación durable que todavía está en `Created` o `NumberAssigned`; no acepta `idempotencyKey`.
+
+El abandono administrativo de operaciones es deliberadamente más restrictivo que el provisionamiento de representaciones: además de `arca:administrar` y el grant `contextId:administrar` del contexto durable, la key administrativa debe tener el mismo `consumerId` que la operación. Un `operationId` de otro namespace se trata como inexistente. `Submitting` y `Uncertain` nunca pueden abandonarse por esta vía: deben reconciliarse. La razón no es texto libre: sólo se aceptan los códigos server-owned `manual_recovery`, `operator_cancelled`, `failed_before_submission` o `stale_pre_submission`. Cualquier otro valor —aunque tenga formato machine-safe— se rechaza antes de persistir o loguear. El actor se deriva de la API key autenticada y no puede ser inyectado por el caller.
 
 Los errores devuelven códigos seguros y nunca rutas secretas, passwords o Token/Sign. `WSFE_600`, `WSFE_601` y `WSFE_602` permanecen distintos; 602 no demuestra por sí solo una revocación de delegación.

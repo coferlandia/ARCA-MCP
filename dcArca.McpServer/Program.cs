@@ -82,8 +82,15 @@ builder.Services.AddSingleton<IFiscalAssignmentAuthorizationValidator>(sp => new
     sp.GetRequiredService<IFiscalTechnicalContextStore>(),
     sp.GetRequiredService<IFiscalCredentialMaterializer>(),
     sp.GetRequiredService<IHttpClientFactory>()));
+builder.Services.AddSingleton<FiscalRepresentationLifecyclePolicy>();
 builder.Services.AddSingleton<FiscalRepresentationAdministration>();
+builder.Services.AddSingleton<PreSubmissionAbandonmentService>();
+builder.Services.AddSingleton<FiscalOperationAdministration>();
 builder.Services.AddSingleton<McpOperationContractService>();
+builder.Services.AddSingleton(sp => new FiscalLocalReadinessValidator(
+    sp.GetRequiredService<IEmissionRecoveryGate>(),
+    fiscalContextsDirectory,
+    builder.Configuration));
 
 builder.Services.AddSingleton<PdfDocumentRenderer>();
 builder.Services.AddSingleton<ObservablePdfDocumentRenderer>();
@@ -138,11 +145,6 @@ var app = builder.Build();
 var recoveryGateService = app.Services.GetRequiredService<FileSystemEmissionRecoveryGate>();
 using var recoveryRuntimeLease = recoveryGateService.AcquireRuntimeLease();
 
-// The V2 fiscal catalog must be explicitly provisioned. Legacy identity data
-// is not auto-transformed and requires a separately authorized cutover/reset.
-await app.Services.GetRequiredService<IFiscalTechnicalContextStore>()
-    .ListContextsAsync();
-
 var concreteEmissionStore = app.Services.GetRequiredService<FileSystemEmissionIdempotencyStore>();
 var concreteSeriesCoordinator = app.Services.GetRequiredService<FileSystemFiscalSeriesCoordinator>();
 await concreteSeriesCoordinator.InitializeAsync(concreteEmissionStore);
@@ -151,30 +153,28 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "alive" }));
-app.MapGet("/health/ready", async (IEmissionRecoveryGate recoveryGate, CancellationToken cancellationToken) =>
+app.MapGet("/health/ready", async (
+    FiscalLocalReadinessValidator readiness,
+    CancellationToken cancellationToken) =>
 {
-    try
-    {
-        var block = await recoveryGate.GetBlockAsync(cancellationToken);
-        return block is null
-            ? Results.Ok(new { status = "ready" })
-            : Results.Json(new
-            {
-                status = "not-ready",
-                code = "RESTORE_RECONCILIATION_REQUIRED",
-                restoreId = block.RestoreId,
-                backupCreatedAt = block.BackupCreatedAt,
-                restoredAt = block.RestoredAt
-            }, statusCode: StatusCodes.Status503ServiceUnavailable);
-    }
-    catch (Exception)
-    {
-        return Results.Json(new
+    var result = await readiness.ValidateAsync(cancellationToken);
+    if (result.Ready)
+        return Results.Ok(new { status = "ready" });
+
+    return result.RecoveryBlock is { } block
+        ? Results.Json(new
         {
             status = "not-ready",
-            code = "RECOVERY_GATE_UNREADABLE"
+            code = result.Code,
+            restoreId = block.RestoreId,
+            backupCreatedAt = block.BackupCreatedAt,
+            restoredAt = block.RestoredAt
+        }, statusCode: StatusCodes.Status503ServiceUnavailable)
+        : Results.Json(new
+        {
+            status = "not-ready",
+            code = result.Code
         }, statusCode: StatusCodes.Status503ServiceUnavailable);
-    }
 });
 
 app.MapMcp().RequireAuthorization();

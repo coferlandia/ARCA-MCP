@@ -35,7 +35,14 @@ public sealed class FiscalAuthorizationRaceTests
             FiscalContextOperationalState.Active, 1, false, [assignment]);
         var identity = new SingleFiscalOperationIdentityProvider(
             config, new SingleFiscalContextOptions(
-                "consumer-a", "operator-homo", "homologacion", 1, "rev-1"));
+                "consumer-a",
+                "operator-homo",
+                "homologacion",
+                1,
+                "rev-1",
+                new FiscalRepresentationProvenance(
+                    assignment.ActivatedAt!.Value.AddMinutes(-1),
+                    assignment.ActivatedAt.Value)));
         var runtime = new FiscalContextRuntime(
             "consumer-a", context, assignment, config, wsfe, null!, identity);
         var resolver = new MutableContextResolver(runtime);
@@ -72,6 +79,147 @@ public sealed class FiscalAuthorizationRaceTests
         Assert.Equal(EmissionIdempotencyState.NumberAssigned, stored!.State);
     }
 
+    [Fact]
+    public async Task ReemplazoDeRepresentacionDuranteRevalidacion_NoCruzaLimiteDeCAE()
+    {
+        using var temp = new TempDirectory();
+        var operations = new FileSystemEmissionIdempotencyStore(temp.Path);
+        using var coordinator = new InMemoryFiscalSeriesCoordinator();
+        var wsfe = new PausedNumberingWsfeClient();
+        var config = new dcArcaConfig
+        {
+            Cuit = RepresentedCuit.ToString(),
+            PuntoVenta = 7,
+            WsfeUrl = "https://example.invalid/wsfe"
+        };
+        var activatedAt = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var assignment = new CredentialAssignmentRecord(
+            "rev-1", "cred-1", CredentialAssignmentStatus.Active,
+            "validated", activatedAt, activatedAt,
+            activatedAt, "admin");
+        var context = new RepresentedFiscalContextRecord(
+            "operator-homo", "homologacion", RepresentedCuit, 7,
+            FiscalContextOperationalState.Active, 1, false, [assignment]);
+        var identity = new SingleFiscalOperationIdentityProvider(
+            config, new SingleFiscalContextOptions(
+                "consumer-a",
+                "operator-homo",
+                "homologacion",
+                1,
+                "rev-1",
+                new FiscalRepresentationProvenance(
+                    assignment.ActivatedAt!.Value.AddMinutes(-1),
+                    assignment.ActivatedAt.Value)));
+        var runtime = new FiscalContextRuntime(
+            "consumer-a", context, assignment, config, wsfe, null!, identity);
+        var resolver = new MutableContextResolver(runtime);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ArcaClaimTypes.ConsumerId, "consumer-a"),
+            new Claim("scope", "arca:facturar"),
+            new Claim(ArcaClaimTypes.ContextGrant,
+                ArcaClaimTypes.GrantValue("operator-homo", "facturar"))
+        ], "test"));
+        var tools = new ArcaTools(
+            resolver, operations, coordinator, null!,
+            new McpOperationContractService(operations, null!, resolver, null!, coordinator),
+            new HttpContextAccessor { HttpContext = new DefaultHttpContext { User = principal } });
+
+        var emission = tools.EmitirComprobanteAvanzado(
+            Request(), "race-representation-replacement", "operator-homo", RepresentedCuit, 7);
+        await wsfe.RevalidationEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Current authorization still looks Active with the same assignment revision/environment,
+        // but the operation-era representation has been revoked/replaced while numbering was in flight.
+        resolver.HistoricalEmissionAllowed = false;
+        wsfe.ResumeRevalidation.TrySetResult();
+
+        var error = await Assert.ThrowsAsync<FiscalContextAccessException>(() => emission);
+        Assert.Equal("FISCAL_REPRESENTATION_FORBIDDEN", error.Code);
+        Assert.Equal(2, wsfe.LastNumberCalls);
+        Assert.Equal(0, wsfe.EmitCalls);
+        Assert.Equal(1, resolver.HistoricalEmissionAuthorizeCalls);
+
+        var keyHash = EmissionRequestFingerprint.OperationKeyHash(
+            "consumer-a", "operator-homo", RepresentedCuit, 7,
+            "race-representation-replacement");
+        var stored = await operations.GetAsync(keyHash);
+        Assert.NotNull(stored);
+        Assert.Equal(EmissionIdempotencyState.NumberAssigned, stored!.State);
+    }
+
+    [Fact]
+    public async Task ReemplazoAntesDePersistirOperacion_NoCruzaLimiteDeCAE()
+    {
+        using var temp = new TempDirectory();
+        var durableStore = new FileSystemEmissionIdempotencyStore(temp.Path);
+        var operations = new PausingCreateStore(durableStore);
+        using var coordinator = new InMemoryFiscalSeriesCoordinator();
+        var wsfe = new PausedNumberingWsfeClient { PauseRevalidation = false };
+        var config = new dcArcaConfig
+        {
+            Cuit = RepresentedCuit.ToString(),
+            PuntoVenta = 7,
+            WsfeUrl = "https://example.invalid/wsfe"
+        };
+        var activatedAt = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var assignment = new CredentialAssignmentRecord(
+            "rev-1", "cred-1", CredentialAssignmentStatus.Active,
+            "validated", activatedAt, activatedAt,
+            activatedAt, "admin");
+        var context = new RepresentedFiscalContextRecord(
+            "operator-homo", "homologacion", RepresentedCuit, 7,
+            FiscalContextOperationalState.Active, 1, false, [assignment]);
+        var identity = new SingleFiscalOperationIdentityProvider(
+            config, new SingleFiscalContextOptions(
+                "consumer-a",
+                "operator-homo",
+                "homologacion",
+                1,
+                "rev-1",
+                new FiscalRepresentationProvenance(
+                    assignment.ActivatedAt!.Value.AddMinutes(-1),
+                    assignment.ActivatedAt.Value)));
+        var runtime = new FiscalContextRuntime(
+            "consumer-a", context, assignment, config, wsfe, null!, identity);
+        var resolver = new MutableContextResolver(runtime);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ArcaClaimTypes.ConsumerId, "consumer-a"),
+            new Claim("scope", "arca:facturar"),
+            new Claim(ArcaClaimTypes.ContextGrant,
+                ArcaClaimTypes.GrantValue("operator-homo", "facturar"))
+        ], "test"));
+        var tools = new ArcaTools(
+            resolver, operations, coordinator, null!,
+            new McpOperationContractService(operations, null!, resolver, null!, coordinator),
+            new HttpContextAccessor { HttpContext = new DefaultHttpContext { User = principal } });
+
+        var emission = tools.EmitirComprobanteAvanzado(
+            Request(), "race-before-operation-persist", "operator-homo", RepresentedCuit, 7);
+        await operations.CreateEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // The request was admitted with the original representation, but before the durable
+        // operation exists that representation is revoked and an exact replacement is activated.
+        resolver.EntryRepresentationStillCurrent = false;
+        operations.ResumeCreate.TrySetResult();
+
+        var error = await Assert.ThrowsAsync<FiscalContextAccessException>(() => emission);
+        Assert.Equal("FISCAL_REPRESENTATION_FORBIDDEN", error.Code);
+        Assert.Equal(0, wsfe.EmitCalls);
+
+        var keyHash = EmissionRequestFingerprint.OperationKeyHash(
+            "consumer-a", "operator-homo", RepresentedCuit, 7,
+            "race-before-operation-persist");
+        var stored = await durableStore.GetAsync(keyHash);
+        Assert.NotNull(stored);
+        Assert.Equal(EmissionIdempotencyState.NumberAssigned, stored!.State);
+        Assert.NotNull(stored.Identity.RepresentationProvenance);
+        Assert.Equal(
+            identity.For(dcTipoComprobante.FacturaB).RepresentationProvenance,
+            stored.Identity.RepresentationProvenance);
+    }
+
     private static dcFacturaRequest Request() => new()
     {
         TipoComprobante = dcTipoComprobante.FacturaB,
@@ -89,6 +237,9 @@ public sealed class FiscalAuthorizationRaceTests
     private sealed class MutableContextResolver(FiscalContextRuntime runtime) : IFiscalContextRuntimeResolver
     {
         public FiscalContextOperationalState State { get; set; } = FiscalContextOperationalState.Active;
+        public bool HistoricalEmissionAllowed { get; set; } = true;
+        public bool EntryRepresentationStillCurrent { get; set; } = true;
+        public int HistoricalEmissionAuthorizeCalls { get; private set; }
 
         public Task<AuthorizedFiscalContext> AuthorizeAsync(
             ClaimsPrincipal principal, string? contextId, string operation,
@@ -105,10 +256,78 @@ public sealed class FiscalAuthorizationRaceTests
             ClaimsPrincipal principal, string? contextId, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
+        public Task<AuthorizedFiscalContext> AuthorizeHistoricalEmissionAsync(
+            ClaimsPrincipal principal,
+            EmissionIdempotencyRecord operation,
+            CancellationToken cancellationToken = default)
+        {
+            HistoricalEmissionAuthorizeCalls++;
+            if (!HistoricalEmissionAllowed
+                || (!EntryRepresentationStillCurrent
+                    && operation.Identity.RepresentationProvenance is not null))
+                throw new FiscalContextAccessException(
+                    "FISCAL_REPRESENTATION_FORBIDDEN",
+                    "La representación histórica de la operación fue reemplazada.");
+            return Task.FromResult(new AuthorizedFiscalContext(
+                runtime.ConsumerId,
+                runtime.Context with { OperationalState = State },
+                operation.Identity.RepresentationProvenance));
+        }
+
         public Task<FiscalContextRuntime> ResolveForHistoricalOperationAsync(
             ClaimsPrincipal principal, EmissionIdempotencyRecord operation,
             CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+    }
+
+    private sealed class PausingCreateStore : IEmissionIdempotencyStore
+    {
+        private readonly IEmissionIdempotencyStore _inner;
+        private int _paused;
+
+        public PausingCreateStore(IEmissionIdempotencyStore inner) => _inner = inner;
+
+        public TaskCompletionSource CreateEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ResumeCreate { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task EnsureContextAsync(
+            FiscalContextDescriptor context,
+            CancellationToken cancellationToken = default)
+            => _inner.EnsureContextAsync(context, cancellationToken);
+
+        public async Task<EmissionIdempotencyRecord> GetOrCreateAsync(
+            string keyHash,
+            string requestHash,
+            int requestCanonicalizationVersion,
+            FiscalOperationIdentity identity,
+            StoredFiscalEvidence fiscalEvidence,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Exchange(ref _paused, 1) == 0)
+            {
+                CreateEntered.TrySetResult();
+                await ResumeCreate.Task.WaitAsync(cancellationToken);
+            }
+            return await _inner.GetOrCreateAsync(
+                keyHash,
+                requestHash,
+                requestCanonicalizationVersion,
+                identity,
+                fiscalEvidence,
+                cancellationToken);
+        }
+
+        public Task<EmissionIdempotencyRecord?> GetAsync(
+            string keyHash,
+            CancellationToken cancellationToken = default)
+            => _inner.GetAsync(keyHash, cancellationToken);
+
+        public Task SaveAsync(
+            EmissionIdempotencyRecord record,
+            CancellationToken cancellationToken = default)
+            => _inner.SaveAsync(record, cancellationToken);
     }
 
     private sealed class PausedNumberingWsfeClient : IdcWsfeClient
@@ -116,6 +335,7 @@ public sealed class FiscalAuthorizationRaceTests
         private int _lastNumberCalls;
         private int _emitCalls;
 
+        public bool PauseRevalidation { get; init; } = true;
         public TaskCompletionSource RevalidationEntered { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ResumeRevalidation { get; } =
@@ -127,7 +347,7 @@ public sealed class FiscalAuthorizationRaceTests
         public async Task<dcFacturaResponse> FECompUltimoAutorizadoAsync(
             dcTipoComprobante tipoComprobante, CancellationToken cancellationToken = default)
         {
-            if (Interlocked.Increment(ref _lastNumberCalls) == 2)
+            if (Interlocked.Increment(ref _lastNumberCalls) == 2 && PauseRevalidation)
             {
                 RevalidationEntered.TrySetResult();
                 await ResumeRevalidation.Task.WaitAsync(cancellationToken);

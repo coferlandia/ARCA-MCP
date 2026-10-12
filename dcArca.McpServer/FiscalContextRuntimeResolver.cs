@@ -24,7 +24,8 @@ public sealed class FiscalContextAccessException : Exception
 
 public sealed record AuthorizedFiscalContext(
     string ConsumerId,
-    RepresentedFiscalContextRecord Context);
+    RepresentedFiscalContextRecord Context,
+    FiscalRepresentationProvenance? RepresentationProvenance = null);
 
 public sealed class FiscalContextRuntime : IDisposable
 {
@@ -98,6 +99,30 @@ public interface IFiscalContextRuntimeResolver
         => ResolveForEmissionAsync(principal, requestedContextId, idempotencyKey,
             tipoComprobante, cancellationToken);
 
+    Task<AuthorizedFiscalContext> AuthorizeHistoricalOperationAsync(
+        ClaimsPrincipal principal,
+        EmissionIdempotencyRecord operation,
+        CancellationToken cancellationToken = default)
+        => AuthorizeAsync(
+            principal,
+            operation.Identity.ContextId,
+            "consultar",
+            operation.Identity.Cuit,
+            operation.Identity.PuntoVenta,
+            cancellationToken);
+
+    Task<AuthorizedFiscalContext> AuthorizeHistoricalEmissionAsync(
+        ClaimsPrincipal principal,
+        EmissionIdempotencyRecord operation,
+        CancellationToken cancellationToken = default)
+        => AuthorizeAsync(
+            principal,
+            operation.Identity.ContextId,
+            "facturar",
+            operation.Identity.Cuit,
+            operation.Identity.PuntoVenta,
+            cancellationToken);
+
     Task<FiscalContextRuntime> ResolveForHistoricalOperationAsync(
         ClaimsPrincipal principal,
         EmissionIdempotencyRecord operation,
@@ -161,11 +186,28 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
     {
         if (operation is not ("consultar" or "facturar"))
             throw new ArgumentException("operation debe ser consultar o facturar.", nameof(operation));
-        var (consumerId, context) = _catalog is null
-            ? await ResolveAuthorizedContextAsync(principal, requestedContextId, operation, cancellationToken)
-            : await ResolveTechnicalRepresentationAsync(principal, requestedContextId, operation,
-                representedCuit, pointOfSale, cancellationToken);
-        return new AuthorizedFiscalContext(consumerId, context);
+        if (_catalog is null)
+        {
+            var (consumerId, context) = await ResolveAuthorizedContextAsync(
+                principal,
+                requestedContextId,
+                operation,
+                cancellationToken);
+            return new AuthorizedFiscalContext(consumerId, context);
+        }
+
+        var (technicalConsumerId, technicalContext, representation) =
+            await ResolveTechnicalRepresentationAsync(
+                principal,
+                requestedContextId,
+                operation,
+                representedCuit,
+                pointOfSale,
+                cancellationToken);
+        return new AuthorizedFiscalContext(
+            technicalConsumerId,
+            technicalContext,
+            RepresentationProvenance(representation));
     }
 
     public Task<FiscalContextRuntime> ResolveForReadAsync(
@@ -189,7 +231,11 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
             ?? throw new FiscalContextAccessException(
                 "ACTIVE_ASSIGNMENT_REQUIRED",
                 "El contexto fiscal no tiene una asignación activa para consultas nuevas.");
-        return CreateRuntime(authorized.ConsumerId, context, assignment);
+        return CreateRuntime(
+            authorized.ConsumerId,
+            context,
+            assignment,
+            authorized.RepresentationProvenance);
     }
 
     public Task<FiscalContextRuntime> ResolveForEmissionAsync(
@@ -231,6 +277,11 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         if (existing is not null)
         {
             EnsureOperationIdentity(existing, consumerId, context, (int)tipoComprobante);
+            if (_catalog is not null)
+                _ = await ResolveHistoricalRepresentationRecordAsync(
+                    consumerId,
+                    existing,
+                    cancellationToken);
             assignment = ResolveHistoricalAssignment(context, existing);
         }
         else
@@ -241,20 +292,56 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
                     "El contexto fiscal no tiene una asignación activa para nuevas emisiones.");
         }
 
-        return CreateRuntime(consumerId, context, assignment);
+        return CreateRuntime(
+            consumerId,
+            context,
+            assignment,
+            authorized.RepresentationProvenance);
     }
 
-    public async Task<FiscalContextRuntime> ResolveForHistoricalOperationAsync(
+    public Task<AuthorizedFiscalContext> AuthorizeHistoricalOperationAsync(
         ClaimsPrincipal principal,
         EmissionIdempotencyRecord operation,
         CancellationToken cancellationToken = default)
+        => AuthorizeHistoricalAsync(principal, operation, "consultar", cancellationToken);
+
+    public Task<AuthorizedFiscalContext> AuthorizeHistoricalEmissionAsync(
+        ClaimsPrincipal principal,
+        EmissionIdempotencyRecord operation,
+        CancellationToken cancellationToken = default)
+        => AuthorizeHistoricalAsync(principal, operation, "facturar", cancellationToken);
+
+    private async Task<AuthorizedFiscalContext> AuthorizeHistoricalAsync(
+        ClaimsPrincipal principal,
+        EmissionIdempotencyRecord operation,
+        string requiredOperation,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(operation);
-        var authorized = _catalog is null
-            ? await AuthorizeAsync(principal, operation.Identity.ContextId, "consultar", cancellationToken)
-            : await AuthorizeHistoricalAsync(principal, operation, cancellationToken);
-        var context = authorized.Context;
-        if (context.OperationalState == FiscalContextOperationalState.Disabled)
+        AuthorizedFiscalContext authorized;
+        if (_catalog is null)
+        {
+            authorized = await AuthorizeAsync(
+                principal,
+                operation.Identity.ContextId,
+                requiredOperation,
+                cancellationToken);
+        }
+        else
+        {
+            var (consumerId, context, representation) =
+                await ResolveHistoricalTechnicalRepresentationAsync(
+                    principal,
+                    operation,
+                    requiredOperation,
+                    cancellationToken);
+            authorized = new AuthorizedFiscalContext(
+                consumerId,
+                context,
+                RepresentationProvenance(representation));
+        }
+
+        if (authorized.Context.OperationalState == FiscalContextOperationalState.Disabled)
             throw new FiscalContextAccessException(
                 "FISCAL_CONTEXT_DISABLED",
                 "El contexto fiscal está deshabilitado incluso para recuperación histórica.");
@@ -262,20 +349,116 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         EnsureOperationIdentity(
             operation,
             authorized.ConsumerId,
-            context,
+            authorized.Context,
             operation.Identity.TipoComprobante);
-        var assignment = ResolveHistoricalAssignment(context, operation);
-        return CreateRuntime(authorized.ConsumerId, context, assignment);
+        _ = ResolveHistoricalAssignment(authorized.Context, operation);
+        return authorized;
     }
 
-    private async Task<AuthorizedFiscalContext> AuthorizeHistoricalAsync(
-        ClaimsPrincipal principal, EmissionIdempotencyRecord operation, CancellationToken cancellationToken)
+    public async Task<FiscalContextRuntime> ResolveForHistoricalOperationAsync(
+        ClaimsPrincipal principal,
+        EmissionIdempotencyRecord operation,
+        CancellationToken cancellationToken = default)
     {
-        var (consumerId, context) = await ResolveTechnicalRepresentationAsync(
-            principal, operation.Identity.ContextId, "consultar", operation.Identity.Cuit,
-            operation.Identity.PuntoVenta, cancellationToken,
-            operation.Identity.CredentialAssignmentRevision);
-        return new AuthorizedFiscalContext(consumerId, context);
+        var authorized = await AuthorizeHistoricalOperationAsync(
+            principal,
+            operation,
+            cancellationToken);
+        var assignment = ResolveHistoricalAssignment(authorized.Context, operation);
+        return CreateRuntime(
+            authorized.ConsumerId,
+            authorized.Context,
+            assignment,
+            authorized.RepresentationProvenance);
+    }
+
+    private async Task<(string ConsumerId, RepresentedFiscalContextRecord Context, FiscalRepresentationRecord Representation)> ResolveHistoricalTechnicalRepresentationAsync(
+        ClaimsPrincipal principal,
+        EmissionIdempotencyRecord operation,
+        string requiredOperation,
+        CancellationToken cancellationToken)
+    {
+        var consumerId = principal.FindFirstValue(ArcaClaimTypes.ConsumerId);
+        if (string.IsNullOrWhiteSpace(consumerId))
+            throw new FiscalContextAccessException("CONSUMER_ID_REQUIRED", "No existe consumerId autenticado.");
+        if (principal.HasClaim(ArcaClaimTypes.LegacyKey, "true"))
+            throw new FiscalContextAccessException("LEGACY_KEY_UNSUPPORTED_V2", "Es necesario reprovisionar la API key del consumidor.");
+        if (!string.Equals(operation.Identity.ConsumerId, consumerId, StringComparison.Ordinal))
+            throw new FiscalContextAccessException(
+                "FISCAL_REPRESENTATION_FORBIDDEN",
+                "La operación fiscal no pertenece al consumidor autenticado.");
+
+        var allowedContexts = principal.FindAll(ArcaClaimTypes.ContextGrant)
+            .Select(x => ParseGrant(x.Value))
+            .Where(x => x.Operation == requiredOperation)
+            .Select(x => x.ContextId)
+            .ToHashSet(StringComparer.Ordinal);
+        if (!allowedContexts.Contains(operation.Identity.ContextId))
+            throw new FiscalContextAccessException(
+                "FISCAL_CONTEXT_FORBIDDEN",
+                $"El consumidor no tiene grant de {requiredOperation} para el contexto técnico histórico.");
+
+        var catalog = _catalog ?? throw new InvalidOperationException("TECHNICAL_CONTEXT_STORE_UNCONFIGURED");
+        var technical = await catalog.GetContextAsync(operation.Identity.ContextId, cancellationToken)
+            ?? throw new FiscalContextAccessException(
+                "FISCAL_CONTEXT_NOT_FOUND",
+                "El contexto técnico histórico ya no existe.");
+
+        var representation = await ResolveHistoricalRepresentationRecordAsync(
+            consumerId,
+            operation,
+            cancellationToken);
+
+        var projected = new RepresentedFiscalContextRecord(
+            technical.ContextId,
+            technical.Environment,
+            operation.Identity.Cuit,
+            operation.Identity.PuntoVenta,
+            technical.OperationalState,
+            technical.ContextRevision,
+            false,
+            technical.Assignments);
+        return (consumerId, projected, representation);
+    }
+
+    private async Task<FiscalRepresentationRecord> ResolveHistoricalRepresentationRecordAsync(
+        string consumerId,
+        EmissionIdempotencyRecord operation,
+        CancellationToken cancellationToken)
+    {
+        var catalog = _catalog
+            ?? throw new InvalidOperationException("TECHNICAL_CONTEXT_STORE_UNCONFIGURED");
+        var candidates = (await catalog.ListRepresentationsAsync(
+                operation.Identity.ContextId,
+                cancellationToken))
+            .Where(x =>
+                string.Equals(x.ConsumerId, consumerId, StringComparison.Ordinal)
+                && x.RepresentedCuit == operation.Identity.Cuit
+                && x.PointOfSale == operation.Identity.PuntoVenta
+                && (x.Status == FiscalRepresentationStatus.Active
+                    || x.Status == FiscalRepresentationStatus.ActionRequired));
+
+        var representations = operation.Identity.RepresentationProvenance is { } provenance
+            ? candidates.Where(x =>
+                    x.ActivatedAt.HasValue
+                    && x.CreatedAt == provenance.CreatedAt
+                    && x.ActivatedAt.Value == provenance.ActivatedAt)
+                .ToArray()
+            : candidates.Where(x =>
+                    x.CreatedAt <= operation.CreatedAt
+                    && x.ActivatedAt.HasValue
+                    && x.ActivatedAt.Value <= operation.CreatedAt)
+                .ToArray();
+
+        if (representations.Length == 0)
+            throw new FiscalContextAccessException(
+                "FISCAL_REPRESENTATION_FORBIDDEN",
+                "La representación fiscal histórica no está disponible para este consumidor/contexto.");
+        if (representations.Length != 1)
+            throw new FiscalContextAccessException(
+                "FISCAL_REPRESENTATION_REQUIRED",
+                "La representación fiscal histórica es ambigua.");
+        return representations[0];
     }
 
     private static void EnsureOperationIdentity(
@@ -319,7 +502,7 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         return assignment;
     }
 
-    private async Task<(string ConsumerId, RepresentedFiscalContextRecord Context)> ResolveTechnicalRepresentationAsync(
+    private async Task<(string ConsumerId, RepresentedFiscalContextRecord Context, FiscalRepresentationRecord Representation)> ResolveTechnicalRepresentationAsync(
         ClaimsPrincipal principal, string? requestedContextId, string operation,
         long? requestedCuit, int? requestedPointOfSale, CancellationToken cancellationToken,
         string? evidenceAssignmentRevision = null)
@@ -381,7 +564,7 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
         var projected = new RepresentedFiscalContextRecord(technical.ContextId,
             technical.Environment, rep.RepresentedCuit, rep.PointOfSale,
             technical.OperationalState, technical.ContextRevision, false, technical.Assignments);
-        return (consumerId, projected);
+        return (consumerId, projected, rep);
     }
 
     private async Task<(string ConsumerId, RepresentedFiscalContextRecord Context)> ResolveAuthorizedContextAsync(
@@ -456,7 +639,8 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
     private FiscalContextRuntime CreateRuntime(
         string consumerId,
         RepresentedFiscalContextRecord context,
-        CredentialAssignmentRecord assignment)
+        CredentialAssignmentRecord assignment,
+        FiscalRepresentationProvenance? representationProvenance = null)
     {
         if (assignment.Status is CredentialAssignmentStatus.Candidate or CredentialAssignmentStatus.Validated)
             throw new FiscalContextAccessException(
@@ -479,7 +663,8 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
                 context.ContextId,
                 context.Environment,
                 context.ContextRevision,
-                assignment.AssignmentRevision));
+                assignment.AssignmentRevision,
+                representationProvenance));
 
         return new FiscalContextRuntime(
             consumerId,
@@ -490,6 +675,15 @@ public sealed class FiscalContextRuntimeResolver : IFiscalContextRuntimeResolver
             padron,
             identityProvider);
     }
+
+    private static FiscalRepresentationProvenance RepresentationProvenance(
+        FiscalRepresentationRecord representation)
+        => new(
+            representation.CreatedAt,
+            representation.ActivatedAt
+                ?? throw new FiscalContextAccessException(
+                    "FISCAL_REPRESENTATION_FORBIDDEN",
+                    "La representación fiscal no tiene evidencia durable de activación."));
 
     private static (string ContextId, string Operation) ParseGrant(string value)
     {

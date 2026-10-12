@@ -285,7 +285,10 @@ public static class EmissionStoreBackupRecovery
     }
 
     private static bool IsPending(EmissionIdempotencyState state)
-        => state is not (EmissionIdempotencyState.Authorized or EmissionIdempotencyState.FiscalRejected);
+        => state is not (
+            EmissionIdempotencyState.Authorized
+            or EmissionIdempotencyState.FiscalRejected
+            or EmissionIdempotencyState.AbandonedBeforeSubmission);
 
     private static FileStream AcquireWriterStoppedProof(string storeDirectory)
     {

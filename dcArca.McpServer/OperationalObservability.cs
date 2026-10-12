@@ -116,6 +116,57 @@ public sealed class ObservableEmissionIdempotencyStore : IEmissionIdempotencySto
         }
     }
 
+    public async Task<EmissionIdempotencyRecord> AbandonBeforeSubmissionAsync(
+        string keyHash,
+        long? reservedNumber,
+        PreSubmissionAbandonmentAudit audit,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var record = await _inner.AbandonBeforeSubmissionAsync(
+                keyHash,
+                reservedNumber,
+                audit,
+                cancellationToken);
+            _logger.LogInformation(
+                "Fiscal operation abandoned before submission OperationRef={OperationRef} ContextRef={ContextRef} Reason={Reason}",
+                OperationalReference.Operation(record.KeyHash),
+                OperationalReference.Context(record.Identity.ContextId),
+                record.AbandonmentAudit?.ReasonCode ?? "unknown");
+            return record;
+        }
+        catch (Exception exception)
+        {
+            LogStoreError("abandon-before-submission", exception, null, keyHash);
+            throw;
+        }
+    }
+
+    public async Task<EmissionIdempotencyRecord> CaptureAbandonedReservationAsync(
+        string keyHash,
+        long reservedNumber,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var record = await _inner.CaptureAbandonedReservationAsync(
+                keyHash,
+                reservedNumber,
+                cancellationToken);
+            _logger.LogInformation(
+                "Fiscal abandoned operation reservation captured OperationRef={OperationRef} ContextRef={ContextRef}",
+                OperationalReference.Operation(record.KeyHash),
+                OperationalReference.Context(record.Identity.ContextId));
+            return record;
+        }
+        catch (Exception exception)
+        {
+            LogStoreError("capture-abandoned-reservation", exception, null, keyHash);
+            throw;
+        }
+    }
+
     private void LogStoreError(string action, Exception exception, string? contextId, string? keyHash)
         => _logger.LogError(
             "Fiscal store error Action={Action} ErrorType={ErrorType} ContextRef={ContextRef} OperationRef={OperationRef}",

@@ -85,6 +85,7 @@ Submitting
 Authorized
 FiscalRejected
 Uncertain
+AbandonedBeforeSubmission
 ```
 
 Antes de iniciar el side effect fiscal debe existir una reserva durable de serie y un número persistido. Inmediatamente antes de `FECAESolicitar` el servidor revalida `FECompUltimoAutorizado`; luego persiste `Submitting`.
@@ -95,7 +96,9 @@ Antes de iniciar el side effect fiscal debe existir una reserva durable de serie
 
 ### Authorized
 
-La misma key + request + identidad devuelve el resultado fiscal almacenado. No solicita otro CAE.
+La misma key + request + identidad devuelve el resultado fiscal almacenado. El replay se resuelve **store-first**: valida ownership/grant `facturar`, identidad durable y fingerprint antes de exigir una representación actualmente activa. Por eso un terminal conocido puede reproducirse aunque la representación haya pasado a `ActionRequired`, sin materializar certificado/WSAA ni llamar WSFE. Una key desconocida continúa por la autorización completa de trabajo nuevo y permanece bloqueada bajo `ActionRequired`.
+
+No solicita otro CAE.
 
 ### FiscalRejected
 
@@ -107,7 +110,7 @@ La operación conserva el mismo número. Antes del primer envío vuelve a valida
 
 ### Submitting / Uncertain
 
-Consulta exclusivamente el mismo tipo/número mediante `FECompConsultar`. Sólo equivalencia fiscal completa produce `RecoveredSuccess`; mismatch o evidencia insuficiente mantienen `Uncertain` y la reserva. Nunca se hace un segundo `FECAESolicitar` automático para esa ambigüedad.
+Un retry de la tool de emisión con la misma key **no reemite**: devuelve el estado/resultado durable y las acciones permitidas para que el caller consulte o reconcilie explícitamente. La ruta `reconciliar_operacion` consulta exclusivamente el mismo tipo/número mediante `FECompConsultar`. Sólo equivalencia fiscal completa produce `RecoveredSuccess`; mismatch o evidencia insuficiente mantienen `Uncertain` y la reserva. Nunca se hace un segundo `FECAESolicitar` automático para esa ambigüedad.
 
 Otra key sobre la misma serie recibe `SERIES_RESERVATION_BLOCKED` mientras exista una operación pendiente.
 
