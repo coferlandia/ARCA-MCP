@@ -211,6 +211,94 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
     }
 
     [Fact]
+    public async Task RepresentacionReemplazadaAntesDePersistir_NoPuedeActivarseConProbeAnterior()
+    {
+        using var temp = new TempStore();
+        var store = await PendingCandidateAsync(temp.Root);
+        var original = await store.GetRepresentationAsync(
+            ContextId, ConsumerId, RepresentedCuit, PointOfSale);
+        Assert.NotNull(original);
+
+        var outcome = new FiscalRepresentationProbeOutcome(
+            new FiscalRepresentationProbeIdentity(
+                ContextId,
+                "homologacion",
+                RepresentedCuit,
+                PointOfSale,
+                "rev-1",
+                original!.CreatedAt),
+            Probe(
+                dcPointOfSaleProbeStatus.Verified,
+                "POINT_OF_SALE_AUTHORIZATION_VERIFIED",
+                "probe original"));
+
+        await store.RevokeRepresentationAsync(
+            ContextId, ConsumerId, RepresentedCuit, PointOfSale, "security");
+        await store.RegisterCandidateAsync(
+            ContextId, ConsumerId, RepresentedCuit, "replacement");
+        await store.SelectPointOfSaleAsync(
+            ContextId, ConsumerId, RepresentedCuit, PointOfSale, "replacement");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new FiscalRepresentationLifecyclePolicy(store).ApplyAsync(
+                ConsumerId,
+                outcome,
+                "admin"));
+
+        Assert.Equal("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH", error.Message);
+        var replacement = await store.GetRepresentationAsync(
+            ContextId, ConsumerId, RepresentedCuit, PointOfSale);
+        Assert.NotNull(replacement);
+        Assert.Equal(FiscalRepresentationStatus.Pending, replacement!.Status);
+        Assert.NotEqual(original.CreatedAt, replacement.CreatedAt);
+        Assert.Null(replacement.VerificationEvidence);
+    }
+
+    [Fact]
+    public async Task RepresentacionReemplazadaAntesDePersistir_NoPuedeRecibirActionRequiredDeProbeAnterior()
+    {
+        using var temp = new TempStore();
+        var store = await PendingCandidateAsync(temp.Root);
+        var original = await store.GetRepresentationAsync(
+            ContextId, ConsumerId, RepresentedCuit, PointOfSale);
+        Assert.NotNull(original);
+
+        var outcome = new FiscalRepresentationProbeOutcome(
+            new FiscalRepresentationProbeIdentity(
+                ContextId,
+                "homologacion",
+                RepresentedCuit,
+                PointOfSale,
+                "rev-1",
+                original!.CreatedAt),
+            Probe(
+                dcPointOfSaleProbeStatus.NotVerified,
+                "POINT_OF_SALE_BLOCKED",
+                "probe original"));
+
+        await store.RevokeRepresentationAsync(
+            ContextId, ConsumerId, RepresentedCuit, PointOfSale, "security");
+        await store.RegisterCandidateAsync(
+            ContextId, ConsumerId, RepresentedCuit, "replacement");
+        await store.SelectPointOfSaleAsync(
+            ContextId, ConsumerId, RepresentedCuit, PointOfSale, "replacement");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new FiscalRepresentationLifecyclePolicy(store).ApplyAsync(
+                ConsumerId,
+                outcome,
+                "admin"));
+
+        Assert.Equal("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH", error.Message);
+        var replacement = await store.GetRepresentationAsync(
+            ContextId, ConsumerId, RepresentedCuit, PointOfSale);
+        Assert.NotNull(replacement);
+        Assert.Equal(FiscalRepresentationStatus.Pending, replacement!.Status);
+        Assert.NotEqual(original.CreatedAt, replacement.CreatedAt);
+        Assert.Null(replacement.ActionRequiredReasonCode);
+    }
+
+    [Fact]
     public void OutcomeDeProbe_NoPermiteEmparejarIdentityYResultadoDesdeAPIPublica()
     {
         Assert.Empty(typeof(FiscalRepresentationProbeOutcome).GetConstructors());
