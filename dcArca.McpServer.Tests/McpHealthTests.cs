@@ -26,6 +26,19 @@ public class McpHealthTests : IClassFixture<WebApplicationFactory<Program>>, IDi
     }
 
     [Fact]
+    public void Store_ResuelveUnicoDirectorioEfectivoParaRuntimeYReadiness()
+    {
+        var effective = FileSystemFiscalTechnicalContextStore.ResolveDirectoryPath(null);
+
+        Assert.False(string.IsNullOrWhiteSpace(effective));
+        Assert.True(Path.IsPathFullyQualified(effective));
+        Assert.EndsWith(
+            Path.Combine("dcArca", "fiscal-contexts"),
+            effective,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ReadinessValidator_RecibePathDeCatalogoRuntimeExplicito()
     {
         Assert.Contains(

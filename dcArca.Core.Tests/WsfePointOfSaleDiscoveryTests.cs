@@ -12,6 +12,34 @@ public class WsfePointOfSaleDiscoveryTests
         Assert.Empty(typeof(FiscalCredentialHostBinding).GetConstructors());
     }
 
+    [Fact]
+    public void CredentialHostBinding_SnapshotNoPuedeMutarseDespuesDeEmitido()
+    {
+        var source = new dcArcaConfig
+        {
+            Environment = "homologacion",
+            Cuit = "20123456786",
+            PuntoVenta = 7,
+            CertificatePath = "credential-a.pfx",
+            CertificatePassword = "secret-a",
+            WsaaUrl = "https://wsaa-a.invalid",
+            WsfeUrl = "https://wsfe-a.invalid",
+            PadronUrl = "https://padron-a.invalid"
+        };
+        var binding = new FiscalCredentialHostBinding("cred-a", "cache-a", source);
+
+        source.CertificatePath = "credential-b.pfx";
+        var exposed = binding.Config;
+        exposed.CertificatePath = "credential-c.pfx";
+        exposed.CertificatePassword = "secret-c";
+        exposed.WsfeUrl = "https://wsfe-c.invalid";
+
+        var reread = binding.Config;
+        Assert.Equal("credential-a.pfx", reread.CertificatePath);
+        Assert.Equal("secret-a", reread.CertificatePassword);
+        Assert.Equal("https://wsfe-a.invalid", reread.WsfeUrl);
+    }
+
     [Theory]
     [InlineData("600", "token")]
     [InlineData("601", "CUIT")]
