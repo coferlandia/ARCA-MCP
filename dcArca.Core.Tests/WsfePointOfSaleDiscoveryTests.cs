@@ -1,3 +1,4 @@
+using dcArca.Core.Models;
 using dcArca.Core.Services;
 using Xunit;
 
