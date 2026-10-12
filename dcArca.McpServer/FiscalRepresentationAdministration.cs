@@ -83,12 +83,6 @@ public sealed class FiscalRepresentationAdministration
                 "La representación no está pendiente de verificación.");
 
         var (context, assignment) = await ActiveContextAsync(contextId, cancellationToken);
-        var probeIdentity = new FiscalRepresentationProbeIdentity(
-            context.ContextId,
-            context.Environment,
-            representedCuit,
-            pointOfSale,
-            assignment.AssignmentRevision);
         var material = _materializer.Materialize(
             Project(context, representedCuit, pointOfSale),
             assignment);
@@ -96,8 +90,11 @@ public sealed class FiscalRepresentationAdministration
         try
         {
             var outcome = await _probe.ProbeBoundAsync(
-                probeIdentity,
-                material.Config,
+                context,
+                assignment,
+                representedCuit,
+                pointOfSale,
+                material.HostBinding,
                 material.WsfeAuth,
                 _clients.CreateClient(nameof(FiscalAssignmentAuthorizationValidator)),
                 cancellationToken);

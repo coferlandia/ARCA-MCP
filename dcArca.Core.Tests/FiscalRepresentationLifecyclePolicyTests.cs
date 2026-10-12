@@ -225,6 +225,18 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
         Assert.Contains(typeof(FiscalRepresentationProbeOutcome), parameterTypes);
         Assert.DoesNotContain(typeof(FiscalRepresentationProbeIdentity), parameterTypes);
         Assert.DoesNotContain(typeof(dcPointOfSaleAccessProbeResult), parameterTypes);
+
+        var boundProbe = typeof(dcWsfePointOfSaleProbe)
+            .GetMethod(nameof(dcWsfePointOfSaleProbe.ProbeBoundAsync))
+            ?? throw new InvalidOperationException("ProbeBoundAsync no encontrado.");
+        var boundParameterTypes = boundProbe.GetParameters()
+            .Select(parameter => parameter.ParameterType)
+            .ToArray();
+
+        Assert.DoesNotContain(typeof(FiscalRepresentationProbeIdentity), boundParameterTypes);
+        Assert.Contains(typeof(FiscalTechnicalContextRecord), boundParameterTypes);
+        Assert.Contains(typeof(CredentialAssignmentRecord), boundParameterTypes);
+        Assert.Contains(typeof(FiscalCredentialHostBinding), boundParameterTypes);
     }
 
     [Fact]

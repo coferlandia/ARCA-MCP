@@ -115,27 +115,53 @@ public sealed class dcWsfePointOfSaleProbe
     }
 
     public async Task<FiscalRepresentationProbeOutcome> ProbeBoundAsync(
-        FiscalRepresentationProbeIdentity identity,
-        dcArcaConfig config,
+        FiscalTechnicalContextRecord context,
+        CredentialAssignmentRecord assignment,
+        long representedCuit,
+        int pointOfSale,
+        FiscalCredentialHostBinding binding,
         dcArcaAuthService authService,
         HttpClient httpClient,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(identity);
-        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(assignment);
+        ArgumentNullException.ThrowIfNull(binding);
+        ArgumentNullException.ThrowIfNull(authService);
+        ArgumentNullException.ThrowIfNull(httpClient);
 
-        if (string.IsNullOrWhiteSpace(identity.ContextId)
-            || string.IsNullOrWhiteSpace(identity.Environment)
-            || string.IsNullOrWhiteSpace(identity.AssignmentRevision)
-            || identity.RepresentedCuit <= 0
-            || identity.PointOfSale <= 0
-            || !long.TryParse(config.Cuit, out var configuredCuit)
-            || configuredCuit != identity.RepresentedCuit
-            || config.PuntoVenta != identity.PointOfSale)
+        var activeAssignment = context.ActiveAssignment;
+        if (string.IsNullOrWhiteSpace(context.ContextId)
+            || string.IsNullOrWhiteSpace(context.Environment)
+            || context.OperationalState != FiscalContextOperationalState.Active
+            || activeAssignment is null
+            || !string.Equals(
+                activeAssignment.AssignmentRevision,
+                assignment.AssignmentRevision,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                activeAssignment.CredentialId,
+                assignment.CredentialId,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                binding.CredentialId,
+                assignment.CredentialId,
+                StringComparison.Ordinal)
+            || representedCuit <= 0
+            || pointOfSale <= 0
+            || !long.TryParse(binding.Config.Cuit, out var configuredCuit)
+            || configuredCuit != representedCuit
+            || binding.Config.PuntoVenta != pointOfSale)
             throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
 
+        var identity = new FiscalRepresentationProbeIdentity(
+            context.ContextId,
+            context.Environment,
+            representedCuit,
+            pointOfSale,
+            assignment.AssignmentRevision);
         var result = await ProbeAsync(
-            config,
+            binding.Config,
             authService,
             httpClient,
             cancellationToken);
