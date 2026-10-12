@@ -25,9 +25,7 @@ public sealed class FiscalCredentialHostBindingResolver
     {
         _configuration = configuration;
         _legacyConfig = legacyConfig;
-        _legacyEnvironment = !string.IsNullOrWhiteSpace(legacyEnvironment)
-            ? legacyEnvironment.Trim()
-            : throw new ArgumentException("legacyEnvironment es obligatorio.", nameof(legacyEnvironment));
+        _legacyEnvironment = FiscalEnvironmentId.Normalize(legacyEnvironment);
     }
 
     public FiscalCredentialHostBinding Resolve(
@@ -37,6 +35,7 @@ public sealed class FiscalCredentialHostBindingResolver
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(assignment);
 
+        var canonicalEnvironment = FiscalEnvironmentId.RequireCanonical(context.Environment);
         var credential = _configuration.GetSection($"FiscalCredentials:{assignment.CredentialId}");
         var certificatePath = credential["CertificatePath"]?.Trim();
         var certificatePassword = credential["CertificatePassword"] ?? string.Empty;
@@ -49,11 +48,11 @@ public sealed class FiscalCredentialHostBindingResolver
         if (string.IsNullOrWhiteSpace(certificatePath))
             throw new InvalidOperationException("CREDENTIAL_REFERENCE_UNRESOLVED");
 
-        var environment = _configuration.GetSection($"FiscalEnvironments:{context.Environment}");
+        var environment = _configuration.GetSection($"FiscalEnvironments:{canonicalEnvironment}");
         var wsaa = environment["WsaaUrl"]?.Trim();
         var wsfe = environment["WsfeUrl"]?.Trim();
         var padron = environment["PadronUrl"]?.Trim();
-        if (string.Equals(context.Environment, _legacyEnvironment, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(canonicalEnvironment, _legacyEnvironment, StringComparison.Ordinal))
         {
             wsaa ??= _legacyConfig.WsaaUrl;
             wsfe ??= _legacyConfig.WsfeUrl;
@@ -66,10 +65,10 @@ public sealed class FiscalCredentialHostBindingResolver
 
         return new FiscalCredentialHostBinding(
             assignment.CredentialId,
-            $"{context.Environment}:{assignment.CredentialId}",
+            $"{canonicalEnvironment}:{assignment.CredentialId}",
             new dcArcaConfig
             {
-                Environment = context.Environment,
+                Environment = canonicalEnvironment,
                 Cuit = context.RepresentedCuit.ToString(),
                 PuntoVenta = context.PointOfSale,
                 CertificatePath = certificatePath,

@@ -123,12 +123,17 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
 
     public Task AddContextAsync(FiscalTechnicalContextRecord context, CancellationToken cancellationToken = default)
     {
-        ValidateContext(context);
+        ArgumentNullException.ThrowIfNull(context);
+        var normalized = context with
+        {
+            Environment = FiscalEnvironmentId.Normalize(context.Environment)
+        };
+        ValidateContext(normalized);
         return MutateAsync(cat =>
         {
-            if (cat.Contexts.Any(x => x.ContextId == context.ContextId))
+            if (cat.Contexts.Any(x => x.ContextId == normalized.ContextId))
                 throw new InvalidOperationException("FISCAL_CONTEXT_ALREADY_EXISTS");
-            return cat with { Contexts = [.. cat.Contexts, context] };
+            return cat with { Contexts = [.. cat.Contexts, normalized] };
         }, cancellationToken);
     }
 
@@ -537,8 +542,11 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
 
     private static void ValidateContext(FiscalTechnicalContextRecord context)
     {
-        if (context is null || string.IsNullOrWhiteSpace(context.ContextId) || string.IsNullOrWhiteSpace(context.Environment) ||
-            context.ContextRevision <= 0 || context.Assignments is null ||
+        if (context is null || string.IsNullOrWhiteSpace(context.ContextId))
+            throw new InvalidDataException("FISCAL_CONTEXT_INVALID");
+        if (!FiscalEnvironmentId.IsCanonical(context.Environment))
+            throw new InvalidDataException("FISCAL_ENVIRONMENT_NOT_CANONICAL");
+        if (context.ContextRevision <= 0 || context.Assignments is null ||
             context.Assignments.Count(x => x.Status == CredentialAssignmentStatus.Active) > 1 ||
             context.Assignments.Select(x => x.AssignmentRevision).Distinct(StringComparer.Ordinal).Count() != context.Assignments.Count ||
             context.Assignments.Any(x => string.IsNullOrWhiteSpace(x.AssignmentRevision) || string.IsNullOrWhiteSpace(x.CredentialId)) ||

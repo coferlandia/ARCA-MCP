@@ -1,4 +1,5 @@
 using dcArca.Core.Models;
+using dcArca.Core.Services;
 
 namespace dcArca.McpServer;
 
@@ -25,12 +26,16 @@ public sealed record FiscalOperationIdentity(
 {
     public FiscalContextDescriptor Context => new(ContextId, Environment, Cuit, PuntoVenta);
 
-    public string SeriesKey => $"{Environment}:{Cuit}:{PuntoVenta}:{TipoComprobante}";
+    public string SeriesKey =>
+        $"{FiscalEnvironmentId.RequireCanonical(Environment)}:{Cuit}:{PuntoVenta}:{TipoComprobante}";
 
     public bool MatchesImmutableIdentity(FiscalOperationIdentity other)
         => string.Equals(ConsumerId, other.ConsumerId, StringComparison.Ordinal)
             && string.Equals(ContextId, other.ContextId, StringComparison.Ordinal)
-            && string.Equals(Environment, other.Environment, StringComparison.Ordinal)
+            && string.Equals(
+                FiscalEnvironmentId.RequireCanonical(Environment),
+                FiscalEnvironmentId.RequireCanonical(other.Environment),
+                StringComparison.Ordinal)
             && Cuit == other.Cuit
             && PuntoVenta == other.PuntoVenta
             && TipoComprobante == other.TipoComprobante
@@ -64,7 +69,7 @@ public sealed record SingleFiscalContextOptions(
         return new SingleFiscalContextOptions(
             Required(configuration, "ConsumerId"),
             Required(configuration, "ContextId"),
-            Required(configuration, "Environment"),
+            FiscalEnvironmentId.Normalize(Required(configuration, "Environment")),
             revision,
             Required(configuration, "CredentialAssignmentRevision"));
     }
@@ -95,7 +100,7 @@ public sealed class SingleFiscalOperationIdentityProvider : IFiscalOperationIden
         => new(
             _options.ConsumerId,
             _options.ContextId,
-            _options.Environment,
+            FiscalEnvironmentId.Normalize(_options.Environment),
             _cuit,
             _arcaConfig.PuntoVenta,
             (int)tipoComprobante,
