@@ -19,7 +19,8 @@ public sealed record FiscalRepresentationProbeIdentity(
     string Environment,
     long RepresentedCuit,
     int PointOfSale,
-    string AssignmentRevision);
+    string AssignmentRevision,
+    DateTimeOffset RepresentationCreatedAt);
 
 /// <summary>
 /// Canonical Core policy that converts a non-emitting point-of-sale probe into
@@ -63,6 +64,7 @@ public sealed class FiscalRepresentationLifecyclePolicy
             || string.IsNullOrWhiteSpace(identity.ContextId)
             || string.IsNullOrWhiteSpace(identity.Environment)
             || string.IsNullOrWhiteSpace(identity.AssignmentRevision)
+            || identity.RepresentationCreatedAt == default
             || probe.PointOfSale != identity.PointOfSale)
             throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
         if (probe.CheckedAt == default)
@@ -75,6 +77,9 @@ public sealed class FiscalRepresentationLifecyclePolicy
             identity.PointOfSale,
             cancellationToken)
             ?? throw new InvalidOperationException("FISCAL_REPRESENTATION_NOT_FOUND");
+
+        if (candidate.CreatedAt != identity.RepresentationCreatedAt)
+            throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
 
         if (!IsRevalidableStatus(candidate.Status))
             throw new InvalidOperationException("FISCAL_REPRESENTATION_STATE_INVALID");

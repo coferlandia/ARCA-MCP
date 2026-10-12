@@ -92,6 +92,7 @@ public sealed class FiscalRepresentationAdministration
             var outcome = await _probe.ProbeBoundAsync(
                 context,
                 assignment,
+                candidate,
                 representedCuit,
                 pointOfSale,
                 material.HostBinding,

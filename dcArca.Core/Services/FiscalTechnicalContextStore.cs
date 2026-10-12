@@ -345,7 +345,7 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
                 expectedIdentity.PointOfSale,
                 rep =>
                 {
-                    EnsureProbeTransitionAllowed(rep);
+                    EnsureProbeTransitionAllowed(rep, expectedIdentity);
                     persisted = rep with
                     {
                         Status = FiscalRepresentationStatus.Active,
@@ -390,7 +390,7 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
                 expectedIdentity.PointOfSale,
                 rep =>
                 {
-                    EnsureProbeTransitionAllowed(rep);
+                    EnsureProbeTransitionAllowed(rep, expectedIdentity);
                     persisted = rep with
                     {
                         Status = FiscalRepresentationStatus.ActionRequired,
@@ -426,8 +426,12 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
     }
 
     private static void EnsureProbeTransitionAllowed(
-        FiscalRepresentationRecord representation)
+        FiscalRepresentationRecord representation,
+        FiscalRepresentationProbeIdentity expectedIdentity)
     {
+        if (representation.CreatedAt != expectedIdentity.RepresentationCreatedAt)
+            throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
+
         if (representation.Status is not (
                 FiscalRepresentationStatus.Pending
                 or FiscalRepresentationStatus.Verified

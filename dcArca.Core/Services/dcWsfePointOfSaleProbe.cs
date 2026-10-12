@@ -117,6 +117,7 @@ public sealed class dcWsfePointOfSaleProbe
     public async Task<FiscalRepresentationProbeOutcome> ProbeBoundAsync(
         FiscalTechnicalContextRecord context,
         CredentialAssignmentRecord assignment,
+        FiscalRepresentationRecord representation,
         long representedCuit,
         int pointOfSale,
         FiscalCredentialHostBinding binding,
@@ -125,6 +126,7 @@ public sealed class dcWsfePointOfSaleProbe
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(assignment);
+        ArgumentNullException.ThrowIfNull(representation);
         ArgumentNullException.ThrowIfNull(binding);
         ArgumentNullException.ThrowIfNull(httpClient);
 
@@ -149,6 +151,13 @@ public sealed class dcWsfePointOfSaleProbe
                 binding.Config.Environment,
                 context.Environment,
                 StringComparison.Ordinal)
+            || !string.Equals(
+                representation.ContextId,
+                context.ContextId,
+                StringComparison.Ordinal)
+            || representation.RepresentedCuit != representedCuit
+            || representation.PointOfSale != pointOfSale
+            || !FiscalRepresentationLifecyclePolicy.IsRevalidableStatus(representation.Status)
             || representedCuit <= 0
             || pointOfSale <= 0
             || !long.TryParse(binding.Config.Cuit, out var configuredCuit)
@@ -161,7 +170,8 @@ public sealed class dcWsfePointOfSaleProbe
             context.Environment,
             representedCuit,
             pointOfSale,
-            assignment.AssignmentRevision);
+            assignment.AssignmentRevision,
+            representation.CreatedAt);
         var authService = new dcArcaAuthService(
             binding.Config.WsaaUrl,
             binding.Config.CertificatePath,
