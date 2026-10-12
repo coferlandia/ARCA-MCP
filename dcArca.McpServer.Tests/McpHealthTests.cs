@@ -130,6 +130,25 @@ public class McpHealthTests : IClassFixture<WebApplicationFactory<Program>>, IDi
     }
 
     [Fact]
+    public async Task PathDeCatalogoSintacticamenteInvalido_NoTumbaLiveYReadyFallaSeguro()
+    {
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("FiscalContexts:Directory", "invalid\0catalog");
+        });
+        var client = factory.CreateClient();
+
+        var live = await client.GetAsync("/health/live");
+        var ready = await client.GetAsync("/health/ready");
+        var body = await ready.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, live.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
+        Assert.Contains("FISCAL_CATALOG_UNREADABLE", body);
+        Assert.DoesNotContain("invalid", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task DirectorioDeCatalogoInvalido_KeepsLiveButReadyReturnsSafe503()
     {
         using var temp = new TempDirectory();
