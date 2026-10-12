@@ -14,18 +14,16 @@ public sealed record FiscalLocalReadinessResult(
 public sealed class FiscalLocalReadinessValidator
 {
     private readonly IEmissionRecoveryGate _recoveryGate;
-    private readonly string _catalogDirectory;
+    private readonly string? _catalogDirectory;
     private readonly IConfiguration _configuration;
 
     public FiscalLocalReadinessValidator(
         IEmissionRecoveryGate recoveryGate,
-        string catalogDirectory,
+        string? catalogDirectory,
         IConfiguration configuration)
     {
         _recoveryGate = recoveryGate;
-        _catalogDirectory = string.IsNullOrWhiteSpace(catalogDirectory)
-            ? throw new ArgumentException("El directorio de catálogo fiscal es obligatorio.", nameof(catalogDirectory))
-            : catalogDirectory;
+        _catalogDirectory = catalogDirectory;
         _configuration = configuration;
     }
 

@@ -28,9 +28,6 @@ if (builder.Environment.EnvironmentName == "Testing")
     recoveryDirectory ??= Path.Combine(testHostRoot, "recovery");
 }
 
-fiscalContextsDirectory =
-    FileSystemFiscalTechnicalContextStore.ResolveDirectoryPath(fiscalContextsDirectory);
-
 if (string.IsNullOrWhiteSpace(recoveryDirectory))
 {
     var dataRoot = string.IsNullOrWhiteSpace(emissionIdempotencyDirectory)
@@ -92,7 +89,7 @@ builder.Services.AddSingleton<FiscalOperationAdministration>();
 builder.Services.AddSingleton<McpOperationContractService>();
 builder.Services.AddSingleton(sp => new FiscalLocalReadinessValidator(
     sp.GetRequiredService<IEmissionRecoveryGate>(),
-    fiscalContextsDirectory!,
+    fiscalContextsDirectory,
     builder.Configuration));
 
 builder.Services.AddSingleton<PdfDocumentRenderer>();
