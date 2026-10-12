@@ -61,6 +61,8 @@ public sealed record dcPointOfSaleListingResult(
 /// </summary>
 public sealed class dcWsfePointOfSaleProbe
 {
+    private readonly IWsaaTokenStore _boundProbeTokenStore = new MemoryWsaaTokenStore();
+
     public async Task<dcPointOfSaleListingResult> ListAsync(
         dcArcaConfig config,
         dcArcaAuthService authService,
@@ -167,7 +169,8 @@ public sealed class dcWsfePointOfSaleProbe
             binding.Config.CertificatePath,
             binding.Config.CertificatePassword,
             binding.CacheIdentity,
-            serviceName: "wsfe");
+            serviceName: "wsfe",
+            tokenStore: _boundProbeTokenStore);
         var result = await ProbeAsync(
             binding.Config,
             authService,
