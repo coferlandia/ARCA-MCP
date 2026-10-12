@@ -152,6 +152,80 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
     }
 
     [Fact]
+    public async Task ProbeDeAssignmentAnterior_SeRechazaTrasRotacionSinMutarRepresentacion()
+    {
+        using var temp = new TempStore();
+        var store = await PendingCandidateAsync(temp.Root);
+        var policy = new FiscalRepresentationLifecyclePolicy(store);
+        var probeIdentity = new FiscalRepresentationProbeIdentity(
+            ContextId,
+            "homologacion",
+            RepresentedCuit,
+            PointOfSale,
+            "rev-1");
+
+        await store.AddCandidateAssignmentAsync(
+            ContextId, "rev-2", "cred-operador-2", "rotation");
+        await store.MarkAssignmentValidatedAsync(
+            ContextId, "rev-2", "cert-and-wsaa-ok-2", "rotation");
+        await store.ActivateAssignmentAsync(ContextId, "rev-2", "rotation");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            policy.ApplyAsync(
+                ContextId,
+                ConsumerId,
+                RepresentedCuit,
+                PointOfSale,
+                probeIdentity,
+                Probe(
+                    dcPointOfSaleProbeStatus.Verified,
+                    "POINT_OF_SALE_AUTHORIZATION_VERIFIED",
+                    "probe ejecutado con rev-1"),
+                "admin"));
+
+        Assert.Equal("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH", error.Message);
+        var durable = await store.GetRepresentationAsync(
+            ContextId, ConsumerId, RepresentedCuit, PointOfSale);
+        Assert.NotNull(durable);
+        Assert.Equal(FiscalRepresentationStatus.Pending, durable!.Status);
+        Assert.Null(durable.VerificationEvidence);
+    }
+
+    [Fact]
+    public async Task ProbeDeMismoPvPeroOtroCuit_SeRechazaSinMutarRepresentacion()
+    {
+        using var temp = new TempStore();
+        var store = await PendingCandidateAsync(temp.Root);
+        var policy = new FiscalRepresentationLifecyclePolicy(store);
+        var probeIdentity = new FiscalRepresentationProbeIdentity(
+            ContextId,
+            "homologacion",
+            RepresentedCuit + 1,
+            PointOfSale,
+            "rev-1");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            policy.ApplyAsync(
+                ContextId,
+                ConsumerId,
+                RepresentedCuit,
+                PointOfSale,
+                probeIdentity,
+                Probe(
+                    dcPointOfSaleProbeStatus.Verified,
+                    "POINT_OF_SALE_AUTHORIZATION_VERIFIED",
+                    "mismo PV, otro CUIT"),
+                "admin"));
+
+        Assert.Equal("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH", error.Message);
+        var durable = await store.GetRepresentationAsync(
+            ContextId, ConsumerId, RepresentedCuit, PointOfSale);
+        Assert.NotNull(durable);
+        Assert.Equal(FiscalRepresentationStatus.Pending, durable!.Status);
+        Assert.Null(durable.VerificationEvidence);
+    }
+
+    [Fact]
     public async Task ProbeDeOtroPv_EsRechazadoSinMutarRepresentacion()
     {
         using var temp = new TempStore();
