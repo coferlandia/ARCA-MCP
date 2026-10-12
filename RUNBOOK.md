@@ -177,7 +177,7 @@ docker exec dcarca-mcpserver dotnet /tools/dcArca.Cli.dll select-representation-
 docker exec dcarca-mcpserver dotnet /tools/dcArca.Cli.dll activate-representation --context cadencia-arca-homologacion --consumer cadencia --cuit 20236438989 --point-of-sale 77 --actor admin
 ```
 
-Comandos de alta son **de una sola vez**: no repetir si el registro ya existe. Verificar primero con `list-contexts` y `list-representations`. La API key se genera con `create-key --name ... --scope ... --consumer ... --grant ...`; el secreto `sk-arca-...` se devuelve una sola vez y se entrega de manera privada. La rotación o reset del store puede invalidar todas las keys anteriores.
+`register-representation` y `select-representation-pv` son idempotentes para la misma representación viva y pueden reintentarse de forma segura ante retries/carreras locales; igual conviene inspeccionar `list-contexts` y `list-representations` antes de una intervención manual. Activación/revocación siguen siendo decisiones administrativas explícitas. La API key se genera con `create-key --name ... --scope ... --consumer ... --grant ...`; el secreto `sk-arca-...` se devuelve una sola vez y se entrega de manera privada. La rotación o reset del store puede invalidar todas las keys anteriores.
 
 ## 7. Diagnóstico fiscal no emisor
 
