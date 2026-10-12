@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Security.Cryptography.X509Certificates;
 using dcArca.Core.Models;
 using dcArca.Core.Services;
+using dcArca.Cli;
 using Microsoft.Extensions.Configuration;
 
 if (args.Length == 0)
