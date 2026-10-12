@@ -158,6 +158,39 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
     }
 
     [Fact]
+    public async Task RotacionDespuesDeLeerContextoPeroAntesDePersistir_FallaCerrado()
+    {
+        using var temp = new TempStore();
+        var durable = await PendingCandidateAsync(temp.Root);
+        var rotating = new RotateAfterContextReadStore(durable);
+        var policy = new FiscalRepresentationLifecyclePolicy(rotating);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            policy.ApplyAsync(
+                ContextId,
+                ConsumerId,
+                RepresentedCuit,
+                PointOfSale,
+                ProbeIdentity(),
+                Probe(
+                    dcPointOfSaleProbeStatus.Verified,
+                    "POINT_OF_SALE_AUTHORIZATION_VERIFIED",
+                    "probe rev-1"),
+                "admin"));
+
+        Assert.Equal("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH", error.Message);
+
+        var representation = await durable.GetRepresentationAsync(
+            ContextId, ConsumerId, RepresentedCuit, PointOfSale);
+        Assert.NotNull(representation);
+        Assert.Equal(FiscalRepresentationStatus.Pending, representation!.Status);
+        Assert.Null(representation.VerificationEvidence);
+
+        var context = await durable.GetContextAsync(ContextId);
+        Assert.Equal("rev-2", context?.ActiveAssignment?.AssignmentRevision);
+    }
+
+    [Fact]
     public async Task ProbeDeAssignmentAnterior_SeRechazaTrasRotacionSinMutarRepresentacion()
     {
         using var temp = new TempStore();
@@ -326,6 +359,118 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
         await store.SelectPointOfSaleAsync(
             ContextId, ConsumerId, RepresentedCuit, PointOfSale, "admin");
         return store;
+    }
+
+    private sealed class RotateAfterContextReadStore(
+        FileSystemFiscalTechnicalContextStore inner) : IFiscalTechnicalContextStore
+    {
+        private int _rotated;
+
+        public Task<IReadOnlyList<FiscalTechnicalContextRecord>> ListContextsAsync(
+            CancellationToken cancellationToken = default)
+            => inner.ListContextsAsync(cancellationToken);
+
+        public async Task<FiscalTechnicalContextRecord?> GetContextAsync(
+            string contextId,
+            CancellationToken cancellationToken = default)
+        {
+            var snapshot = await inner.GetContextAsync(contextId, cancellationToken);
+            if (snapshot is not null
+                && Interlocked.Exchange(ref _rotated, 1) == 0)
+            {
+                await inner.AddCandidateAssignmentAsync(
+                    contextId, "rev-2", "cred-operador-2", "rotation", cancellationToken);
+                await inner.MarkAssignmentValidatedAsync(
+                    contextId, "rev-2", "cert-and-wsaa-ok-2", "rotation", cancellationToken);
+                await inner.ActivateAssignmentAsync(
+                    contextId, "rev-2", "rotation", cancellationToken);
+            }
+            return snapshot;
+        }
+
+        public Task AddContextAsync(
+            FiscalTechnicalContextRecord context,
+            CancellationToken cancellationToken = default)
+            => inner.AddContextAsync(context, cancellationToken);
+
+        public Task AddCandidateAssignmentAsync(
+            string contextId, string revision, string credentialId, string actor,
+            CancellationToken cancellationToken = default)
+            => inner.AddCandidateAssignmentAsync(
+                contextId, revision, credentialId, actor, cancellationToken);
+
+        public Task MarkAssignmentValidatedAsync(
+            string contextId, string revision, string evidence, string actor,
+            CancellationToken cancellationToken = default)
+            => inner.MarkAssignmentValidatedAsync(
+                contextId, revision, evidence, actor, cancellationToken);
+
+        public Task ActivateAssignmentAsync(
+            string contextId, string revision, string actor,
+            CancellationToken cancellationToken = default)
+            => inner.ActivateAssignmentAsync(contextId, revision, actor, cancellationToken);
+
+        public Task DisableAssignmentAsync(
+            string contextId, string revision, string actor,
+            CancellationToken cancellationToken = default)
+            => inner.DisableAssignmentAsync(contextId, revision, actor, cancellationToken);
+
+        public Task SetContextStateAsync(
+            string contextId, FiscalContextOperationalState state, string actor,
+            CancellationToken cancellationToken = default)
+            => inner.SetContextStateAsync(contextId, state, actor, cancellationToken);
+
+        public Task RegisterCandidateAsync(
+            string contextId, string consumerId, long representedCuit, string actor,
+            CancellationToken cancellationToken = default)
+            => inner.RegisterCandidateAsync(
+                contextId, consumerId, representedCuit, actor, cancellationToken);
+
+        public Task<IReadOnlyList<FiscalRepresentationRecord>> ListRepresentationsAsync(
+            string contextId,
+            CancellationToken cancellationToken = default)
+            => inner.ListRepresentationsAsync(contextId, cancellationToken);
+
+        public Task<FiscalRepresentationRecord?> GetRepresentationAsync(
+            string contextId, string consumerId, long representedCuit, int pointOfSale,
+            CancellationToken cancellationToken = default)
+            => inner.GetRepresentationAsync(
+                contextId, consumerId, representedCuit, pointOfSale, cancellationToken);
+
+        public Task SelectPointOfSaleAsync(
+            string contextId, string consumerId, long representedCuit, int pointOfSale,
+            string actor, CancellationToken cancellationToken = default)
+            => inner.SelectPointOfSaleAsync(
+                contextId, consumerId, representedCuit, pointOfSale, actor, cancellationToken);
+
+        public Task MarkRepresentationVerifiedAsync(
+            string contextId, string consumerId, long representedCuit, int pointOfSale,
+            string evidence, string actor, CancellationToken cancellationToken = default)
+            => inner.MarkRepresentationVerifiedAsync(
+                contextId, consumerId, representedCuit, pointOfSale,
+                evidence, actor, cancellationToken);
+
+        public Task ActivateRepresentationAsync(
+            string contextId, string consumerId, long representedCuit, int pointOfSale,
+            string actor, CancellationToken cancellationToken = default)
+            => inner.ActivateRepresentationAsync(
+                contextId, consumerId, representedCuit, pointOfSale,
+                actor, cancellationToken);
+
+        public Task RevokeRepresentationAsync(
+            string contextId, string consumerId, long representedCuit, int pointOfSale,
+            string actor, CancellationToken cancellationToken = default)
+            => inner.RevokeRepresentationAsync(
+                contextId, consumerId, representedCuit, pointOfSale,
+                actor, cancellationToken);
+
+        public Task MarkRepresentationActionRequiredAsync(
+            string contextId, string consumerId, long representedCuit, int pointOfSale,
+            string reasonCode, string actor,
+            CancellationToken cancellationToken = default)
+            => inner.MarkRepresentationActionRequiredAsync(
+                contextId, consumerId, representedCuit, pointOfSale,
+                reasonCode, actor, cancellationToken);
     }
 
     private sealed class TempStore : IDisposable
