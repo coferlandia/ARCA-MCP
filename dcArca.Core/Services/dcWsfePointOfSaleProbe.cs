@@ -24,6 +24,20 @@ public sealed record dcPointOfSaleAccessProbeResult(
     public bool CanActivate => Status is dcPointOfSaleProbeStatus.Verified or dcPointOfSaleProbeStatus.ManualUnverified;
 }
 
+public sealed class FiscalRepresentationProbeOutcome
+{
+    internal FiscalRepresentationProbeOutcome(
+        FiscalRepresentationProbeIdentity identity,
+        dcPointOfSaleAccessProbeResult probe)
+    {
+        Identity = identity ?? throw new ArgumentNullException(nameof(identity));
+        Probe = probe ?? throw new ArgumentNullException(nameof(probe));
+    }
+
+    public FiscalRepresentationProbeIdentity Identity { get; }
+    public dcPointOfSaleAccessProbeResult Probe { get; }
+}
+
 public sealed record dcWsfePointOfSale(
     int Number,
     string? EmissionType,
@@ -98,6 +112,34 @@ public sealed class dcWsfePointOfSaleProbe
         {
             return Failed("WSFE_ACCESS_NOT_VERIFIED", "No se pudo completar el diagnóstico remoto de WSFE.", checkedAt);
         }
+    }
+
+    public async Task<FiscalRepresentationProbeOutcome> ProbeBoundAsync(
+        FiscalRepresentationProbeIdentity identity,
+        dcArcaConfig config,
+        dcArcaAuthService authService,
+        HttpClient httpClient,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(config);
+
+        if (string.IsNullOrWhiteSpace(identity.ContextId)
+            || string.IsNullOrWhiteSpace(identity.Environment)
+            || string.IsNullOrWhiteSpace(identity.AssignmentRevision)
+            || identity.RepresentedCuit <= 0
+            || identity.PointOfSale <= 0
+            || !long.TryParse(config.Cuit, out var configuredCuit)
+            || configuredCuit != identity.RepresentedCuit
+            || config.PuntoVenta != identity.PointOfSale)
+            throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
+
+        var result = await ProbeAsync(
+            config,
+            authService,
+            httpClient,
+            cancellationToken);
+        return new FiscalRepresentationProbeOutcome(identity, result);
     }
 
     public async Task<dcPointOfSaleAccessProbeResult> ProbeAsync(

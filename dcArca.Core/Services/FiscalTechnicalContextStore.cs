@@ -73,6 +73,20 @@ public interface IFiscalTechnicalContextStore
     Task RevokeRepresentationAsync(string contextId, string consumerId, long representedCuit, int pointOfSale, string actor, CancellationToken cancellationToken = default);
     Task MarkRepresentationActionRequiredAsync(string contextId, string consumerId, long representedCuit,
         int pointOfSale, string reasonCode, string actor, CancellationToken cancellationToken = default);
+
+    Task<FiscalRepresentationRecord> ActivateRepresentationFromProbeAsync(
+        string consumerId,
+        FiscalRepresentationProbeIdentity expectedIdentity,
+        string evidence,
+        string actor,
+        CancellationToken cancellationToken = default);
+
+    Task<FiscalRepresentationRecord> MarkRepresentationActionRequiredFromProbeAsync(
+        string consumerId,
+        FiscalRepresentationProbeIdentity expectedIdentity,
+        string reasonCode,
+        string actor,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed record FiscalTechnicalCatalog(
@@ -294,6 +308,127 @@ public sealed class FileSystemFiscalTechnicalContextStore : IFiscalTechnicalCont
                 ActionRequiredReasonCode = reasonCode
             };
         }, cancellationToken);
+    }
+
+    public async Task<FiscalRepresentationRecord> ActivateRepresentationFromProbeAsync(
+        string consumerId,
+        FiscalRepresentationProbeIdentity expectedIdentity,
+        string evidence,
+        string actor,
+        CancellationToken cancellationToken = default)
+    {
+        Require(consumerId, nameof(consumerId));
+        ArgumentNullException.ThrowIfNull(expectedIdentity);
+        Require(evidence, nameof(evidence));
+        Require(actor, nameof(actor));
+
+        FiscalRepresentationRecord? persisted = null;
+        await MutateAsync(cat =>
+        {
+            var context = RequireContext(cat, expectedIdentity.ContextId);
+            EnsureProbeIdentityStillCurrent(context, expectedIdentity);
+            var now = DateTimeOffset.UtcNow;
+            var manual = evidence.StartsWith(
+                "MANUAL_PV_UNVERIFIED_602|",
+                StringComparison.Ordinal);
+
+            return ChangeRepresentation(
+                cat,
+                expectedIdentity.ContextId,
+                consumerId,
+                expectedIdentity.RepresentedCuit,
+                expectedIdentity.PointOfSale,
+                rep =>
+                {
+                    EnsureProbeTransitionAllowed(rep);
+                    persisted = rep with
+                    {
+                        Status = FiscalRepresentationStatus.Active,
+                        VerificationEvidence = evidence,
+                        VerifiedAt = manual ? null : now,
+                        VerifiedBy = manual ? null : actor,
+                        ActivatedAt = rep.ActivatedAt ?? now,
+                        ActivatedBy = rep.ActivatedBy ?? actor
+                    };
+                    return persisted;
+                });
+        }, cancellationToken);
+
+        return persisted
+            ?? throw new InvalidDataException("FISCAL_REPRESENTATION_PERSISTENCE_FAILED");
+    }
+
+    public async Task<FiscalRepresentationRecord> MarkRepresentationActionRequiredFromProbeAsync(
+        string consumerId,
+        FiscalRepresentationProbeIdentity expectedIdentity,
+        string reasonCode,
+        string actor,
+        CancellationToken cancellationToken = default)
+    {
+        Require(consumerId, nameof(consumerId));
+        ArgumentNullException.ThrowIfNull(expectedIdentity);
+        Require(reasonCode, nameof(reasonCode));
+        Require(actor, nameof(actor));
+
+        FiscalRepresentationRecord? persisted = null;
+        await MutateAsync(cat =>
+        {
+            var context = RequireContext(cat, expectedIdentity.ContextId);
+            EnsureProbeIdentityStillCurrent(context, expectedIdentity);
+            var now = DateTimeOffset.UtcNow;
+
+            return ChangeRepresentation(
+                cat,
+                expectedIdentity.ContextId,
+                consumerId,
+                expectedIdentity.RepresentedCuit,
+                expectedIdentity.PointOfSale,
+                rep =>
+                {
+                    EnsureProbeTransitionAllowed(rep);
+                    persisted = rep with
+                    {
+                        Status = FiscalRepresentationStatus.ActionRequired,
+                        ActionRequiredAt = now,
+                        ActionRequiredBy = actor,
+                        ActionRequiredReasonCode = reasonCode
+                    };
+                    return persisted;
+                });
+        }, cancellationToken);
+
+        return persisted
+            ?? throw new InvalidDataException("FISCAL_REPRESENTATION_PERSISTENCE_FAILED");
+    }
+
+    private static void EnsureProbeIdentityStillCurrent(
+        FiscalTechnicalContextRecord context,
+        FiscalRepresentationProbeIdentity expectedIdentity)
+    {
+        if (context.OperationalState != FiscalContextOperationalState.Active
+            || context.ActiveAssignment is null)
+            throw new InvalidOperationException("FISCAL_CONTEXT_NOT_ACTIVE");
+
+        if (!string.Equals(
+                context.Environment,
+                expectedIdentity.Environment,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                context.ActiveAssignment.AssignmentRevision,
+                expectedIdentity.AssignmentRevision,
+                StringComparison.Ordinal))
+            throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
+    }
+
+    private static void EnsureProbeTransitionAllowed(
+        FiscalRepresentationRecord representation)
+    {
+        if (representation.Status is not (
+                FiscalRepresentationStatus.Pending
+                or FiscalRepresentationStatus.Verified
+                or FiscalRepresentationStatus.Active
+                or FiscalRepresentationStatus.ActionRequired))
+            throw new InvalidOperationException("FISCAL_REPRESENTATION_STATE_INVALID");
     }
 
     private Task UpdateContextAsync(string id, Func<FiscalTechnicalContextRecord, FiscalTechnicalContextRecord> action, CancellationToken ct)

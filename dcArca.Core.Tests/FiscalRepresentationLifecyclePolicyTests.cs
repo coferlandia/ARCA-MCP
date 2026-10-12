@@ -24,9 +24,9 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
             "mensaje que no debe formar parte de la evidencia");
 
         var result = await policy.ApplyAsync(
-            ContextId, ConsumerId, RepresentedCuit, PointOfSale,
-            ProbeIdentity(),
-            probe, "admin");
+            ConsumerId,
+            Outcome(probe),
+            "admin");
 
         Assert.Equal(FiscalRepresentationLifecycleDisposition.Activated, result.Disposition);
         Assert.Equal(FiscalRepresentationStatus.Active, result.Representation.Status);
@@ -49,9 +49,9 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
             "ARCA no informó puntos de venta; manual 602");
 
         var result = await policy.ApplyAsync(
-            ContextId, ConsumerId, RepresentedCuit, PointOfSale,
-            ProbeIdentity(),
-            probe, "admin");
+            ConsumerId,
+            Outcome(probe),
+            "admin");
 
         Assert.Equal(FiscalRepresentationLifecycleDisposition.Activated, result.Disposition);
         Assert.Equal(
@@ -77,9 +77,9 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
         var probe = Probe(dcPointOfSaleProbeStatus.NotVerified, code, "rechazo seguro");
 
         var result = await policy.ApplyAsync(
-            ContextId, ConsumerId, RepresentedCuit, PointOfSale,
-            ProbeIdentity(),
-            probe, "admin");
+            ConsumerId,
+            Outcome(probe),
+            "admin");
 
         Assert.Equal(FiscalRepresentationLifecycleDisposition.ActionRequired, result.Disposition);
         Assert.Equal(code, result.Code);
@@ -102,9 +102,9 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
         var probe = Probe(dcPointOfSaleProbeStatus.NotVerified, code, "diagnostico transitorio");
 
         var result = await policy.ApplyAsync(
-            ContextId, ConsumerId, RepresentedCuit, PointOfSale,
-            ProbeIdentity(),
-            probe, "admin");
+            ConsumerId,
+            Outcome(probe),
+            "admin");
 
         Assert.Equal(FiscalRepresentationLifecycleDisposition.Inconclusive, result.Disposition);
         Assert.Equal(code, result.Code);
@@ -126,10 +126,9 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
 
         var policy = new FiscalRepresentationLifecyclePolicy(store);
         var result = await policy.ApplyAsync(
-            ContextId, ConsumerId, RepresentedCuit, PointOfSale,
-            ProbeIdentity(),
-            Probe(dcPointOfSaleProbeStatus.NotVerified,
-                "WSFE_ACCESS_NOT_VERIFIED", "network"),
+            ConsumerId,
+            Outcome(Probe(dcPointOfSaleProbeStatus.NotVerified,
+                "WSFE_ACCESS_NOT_VERIFIED", "network")),
             "admin");
 
         Assert.Equal(FiscalRepresentationLifecycleDisposition.Inconclusive, result.Disposition);
@@ -148,10 +147,9 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
         var policy = new FiscalRepresentationLifecyclePolicy(store);
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             policy.ApplyAsync(
-                ContextId, ConsumerId, RepresentedCuit, PointOfSale,
-                ProbeIdentity(),
-                Probe(dcPointOfSaleProbeStatus.Verified,
-                    "POINT_OF_SALE_AUTHORIZATION_VERIFIED", "ok"),
+                ConsumerId,
+                Outcome(Probe(dcPointOfSaleProbeStatus.Verified,
+                    "POINT_OF_SALE_AUTHORIZATION_VERIFIED", "ok")),
                 "admin"));
 
         Assert.Equal("FISCAL_REPRESENTATION_STATE_INVALID", error.Message);
@@ -163,20 +161,16 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
     {
         using var temp = new TempStore();
         var durable = await PendingCandidateAsync(temp.Root);
-        var rotating = new RotateAfterContextReadStore(durable);
+        var rotating = new RotateBeforeProbePersistenceStore(durable);
         var policy = new FiscalRepresentationLifecyclePolicy(rotating);
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             policy.ApplyAsync(
-                ContextId,
                 ConsumerId,
-                RepresentedCuit,
-                PointOfSale,
-                ProbeIdentity(),
-                Probe(
+                Outcome(Probe(
                     dcPointOfSaleProbeStatus.Verified,
                     "POINT_OF_SALE_AUTHORIZATION_VERIFIED",
-                    "probe rev-1"),
+                    "probe rev-1")),
                 "admin"));
 
         Assert.Equal("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH", error.Message);
@@ -189,6 +183,48 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
 
         var context = await durable.GetContextAsync(ContextId);
         Assert.Equal("rev-2", context?.ActiveAssignment?.AssignmentRevision);
+    }
+
+    [Fact]
+    public async Task RotacionAntesDePersistirActionRequired_FallaCerrado()
+    {
+        using var temp = new TempStore();
+        var durable = await PendingCandidateAsync(temp.Root);
+        var rotating = new RotateBeforeProbePersistenceStore(durable);
+        var policy = new FiscalRepresentationLifecyclePolicy(rotating);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            policy.ApplyAsync(
+                ConsumerId,
+                Outcome(Probe(
+                    dcPointOfSaleProbeStatus.NotVerified,
+                    "POINT_OF_SALE_BLOCKED",
+                    "denegación rev-1")),
+                "admin"));
+
+        Assert.Equal("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH", error.Message);
+        var representation = await durable.GetRepresentationAsync(
+            ContextId, ConsumerId, RepresentedCuit, PointOfSale);
+        Assert.NotNull(representation);
+        Assert.Equal(FiscalRepresentationStatus.Pending, representation!.Status);
+        Assert.Null(representation.ActionRequiredReasonCode);
+    }
+
+    [Fact]
+    public void OutcomeDeProbe_NoPermiteEmparejarIdentityYResultadoDesdeAPIPublica()
+    {
+        Assert.Empty(typeof(FiscalRepresentationProbeOutcome).GetConstructors());
+
+        var apply = typeof(FiscalRepresentationLifecyclePolicy)
+            .GetMethods()
+            .Single(method => method.Name == nameof(FiscalRepresentationLifecyclePolicy.ApplyAsync));
+        var parameterTypes = apply.GetParameters()
+            .Select(parameter => parameter.ParameterType)
+            .ToArray();
+
+        Assert.Contains(typeof(FiscalRepresentationProbeOutcome), parameterTypes);
+        Assert.DoesNotContain(typeof(FiscalRepresentationProbeIdentity), parameterTypes);
+        Assert.DoesNotContain(typeof(dcPointOfSaleAccessProbeResult), parameterTypes);
     }
 
     [Fact]
@@ -212,15 +248,13 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             policy.ApplyAsync(
-                ContextId,
                 ConsumerId,
-                RepresentedCuit,
-                PointOfSale,
-                probeIdentity,
-                Probe(
-                    dcPointOfSaleProbeStatus.Verified,
-                    "POINT_OF_SALE_AUTHORIZATION_VERIFIED",
-                    "probe ejecutado con rev-1"),
+                Outcome(
+                    Probe(
+                        dcPointOfSaleProbeStatus.Verified,
+                        "POINT_OF_SALE_AUTHORIZATION_VERIFIED",
+                        "probe ejecutado con rev-1"),
+                    probeIdentity),
                 "admin"));
 
         Assert.Equal("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH", error.Message);
@@ -246,18 +280,16 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             policy.ApplyAsync(
-                ContextId,
                 ConsumerId,
-                RepresentedCuit,
-                PointOfSale,
-                probeIdentity,
-                Probe(
-                    dcPointOfSaleProbeStatus.Verified,
-                    "POINT_OF_SALE_AUTHORIZATION_VERIFIED",
-                    "mismo PV, otro CUIT"),
+                Outcome(
+                    Probe(
+                        dcPointOfSaleProbeStatus.Verified,
+                        "POINT_OF_SALE_AUTHORIZATION_VERIFIED",
+                        "mismo PV, otro CUIT"),
+                    probeIdentity),
                 "admin"));
 
-        Assert.Equal("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH", error.Message);
+        Assert.Equal("FISCAL_REPRESENTATION_NOT_FOUND", error.Message);
         var durable = await store.GetRepresentationAsync(
             ContextId, ConsumerId, RepresentedCuit, PointOfSale);
         Assert.NotNull(durable);
@@ -281,9 +313,9 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             policy.ApplyAsync(
-                ContextId, ConsumerId, RepresentedCuit, PointOfSale,
-                ProbeIdentity(),
-                mismatched, "admin"));
+                ConsumerId,
+                Outcome(mismatched),
+                "admin"));
 
         Assert.Equal("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH", error.Message);
         var durable = await store.GetRepresentationAsync(
@@ -303,9 +335,9 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
             "token=secret sign=secret <xml>private</xml>");
 
         var result = await policy.ApplyAsync(
-            ContextId, ConsumerId, RepresentedCuit, PointOfSale,
-            ProbeIdentity(),
-            probe, "admin");
+            ConsumerId,
+            Outcome(probe),
+            "admin");
 
         Assert.NotNull(result.VerificationEvidence);
         Assert.DoesNotContain("token", result.VerificationEvidence, StringComparison.OrdinalIgnoreCase);
@@ -313,6 +345,11 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
         Assert.DoesNotContain("xml", result.VerificationEvidence, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("secret", result.VerificationEvidence, StringComparison.OrdinalIgnoreCase);
     }
+
+    private static FiscalRepresentationProbeOutcome Outcome(
+        dcPointOfSaleAccessProbeResult probe,
+        FiscalRepresentationProbeIdentity? identity = null)
+        => new(identity ?? ProbeIdentity(), probe);
 
     private static FiscalRepresentationProbeIdentity ProbeIdentity(
         string assignmentRevision = "rev-1",
@@ -362,7 +399,7 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
         return store;
     }
 
-    private sealed class RotateAfterContextReadStore(
+    private sealed class RotateBeforeProbePersistenceStore(
         FileSystemFiscalTechnicalContextStore inner) : IFiscalTechnicalContextStore
     {
         private int _rotated;
@@ -371,23 +408,10 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
             CancellationToken cancellationToken = default)
             => inner.ListContextsAsync(cancellationToken);
 
-        public async Task<FiscalTechnicalContextRecord?> GetContextAsync(
+        public Task<FiscalTechnicalContextRecord?> GetContextAsync(
             string contextId,
             CancellationToken cancellationToken = default)
-        {
-            var snapshot = await inner.GetContextAsync(contextId, cancellationToken);
-            if (snapshot is not null
-                && Interlocked.Exchange(ref _rotated, 1) == 0)
-            {
-                await inner.AddCandidateAssignmentAsync(
-                    contextId, "rev-2", "cred-operador-2", "rotation", cancellationToken);
-                await inner.MarkAssignmentValidatedAsync(
-                    contextId, "rev-2", "cert-and-wsaa-ok-2", "rotation", cancellationToken);
-                await inner.ActivateAssignmentAsync(
-                    contextId, "rev-2", "rotation", cancellationToken);
-            }
-            return snapshot;
-        }
+            => inner.GetContextAsync(contextId, cancellationToken);
 
         public Task AddContextAsync(
             FiscalTechnicalContextRecord context,
@@ -472,6 +496,45 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
             => inner.MarkRepresentationActionRequiredAsync(
                 contextId, consumerId, representedCuit, pointOfSale,
                 reasonCode, actor, cancellationToken);
+
+        public async Task<FiscalRepresentationRecord> ActivateRepresentationFromProbeAsync(
+            string consumerId,
+            FiscalRepresentationProbeIdentity expectedIdentity,
+            string evidence,
+            string actor,
+            CancellationToken cancellationToken = default)
+        {
+            await RotateAsync(expectedIdentity.ContextId, cancellationToken);
+            return await inner.ActivateRepresentationFromProbeAsync(
+                consumerId, expectedIdentity, evidence, actor, cancellationToken);
+        }
+
+        public async Task<FiscalRepresentationRecord> MarkRepresentationActionRequiredFromProbeAsync(
+            string consumerId,
+            FiscalRepresentationProbeIdentity expectedIdentity,
+            string reasonCode,
+            string actor,
+            CancellationToken cancellationToken = default)
+        {
+            await RotateAsync(expectedIdentity.ContextId, cancellationToken);
+            return await inner.MarkRepresentationActionRequiredFromProbeAsync(
+                consumerId, expectedIdentity, reasonCode, actor, cancellationToken);
+        }
+
+        private async Task RotateAsync(
+            string contextId,
+            CancellationToken cancellationToken)
+        {
+            if (Interlocked.Exchange(ref _rotated, 1) != 0)
+                return;
+
+            await inner.AddCandidateAssignmentAsync(
+                contextId, "rev-2", "cred-operador-2", "rotation", cancellationToken);
+            await inner.MarkAssignmentValidatedAsync(
+                contextId, "rev-2", "cert-and-wsaa-ok-2", "rotation", cancellationToken);
+            await inner.ActivateAssignmentAsync(
+                contextId, "rev-2", "rotation", cancellationToken);
+        }
     }
 
     private sealed class TempStore : IDisposable

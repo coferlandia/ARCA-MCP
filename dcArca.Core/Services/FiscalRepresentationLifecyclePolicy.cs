@@ -45,83 +45,48 @@ public sealed class FiscalRepresentationLifecyclePolicy
         => _store = store;
 
     public async Task<FiscalRepresentationLifecycleResult> ApplyAsync(
-        string contextId,
         string consumerId,
-        long representedCuit,
-        int pointOfSale,
-        FiscalRepresentationProbeIdentity probeIdentity,
-        dcPointOfSaleAccessProbeResult probe,
+        FiscalRepresentationProbeOutcome outcome,
         string actor,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(probeIdentity);
-        ArgumentNullException.ThrowIfNull(probe);
+        ArgumentNullException.ThrowIfNull(outcome);
+        if (string.IsNullOrWhiteSpace(consumerId))
+            throw new ArgumentException("El consumerId es obligatorio.", nameof(consumerId));
         if (string.IsNullOrWhiteSpace(actor))
             throw new ArgumentException("El actor es obligatorio.", nameof(actor));
-        if (pointOfSale <= 0)
-            throw new ArgumentOutOfRangeException(nameof(pointOfSale));
-        if (probe.PointOfSale != pointOfSale
-            || !string.Equals(probeIdentity.ContextId, contextId, StringComparison.Ordinal)
-            || probeIdentity.RepresentedCuit != representedCuit
-            || probeIdentity.PointOfSale != pointOfSale)
+
+        var identity = outcome.Identity;
+        var probe = outcome.Probe;
+        if (identity.RepresentedCuit <= 0
+            || identity.PointOfSale <= 0
+            || string.IsNullOrWhiteSpace(identity.ContextId)
+            || string.IsNullOrWhiteSpace(identity.Environment)
+            || string.IsNullOrWhiteSpace(identity.AssignmentRevision)
+            || probe.PointOfSale != identity.PointOfSale)
             throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
         if (probe.CheckedAt == default)
             throw new InvalidOperationException("POINT_OF_SALE_PROBE_INVALID");
 
         var candidate = await _store.GetRepresentationAsync(
-            contextId,
+            identity.ContextId,
             consumerId,
-            representedCuit,
-            pointOfSale,
+            identity.RepresentedCuit,
+            identity.PointOfSale,
             cancellationToken)
             ?? throw new InvalidOperationException("FISCAL_REPRESENTATION_NOT_FOUND");
 
         if (!IsRevalidableStatus(candidate.Status))
             throw new InvalidOperationException("FISCAL_REPRESENTATION_STATE_INVALID");
 
-        var context = await _store.GetContextAsync(contextId, cancellationToken)
-            ?? throw new InvalidOperationException("FISCAL_CONTEXT_NOT_FOUND");
-        if (context.OperationalState != FiscalContextOperationalState.Active)
-            throw new InvalidOperationException("FISCAL_CONTEXT_NOT_ACTIVE");
-        var assignment = context.ActiveAssignment
-            ?? throw new InvalidOperationException("ACTIVE_ASSIGNMENT_REQUIRED");
-        if (!string.Equals(
-                probeIdentity.Environment,
-                context.Environment,
-                StringComparison.Ordinal)
-            || !string.Equals(
-                probeIdentity.AssignmentRevision,
-                assignment.AssignmentRevision,
-                StringComparison.Ordinal))
-            throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
-
         if (IsVerifiedActivation(probe) || IsManual602Activation(probe))
         {
-            var evidence = BuildEvidence(
-                probe,
-                probeIdentity);
-
-            await _store.MarkRepresentationVerifiedAsync(
-                contextId,
+            var evidence = BuildEvidence(probe, identity);
+            var active = await _store.ActivateRepresentationFromProbeAsync(
                 consumerId,
-                representedCuit,
-                pointOfSale,
+                identity,
                 evidence,
                 actor,
-                cancellationToken);
-            await _store.ActivateRepresentationAsync(
-                contextId,
-                consumerId,
-                representedCuit,
-                pointOfSale,
-                actor,
-                cancellationToken);
-
-            var active = await RequireRepresentationAsync(
-                contextId,
-                consumerId,
-                representedCuit,
-                pointOfSale,
                 cancellationToken);
             return new FiscalRepresentationLifecycleResult(
                 FiscalRepresentationLifecycleDisposition.Activated,
@@ -133,21 +98,13 @@ public sealed class FiscalRepresentationLifecyclePolicy
 
         if (ConclusiveDenials.Contains(probe.Code))
         {
-            await _store.MarkRepresentationActionRequiredAsync(
-                contextId,
-                consumerId,
-                representedCuit,
-                pointOfSale,
-                probe.Code,
-                actor,
-                cancellationToken);
-
-            var actionRequired = await RequireRepresentationAsync(
-                contextId,
-                consumerId,
-                representedCuit,
-                pointOfSale,
-                cancellationToken);
+            var actionRequired =
+                await _store.MarkRepresentationActionRequiredFromProbeAsync(
+                    consumerId,
+                    identity,
+                    probe.Code,
+                    actor,
+                    cancellationToken);
             return new FiscalRepresentationLifecycleResult(
                 FiscalRepresentationLifecycleDisposition.ActionRequired,
                 probe.Code,
@@ -156,9 +113,26 @@ public sealed class FiscalRepresentationLifecyclePolicy
                 null);
         }
 
-        // Absence of conclusive authorization evidence is not proof of revocation.
-        // Keep the durable lifecycle unchanged and let the caller decide how to
-        // surface/retry the inconclusive remote diagnosis.
+        // Inconclusive outcomes do not mutate durable lifecycle, but they must
+        // still belong to the currently active technical assignment.
+        var context = await _store.GetContextAsync(
+            identity.ContextId,
+            cancellationToken)
+            ?? throw new InvalidOperationException("FISCAL_CONTEXT_NOT_FOUND");
+        if (context.OperationalState != FiscalContextOperationalState.Active)
+            throw new InvalidOperationException("FISCAL_CONTEXT_NOT_ACTIVE");
+        var assignment = context.ActiveAssignment
+            ?? throw new InvalidOperationException("ACTIVE_ASSIGNMENT_REQUIRED");
+        if (!string.Equals(
+                context.Environment,
+                identity.Environment,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                assignment.AssignmentRevision,
+                identity.AssignmentRevision,
+                StringComparison.Ordinal))
+            throw new InvalidOperationException("POINT_OF_SALE_PROBE_IDENTITY_MISMATCH");
+
         return new FiscalRepresentationLifecycleResult(
             FiscalRepresentationLifecycleDisposition.Inconclusive,
             probe.Code,
@@ -172,20 +146,6 @@ public sealed class FiscalRepresentationLifecyclePolicy
             or FiscalRepresentationStatus.Verified
             or FiscalRepresentationStatus.Active
             or FiscalRepresentationStatus.ActionRequired;
-
-    private async Task<FiscalRepresentationRecord> RequireRepresentationAsync(
-        string contextId,
-        string consumerId,
-        long representedCuit,
-        int pointOfSale,
-        CancellationToken cancellationToken)
-        => await _store.GetRepresentationAsync(
-            contextId,
-            consumerId,
-            representedCuit,
-            pointOfSale,
-            cancellationToken)
-            ?? throw new InvalidOperationException("FISCAL_REPRESENTATION_NOT_FOUND");
 
     private static bool IsVerifiedActivation(dcPointOfSaleAccessProbeResult probe)
         => probe.Status == dcPointOfSaleProbeStatus.Verified

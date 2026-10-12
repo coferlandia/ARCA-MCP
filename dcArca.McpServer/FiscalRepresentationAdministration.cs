@@ -92,22 +92,18 @@ public sealed class FiscalRepresentationAdministration
         var material = _materializer.Materialize(
             Project(context, representedCuit, pointOfSale),
             assignment);
-        var probe = await _probe.ProbeAsync(
-            material.Config,
-            material.WsfeAuth,
-            _clients.CreateClient(nameof(FiscalAssignmentAuthorizationValidator)),
-            cancellationToken);
-
         FiscalRepresentationLifecycleResult lifecycle;
         try
         {
-            lifecycle = await _lifecycle.ApplyAsync(
-                contextId,
-                consumerId,
-                representedCuit,
-                pointOfSale,
+            var outcome = await _probe.ProbeBoundAsync(
                 probeIdentity,
-                probe,
+                material.Config,
+                material.WsfeAuth,
+                _clients.CreateClient(nameof(FiscalAssignmentAuthorizationValidator)),
+                cancellationToken);
+            lifecycle = await _lifecycle.ApplyAsync(
+                consumerId,
+                outcome,
                 Actor(principal),
                 cancellationToken);
         }
