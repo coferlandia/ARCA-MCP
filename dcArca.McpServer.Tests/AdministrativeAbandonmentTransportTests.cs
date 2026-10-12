@@ -149,15 +149,19 @@ public sealed class AdministrativeAbandonmentTransportTests
         Assert.Equal(state, durable?.State);
     }
 
-    [Fact]
-    public async Task RazonAdministrativaNoSegura_DevuelveErrorEstructurado_YNoModificaOperacion()
+    [Theory]
+    [InlineData("contains spaces")]
+    [InlineData("CredencialesComprometidasNoReintentar")]
+    [InlineData("sk-arca-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")]
+    public async Task RazonAdministrativaNoPermitida_DevuelveErrorEstructurado_YNoModificaOperacion(
+        string reasonCode)
     {
         var key = await SeedAsync(
             ConsumerA, 77, EmissionIdempotencyState.NumberAssigned, 177);
 
         using var client = _factory.CreateClient();
         var body = await CallAbandonAsync(
-            client, "arca:administrar", ConsumerA, Grant(), key, "contains spaces");
+            client, "arca:administrar", ConsumerA, Grant(), key, reasonCode);
 
         AssertStructuredError(body, "OPERATION_ABANDON_REASON_INVALID");
 
