@@ -186,7 +186,7 @@ public sealed class AdministrativeAbandonmentTransportTests
         Assert.NotNull(afterFirst);
 
         var second = await CallAbandonAsync(
-            client, "arca:administrar", ConsumerA, Grant(), key, "second_reason");
+            client, "arca:administrar", ConsumerA, Grant(), key, "operator_cancelled");
         Assert.DoesNotContain("\"isError\":true", second, StringComparison.Ordinal);
         Assert.Contains("AbandonedBeforeSubmission", second, StringComparison.Ordinal);
 

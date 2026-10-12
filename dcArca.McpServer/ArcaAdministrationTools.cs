@@ -59,7 +59,7 @@ public sealed class ArcaAdministrationTools
         CancellationToken cancellationToken = default)
         => _admin.RevokeAsync(Principal, contextId, consumerId, representedCuit, pointOfSale, cancellationToken);
 
-    [McpServerTool, Description("Abandona de forma auditada una operación Created/NumberAssigned antes del envío fiscal. Requiere operationId durable; nunca acepta idempotencyKey.")]
+    [McpServerTool, Description("Abandona de forma auditada una operación Created/NumberAssigned antes del envío fiscal. Requiere operationId durable; nunca acepta idempotencyKey. reasonCode: manual_recovery, operator_cancelled, failed_before_submission o stale_pre_submission.")]
     [Authorize(Policy = "ArcaAdministrar")]
     public Task<AdministrativePreSubmissionAbandonmentResult> AbandonarOperacionPreSubmission(
         string operationId,

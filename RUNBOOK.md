@@ -215,7 +215,7 @@ Usar `abandonar_operacion_pre_submission(operationId, reasonCode)` únicamente p
 
 La operación persiste actor, timestamp y `reasonCode`, conserva cualquier número ya reservado y libera sólo la reserva cuyo owner coincide exactamente. La respuesta informa estado previo/final y si se liberó la reserva. Una repetición sobre la misma operación ya abandonada es idempotente y conserva la auditoría original.
 
-**Prohibido** usar este procedimiento sobre `Submitting` o `Uncertain`, borrar archivos del store, editar JSON durable o liberar una serie manualmente para destrabarla. Esos estados pueden haber cruzado el side effect fiscal y deben reconciliarse. El `reasonCode` debe ser un token machine-safe de hasta 96 caracteres (letras, números, `-`, `_`, `.`, `:` o `/`), sin texto libre ni secretos.
+**Prohibido** usar este procedimiento sobre `Submitting` o `Uncertain`, borrar archivos del store, editar JSON durable o liberar una serie manualmente para destrabarla. Esos estados pueden haber cruzado el side effect fiscal y deben reconciliarse. El `reasonCode` no admite texto libre: debe ser exactamente uno de `manual_recovery`, `operator_cancelled`, `failed_before_submission` o `stale_pre_submission`. El servidor rechaza cualquier otro valor antes de persistirlo o loguearlo; nunca colocar secretos ni credenciales en este campo.
 
 - `docker compose config` devuelve `invalid spec :/app/appsettings.json`: falta `--env-file .env`.
 - `scp` ve carpetas vacías o `Permission denied`: el store es propiedad de root; usar backup en frío con `sudo tar`, sin cambiar propietarios.

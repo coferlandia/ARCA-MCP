@@ -18,6 +18,15 @@ public sealed record AdministrativePreSubmissionAbandonmentResult(
 /// </summary>
 public sealed class FiscalOperationAdministration
 {
+    private static readonly HashSet<string> AllowedReasonCodes =
+        new(StringComparer.Ordinal)
+        {
+            "manual_recovery",
+            "operator_cancelled",
+            "failed_before_submission",
+            "stale_pre_submission"
+        };
+
     private readonly IEmissionIdempotencyStore _store;
     private readonly PreSubmissionAbandonmentService _abandonment;
 
@@ -98,10 +107,10 @@ public sealed class FiscalOperationAdministration
     private static string NormalizeReasonCode(string reasonCode)
     {
         var normalized = reasonCode?.Trim() ?? string.Empty;
-        if (!IsAuditToken(normalized, 96))
+        if (!AllowedReasonCodes.Contains(normalized))
             throw new FiscalContextAccessException(
                 "OPERATION_ABANDON_REASON_INVALID",
-                "La razón administrativa debe ser un código seguro de hasta 96 caracteres.");
+                "La razón administrativa no pertenece al conjunto de códigos permitidos.");
         return normalized;
     }
 
