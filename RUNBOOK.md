@@ -209,6 +209,14 @@ En octubre de 2026 se decidió descartar sólo el estado histórico de pruebas t
 
 ## 10. Troubleshooting y mantenimiento
 
+### Abandono administrativo pre-submission
+
+Usar `abandonar_operacion_pre_submission(operationId, reasonCode)` únicamente para cerrar trabajo que el store durable todavía marque como `Created` o `NumberAssigned` y cuya intención ya no deba continuar. La key debe tener `arca:administrar`, grant `<contextId>:administrar` para el contexto durable y el mismo `consumerId` que la operación. El `operationId` es obligatorio; no sustituirlo por una `idempotencyKey`.
+
+La operación persiste actor, timestamp y `reasonCode`, conserva cualquier número ya reservado y libera sólo la reserva cuyo owner coincide exactamente. La respuesta informa estado previo/final y si se liberó la reserva. Una repetición sobre la misma operación ya abandonada es idempotente y conserva la auditoría original.
+
+**Prohibido** usar este procedimiento sobre `Submitting` o `Uncertain`, borrar archivos del store, editar JSON durable o liberar una serie manualmente para destrabarla. Esos estados pueden haber cruzado el side effect fiscal y deben reconciliarse. El `reasonCode` debe ser un token machine-safe de hasta 96 caracteres (letras, números, `-`, `_`, `.`, `:` o `/`), sin texto libre ni secretos.
+
 - `docker compose config` devuelve `invalid spec :/app/appsettings.json`: falta `--env-file .env`.
 - `scp` ve carpetas vacías o `Permission denied`: el store es propiedad de root; usar backup en frío con `sudo tar`, sin cambiar propietarios.
 - `401/403`: revisar API key, scopes, `consumerId` y grants; no compartir secretos en tickets.

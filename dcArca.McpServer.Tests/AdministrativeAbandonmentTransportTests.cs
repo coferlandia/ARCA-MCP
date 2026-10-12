@@ -88,6 +88,8 @@ public sealed class AdministrativeAbandonmentTransportTests
         Assert.NotNull(durable);
         Assert.Equal(EmissionIdempotencyState.AbandonedBeforeSubmission, durable!.State);
         Assert.Equal(171, durable.NumeroComprobante);
+        Assert.Equal("api-key:test-admin-key", durable.AbandonmentAudit?.ActorReference);
+        Assert.Equal("manual_recovery", durable.AbandonmentAudit?.ReasonCode);
         Assert.Null(await _factory.Services.GetRequiredService<IFiscalSeriesCoordinator>()
             .GetActiveAsync(durable.Identity));
     }
@@ -145,6 +147,23 @@ public sealed class AdministrativeAbandonmentTransportTests
         var durable = await _factory.Services.GetRequiredService<IEmissionIdempotencyStore>()
             .GetAsync(key);
         Assert.Equal(state, durable?.State);
+    }
+
+    [Fact]
+    public async Task RazonAdministrativaNoSegura_DevuelveErrorEstructurado_YNoModificaOperacion()
+    {
+        var key = await SeedAsync(
+            ConsumerA, 77, EmissionIdempotencyState.NumberAssigned, 177);
+
+        using var client = _factory.CreateClient();
+        var body = await CallAbandonAsync(
+            client, "arca:administrar", ConsumerA, Grant(), key, "contains spaces");
+
+        AssertStructuredError(body, "OPERATION_ABANDON_REASON_INVALID");
+
+        var durable = await _factory.Services.GetRequiredService<IEmissionIdempotencyStore>()
+            .GetAsync(key);
+        Assert.Equal(EmissionIdempotencyState.NumberAssigned, durable?.State);
     }
 
     [Fact]

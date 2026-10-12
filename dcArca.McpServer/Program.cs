@@ -83,6 +83,8 @@ builder.Services.AddSingleton<IFiscalAssignmentAuthorizationValidator>(sp => new
     sp.GetRequiredService<IFiscalCredentialMaterializer>(),
     sp.GetRequiredService<IHttpClientFactory>()));
 builder.Services.AddSingleton<FiscalRepresentationAdministration>();
+builder.Services.AddSingleton<PreSubmissionAbandonmentService>();
+builder.Services.AddSingleton<FiscalOperationAdministration>();
 builder.Services.AddSingleton<McpOperationContractService>();
 
 builder.Services.AddSingleton<PdfDocumentRenderer>();
