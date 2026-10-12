@@ -148,7 +148,9 @@ docker exec dcarca-mcpserver curl -fsS http://127.0.0.1:8080/health/live
 docker exec dcarca-mcpserver curl -fsS http://127.0.0.1:8080/health/ready
 ```
 
-Esperado: contenedor `healthy`, `{"status":"alive"}`, `{"status":"ready"}`. La advertencia sobre Docker Bake/buildx no fue bloqueante. Los avisos ASP.NET DataProtection observados no bloquearon el arranque y deberán evaluarse si el proceso necesita persistir esas claves.
+Esperado: contenedor `healthy`, `{"status":"alive"}`, `{"status":"ready"}`. `/health/ready` valida exclusivamente estructura local: recovery gate, catálogo V2, environments canónicos/configurados y referencias de credenciales activas. No llama ARCA ni abre el PFX; por lo tanto un 200 no demuestra autorización WSAA/WSFE ni habilitación del PV. Un catálogo vacío pero provisionable puede estar ready. Si devuelve 503, corregir el código seguro informado antes de habilitar nuevas emisiones.
+
+La advertencia sobre Docker Bake/buildx no fue bloqueante. Los avisos ASP.NET DataProtection observados no bloquearon el arranque y deberán evaluarse si el proceso necesita persistir esas claves.
 
 No usar `docker compose down -v`. No recrear con `docker run` manual: se perderían los montajes y la definición real de redes/Traefik. Para rollback binario revisar compatibilidad de schema; no restaurar `/data` antiguo automáticamente. El lector actual soporta operaciones v2 legacy sin provenance y v3 con provenance; las operaciones nuevas o reescritas se escriben en schema v4 para preservar también el cierre `AbandonedBeforeSubmission`. Un binario pre-v4 debe fallar cerrado al encontrarlas; no bajar manualmente `SchemaVersion`, quitar provenance ni borrar auditoría/estado de abandono para forzar compatibilidad.
 
@@ -225,6 +227,9 @@ La operación persiste actor, timestamp y `reasonCode`, conserva cualquier núme
 - `SERIES_WRITER_BUSY`: comprobar writer concurrente; nunca borrar locks a ciegas.
 - `SERIES_RESERVATION_BLOCKED`, `Submitting`, `Uncertain`: reconciliar operación previa; nunca emitir con otra key ni saltar número.
 - `RESTORE_RECONCILIATION_REQUIRED`: el recovery gate impide nuevas emisiones hasta documentar conciliación.
+- `FISCAL_CATALOG_UNREADABLE`: catálogo V2 corrupto/schema inválido/V1 pendiente; mantener live para diagnóstico y reparar mediante procedimiento controlado, no editar JSON a ciegas.
+- `FISCAL_ENVIRONMENT_UNRESOLVED`: un contexto referencia un environment canónico que no tiene los tres endpoints locales configurados.
+- `CREDENTIAL_REFERENCE_UNRESOLVED`: una assignment activa referencia un `credentialId` sin `CertificatePath` server-owned. El health no intenta abrir ese archivo ni autenticar contra WSAA.
 - CAE autorizado pero PDF fallido: reintentar solo el render, no la emisión fiscal.
 - Comprobar fechas de expiración de PFX, backups, disco y CI.
 
