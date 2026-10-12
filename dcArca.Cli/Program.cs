@@ -284,7 +284,6 @@ static async Task<int> ManageFiscalContextsAsync(string[] args, JsonSerializerOp
             return 0;
         }
         case "list-points-of-sale":
-        case "activate-representation":
         {
             var contextId = RequiredOption(args, "--context");
             var consumer = RequiredOption(args, "--consumer");
@@ -297,37 +296,48 @@ static async Task<int> ManageFiscalContextsAsync(string[] args, JsonSerializerOp
             if (!representations.Any(x => x.ConsumerId == consumer && x.RepresentedCuit == cuit
                 && x.Status != FiscalRepresentationStatus.Revoked))
                 throw new InvalidOperationException("FISCAL_REPRESENTATION_CANDIDATE_REQUIRED");
-            var pv = args[0] == "activate-representation"
-                ? ParseInt(RequiredOption(args, "--point-of-sale"), "--point-of-sale") : 1;
             var projected = new RepresentedFiscalContextRecord(contextId, context.Environment, cuit,
-                pv, context.OperationalState, context.ContextRevision, false, context.Assignments);
+                1, context.OperationalState, context.ContextRevision, false, context.Assignments);
             var binding = HostBinding(configuration, projected, assignment);
             var probe = new dcWsfePointOfSaleProbe();
             using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
             var auth = CreateWsfeAuth(binding);
-            if (args[0] == "list-points-of-sale")
-            {
-                var result = await probe.ListAsync(binding.Config, auth, httpClient);
-                Console.WriteLine(JsonSerializer.Serialize(result, jsonOptions));
-                return result.Verified ? 0 : 2;
-            }
-            var candidate = await store.GetRepresentationAsync(contextId, consumer, cuit, pv)
-                ?? throw new InvalidOperationException("FISCAL_REPRESENTATION_NOT_FOUND");
-            if (candidate.Status is not (FiscalRepresentationStatus.Pending or FiscalRepresentationStatus.Verified or FiscalRepresentationStatus.Active or FiscalRepresentationStatus.ActionRequired))
-                throw new InvalidOperationException("FISCAL_REPRESENTATION_STATE_INVALID");
-            var resultProbe = await probe.ProbeAsync(binding.Config, auth, httpClient);
-            if (!resultProbe.CanActivate)
-            {
-                Console.WriteLine(JsonSerializer.Serialize(resultProbe, jsonOptions));
-                return 2;
-            }
+            var result = await probe.ListAsync(binding.Config, auth, httpClient);
+            Console.WriteLine(JsonSerializer.Serialize(result, jsonOptions));
+            return result.Verified ? 0 : 2;
+        }
+        case "activate-representation":
+        {
+            var contextId = RequiredOption(args, "--context");
+            var consumer = RequiredOption(args, "--consumer");
+            var cuit = ParseLong(RequiredOption(args, "--cuit"), "--cuit");
+            var pv = ParseInt(RequiredOption(args, "--point-of-sale"), "--point-of-sale");
             var actor = RequiredOption(args, "--actor");
-            var evidence = $"{(resultProbe.Verified ? "FEParamGetPtosVenta" : "MANUAL_PV_UNVERIFIED_602")}|context={contextId}|env={context.Environment}|cuit={cuit}|pv={pv}|rev={assignment.AssignmentRevision}|checked={resultProbe.CheckedAt:O}";
-            await store.MarkRepresentationVerifiedAsync(contextId, consumer, cuit, pv, evidence, actor);
-            await store.ActivateRepresentationAsync(contextId, consumer, cuit, pv, actor);
-            Console.WriteLine(JsonSerializer.Serialize(new { Status = "Active", ContextId = contextId,
-                ConsumerId = consumer, Cuit = cuit, PointOfSale = pv }, jsonOptions));
-            return 0;
+
+            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            var command = new FiscalRepresentationActivationCommand(
+                store,
+                new FiscalRepresentationLifecyclePolicy(store),
+                new FiscalRepresentationProbeExecutor(configuration, httpClient));
+            var result = await command.ExecuteAsync(
+                contextId,
+                consumer,
+                cuit,
+                pv,
+                actor);
+
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                Status = result.Representation.Status.ToString(),
+                ContextId = contextId,
+                ConsumerId = consumer,
+                Cuit = cuit,
+                PointOfSale = pv,
+                result.Code,
+                result.SafeMessage,
+                Disposition = result.Disposition.ToString()
+            }, jsonOptions));
+            return result.ExitCode;
         }
         case "revoke-representation":
         {
