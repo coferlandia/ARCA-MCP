@@ -192,6 +192,7 @@ public sealed class FiscalRepresentationActivationCommandTests
         public Task<FiscalRepresentationProbeOutcome> ProbeAsync(
             FiscalTechnicalContextRecord context,
             CredentialAssignmentRecord assignment,
+            FiscalRepresentationRecord representation,
             long representedCuit,
             int pointOfSale,
             CancellationToken cancellationToken = default)
@@ -202,7 +203,8 @@ public sealed class FiscalRepresentationActivationCommandTests
                         context.Environment,
                         representedCuit,
                         pointOfSale,
-                        assignment.AssignmentRevision),
+                        assignment.AssignmentRevision,
+                        representation.CreatedAt),
                     probe));
     }
 
@@ -214,6 +216,7 @@ public sealed class FiscalRepresentationActivationCommandTests
         public async Task<FiscalRepresentationProbeOutcome> ProbeAsync(
             FiscalTechnicalContextRecord context,
             CredentialAssignmentRecord assignment,
+            FiscalRepresentationRecord representation,
             long representedCuit,
             int pointOfSale,
             CancellationToken cancellationToken = default)
