@@ -174,11 +174,12 @@ public sealed class McpFiscalErrorBoundaryTests : IClassFixture<WebApplicationFa
         await tokenStore.WriteAsync(cacheKey + "_wsfe",
             new WsaaTokenEntry("test-token", "test-sign", DateTime.UtcNow.AddHours(1)));
 
+        var materializer = new ProbeMaterializer(cacheKey, tokenStore);
         using var factory = CreateFactory(catalog, services =>
         {
             services.RemoveAll<IFiscalCredentialMaterializer>();
-            services.AddSingleton<IFiscalCredentialMaterializer>(
-                new ProbeMaterializer(cacheKey, tokenStore));
+            services.AddSingleton<IFiscalCredentialMaterializer>(materializer);
+            services.AddSingleton(materializer.CreateBoundProbe());
             services.RemoveAll<IHttpClientFactory>();
             services.AddSingleton<IHttpClientFactory>(new ErrorWsfeClientFactory(remoteCode));
         });
@@ -404,6 +405,15 @@ public sealed class McpFiscalErrorBoundaryTests : IClassFixture<WebApplicationFa
     private sealed class ProbeMaterializer(string cacheKey, IWsaaTokenStore tokenStore)
         : IFiscalCredentialMaterializer
     {
+        public dcWsfePointOfSaleProbe CreateBoundProbe()
+            => new(binding => new dcArcaAuthService(
+                binding.Config.WsaaUrl,
+                binding.Config.CertificatePath,
+                binding.Config.CertificatePassword,
+                cacheKey,
+                serviceName: "wsfe",
+                tokenStore: tokenStore));
+
         public FiscalCredentialMaterialization Materialize(
             RepresentedFiscalContextRecord context,
             CredentialAssignmentRecord assignment)
