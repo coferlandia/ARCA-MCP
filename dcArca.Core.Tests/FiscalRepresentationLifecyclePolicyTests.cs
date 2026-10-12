@@ -157,6 +157,7 @@ public sealed class FiscalRepresentationLifecyclePolicyTests
         Assert.Equal("FISCAL_REPRESENTATION_STATE_INVALID", error.Message);
     }
 
+    // Regression authority for the CAS window reported during #76 review.
     [Fact]
     public async Task RotacionDespuesDeLeerContextoPeroAntesDePersistir_FallaCerrado()
     {
