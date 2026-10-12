@@ -52,6 +52,66 @@ public class WsfePointOfSaleDiscoveryTests
     }
 
     [Fact]
+    public async Task ProbeBound_IgnoraTicketPresembradoEnSharedCache()
+    {
+        var context = new FiscalTechnicalContextRecord(
+            "operator-homo",
+            "homologacion",
+            FiscalContextOperationalState.Active,
+            1,
+            [
+                new CredentialAssignmentRecord(
+                    "rev-1",
+                    "cred-a",
+                    CredentialAssignmentStatus.Active,
+                    "validated",
+                    DateTimeOffset.UtcNow.AddMinutes(-2),
+                    DateTimeOffset.UtcNow.AddMinutes(-2),
+                    DateTimeOffset.UtcNow.AddMinutes(-1),
+                    "admin")
+            ]);
+        var assignment = context.ActiveAssignment!;
+        var binding = new FiscalCredentialHostBinding(
+            "cred-a",
+            "homologacion:cred-a",
+            new dcArcaConfig
+            {
+                Environment = "homologacion",
+                Cuit = "20123456786",
+                PuntoVenta = 7,
+                CertificatePath = Path.Combine(Path.GetTempPath(), "credential-a-does-not-exist.pfx"),
+                CertificatePassword = "secret-a",
+                WsaaUrl = "https://wsaa.example.invalid",
+                WsfeUrl = "https://wsfe.example.invalid",
+                PadronUrl = "https://padron.example.invalid"
+            });
+        var sharedKey = binding.CacheIdentity + "_wsfe";
+        await MemoryWsaaTokenStore.Shared.WriteAsync(
+            sharedKey,
+            new WsaaTokenEntry(
+                "ticket-from-other-credential",
+                "sign-from-other-credential",
+                DateTime.UtcNow.AddHours(1)));
+
+        try
+        {
+            var result = await new dcWsfePointOfSaleProbe().ProbeBoundAsync(
+                context,
+                assignment,
+                20123456786,
+                7,
+                binding,
+                new HttpClient(new ThrowIfCalledHandler()));
+
+            Assert.Equal("WSAA_AUTHORIZATION_NOT_VERIFIED", result.Probe.Code);
+        }
+        finally
+        {
+            await MemoryWsaaTokenStore.Shared.RemoveAsync(sharedKey);
+        }
+    }
+
+    [Fact]
     public void ProbeBound_NoExponeAuthenticadorNiTokenStoreComoInputDelCaller()
     {
         var method = typeof(dcWsfePointOfSaleProbe).GetMethod(
@@ -102,6 +162,14 @@ public class WsfePointOfSaleDiscoveryTests
         var result = dcWsfePointOfSaleProbe.EvaluatePointOfSale(77, listing);
         Assert.False(result.CanActivate);
         Assert.Equal("POINT_OF_SALE_BLOCKED", result.Code);
+    }
+
+    private sealed class ThrowIfCalledHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+            => throw new InvalidOperationException("HTTP_SHOULD_NOT_BE_CALLED");
     }
 
     private static string Envelope(string body) =>
