@@ -52,6 +52,20 @@ public class WsfePointOfSaleDiscoveryTests
     }
 
     [Fact]
+    public void ProbeBound_NoExponeAuthenticadorNiTokenStoreComoInputDelCaller()
+    {
+        var method = typeof(dcWsfePointOfSaleProbe).GetMethod(
+            "ProbeBoundAsync",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+
+        Assert.NotNull(method);
+        Assert.DoesNotContain(
+            method!.GetParameters(),
+            parameter => parameter.ParameterType == typeof(dcArcaAuthService)
+                || parameter.ParameterType == typeof(IWsaaTokenStore));
+    }
+
+    [Fact]
     public async Task ProbeBound_AuthenticadorDeOtraCredencial_FallaAntesDeRed()
     {
         var context = new FiscalTechnicalContextRecord(
