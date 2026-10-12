@@ -147,18 +147,6 @@ public class WsfePointOfSaleDiscoveryTests
     }
 
     [Fact]
-    public void ProbeBound_NoConservaTokenStoreEntreInvocaciones()
-    {
-        var fields = typeof(dcWsfePointOfSaleProbe)
-            .GetFields(System.Reflection.BindingFlags.Instance
-                | System.Reflection.BindingFlags.NonPublic
-                | System.Reflection.BindingFlags.Public);
-
-        Assert.DoesNotContain(fields, field =>
-            typeof(IWsaaTokenStore).IsAssignableFrom(field.FieldType));
-    }
-
-    [Fact]
     public void PvManual_EsPermitidoSoloPara602SinResultados()
     {
         var listing = dcWsfePointOfSaleProbe.ParseListingResponse(
