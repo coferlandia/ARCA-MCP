@@ -19,7 +19,7 @@ templateKey + templateVersion
 Ejemplo:
 
 ```text
-factura-ar + 3
+factura-ar + 4
 ```
 
 Por compatibilidad del schema MCP actual, el parámetro público continúa llamándose temporalmente `templateId`, pero su semántica es **clave lógica estable**. Por ejemplo:
@@ -27,7 +27,7 @@ Por compatibilidad del schema MCP actual, el parámetro público continúa llam�
 ```json
 {
   "templateId": "factura-ar",
-  "templateVersion": "3"
+  "templateVersion": "4"
 }
 ```
 
@@ -121,6 +121,8 @@ Formato actual:
 - vuelve a verificar visibilidad con la credencial runtime;
 - prioriza en su salida `TEMPLATE_KEY`, `TEMPLATE_VERSION`, `TEMPLATE_OWNER` y `TEMPLATE_STATUS`;
 - el ID físico se imprime únicamente como diagnóstico y no debe copiarse a SecretarIA.
+
+La versión `factura-ar:4` mantiene Factura A/B/C y agrega identificación visual explícita para Nota de Crédito A/B/C (tipos 3/8/13). La versión `factura-ar:3` permanece disponible e inmutable para snapshots históricos que la referencian.
 
 Una versión publicada es inmutable:
 

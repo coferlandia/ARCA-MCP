@@ -39,6 +39,26 @@ public class PdfTemplateManifestTests
         }
     }
 
+
+    [Fact]
+    public void FacturaArV4_IdentifiesInvoicesAndCreditNotes()
+    {
+        var repositoryRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", ".."));
+        var templatePath = Path.Combine(
+            repositoryRoot, "deploy", "cadencia", "pdf-templates", "factura-ar-v4.html");
+
+        Assert.True(File.Exists(templatePath), $"No existe {templatePath}");
+        var template = File.ReadAllText(templatePath);
+
+        Assert.Contains("fiscal.tipoComprobante == 1 or fiscal.tipoComprobante == 3", template);
+        Assert.Contains("fiscal.tipoComprobante == 6 or fiscal.tipoComprobante == 8", template);
+        Assert.Contains("fiscal.tipoComprobante == 11 or fiscal.tipoComprobante == 13", template);
+        Assert.Contains("fiscal.tipoComprobante == 3 or fiscal.tipoComprobante == 8 or fiscal.tipoComprobante == 13", template);
+        Assert.Contains("Nota de crédito", template);
+        Assert.Contains("Factura", template);
+    }
+
     private static string RequiredString(JsonElement element, string propertyName)
     {
         Assert.True(element.TryGetProperty(propertyName, out var property), $"Falta {propertyName}");
