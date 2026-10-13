@@ -63,16 +63,16 @@ public class WsfePointOfSaleDiscoveryTests
               <PtoVenta><Nro>7</Nro><EmisionTipo>CAE</EmisionTipo><Bloqueado>N</Bloqueado><FchBaja></FchBaja></PtoVenta>
               <PtoVenta><Nro>8</Nro><EmisionTipo>CAE</EmisionTipo><Bloqueado>S</Bloqueado></PtoVenta>
               <PtoVenta><Nro>9</Nro><EmisionTipo>CAE</EmisionTipo><Bloqueado>N</Bloqueado><FchBaja>20261001</FchBaja></PtoVenta>
-              <PtoVenta><Nro>10</Nro><EmisionTipo>CAEA</EmisionTipo><Bloqueado>N</Bloqueado></PtoVenta>
+              <PtoVenta><Nro>10</Nro><EmisionTipo>CAEA</EmisionTipo><Bloqueado>N</Bloqueado></PtoVenta>\n              <PtoVenta><Nro>77</Nro><EmisionTipo>CAE - Monotributo</EmisionTipo><Bloqueado>N</Bloqueado><FchBaja></FchBaja></PtoVenta>
             </ResultGet>
             """);
         var result = dcWsfePointOfSaleProbe.ParseListingResponse(soap, DateTimeOffset.UtcNow);
         Assert.True(result.Verified);
-        Assert.Equal(4, result.Points.Count);
+        Assert.Equal(5, result.Points.Count);
         Assert.True(result.Points.Single(x => x.Number == 7).EligibleForCae);
         Assert.True(result.Points.Single(x => x.Number == 8).Blocked);
         Assert.False(result.Points.Single(x => x.Number == 9).EligibleForCae);
-        Assert.False(result.Points.Single(x => x.Number == 10).EligibleForCae);
+        Assert.False(result.Points.Single(x => x.Number == 10).EligibleForCae);\n        Assert.True(result.Points.Single(x => x.Number == 77).EligibleForCae);
     }
 
     [Theory]
