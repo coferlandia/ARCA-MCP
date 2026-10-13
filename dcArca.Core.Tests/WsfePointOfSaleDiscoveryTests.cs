@@ -63,7 +63,7 @@ public class WsfePointOfSaleDiscoveryTests
               <PtoVenta><Nro>7</Nro><EmisionTipo>CAE</EmisionTipo><Bloqueado>N</Bloqueado><FchBaja></FchBaja></PtoVenta>
               <PtoVenta><Nro>8</Nro><EmisionTipo>CAE</EmisionTipo><Bloqueado>S</Bloqueado></PtoVenta>
               <PtoVenta><Nro>9</Nro><EmisionTipo>CAE</EmisionTipo><Bloqueado>N</Bloqueado><FchBaja>20261001</FchBaja></PtoVenta>
-              <PtoVenta><Nro>10</Nro><EmisionTipo>CAEA</EmisionTipo><Bloqueado>N</Bloqueado></PtoVenta>\n              <PtoVenta><Nro>77</Nro><EmisionTipo>CAE - Monotributo</EmisionTipo><Bloqueado>N</Bloqueado><FchBaja></FchBaja></PtoVenta>
+              <PtoVenta><Nro>10</Nro><EmisionTipo>CAEA</EmisionTipo><Bloqueado>N</Bloqueado></PtoVenta>\n              <PtoVenta><Nro>77</Nro><EmisionTipo>CAE - Monotributo</EmisionTipo><Bloqueado>N</Bloqueado><FchBaja>NULL</FchBaja></PtoVenta>
             </ResultGet>
             """);
         var result = dcWsfePointOfSaleProbe.ParseListingResponse(soap, DateTimeOffset.UtcNow);
