@@ -39,6 +39,34 @@ printf '{"Id":"key_docker","Secret":"sk-arca-docker"}\n'
 EOF
 chmod +x "$tmp/bin/docker"
 
+cat > "$tmp/bin/uname" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "${FAKE_UNAME:-Linux}"
+EOF
+chmod +x "$tmp/bin/uname"
+
+cat > "$tmp/bin/stat" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${FAKE_STAT_FAIL:-0}" == "1" ]]; then
+  exit 1
+fi
+printf '%s\n' "${FAKE_STAT_OWNER:-1234:5678}"
+EOF
+chmod +x "$tmp/bin/stat"
+
+cat > "$tmp/bin/id" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+  -u) printf '%s\n' '9001' ;;
+  -g) printf '%s\n' '9002' ;;
+  *) exit 64 ;;
+esac
+EOF
+chmod +x "$tmp/bin/id"
+
 original_path="$PATH"
 export PATH="$tmp/bin:$PATH"
 
@@ -83,6 +111,41 @@ grep -q -- "$tmp/store:/data" "$tmp/capture/docker.args"
 grep -q -- 'ApiKeys__Directory=/data' "$tmp/capture/docker.args"
 grep -q -- '/tools/dcArca.Cli.dll' "$tmp/capture/docker.args"
 grep -q -- 'create-key' "$tmp/capture/docker.args"
+
+# On Linux the container identity must follow the persistent store owner, not
+# the interactive operator running the wrapper.
+grep -qx -- '--user' "$tmp/capture/docker.args"
+grep -qx -- '1234:5678' "$tmp/capture/docker.args"
+if grep -qx -- '9001:9002' "$tmp/capture/docker.args"; then
+  echo "Expected Docker backend to use store owner, not operator UID:GID" >&2
+  exit 1
+fi
+
+# If the store owner cannot be determined reliably, do not force an identity;
+# let the image choose its default user instead.
+export FAKE_STAT_FAIL=1
+bash "$RUNNER" list \
+  --backend docker \
+  --image custom-arca:ops \
+  --directory "$tmp/store" >/dev/null
+if grep -qx -- '--user' "$tmp/capture/docker.args"; then
+  echo "Expected Docker backend to omit --user when owner detection fails" >&2
+  exit 1
+fi
+unset FAKE_STAT_FAIL
+
+# Git Bash/Windows must keep the safe fallback and never apply Unix ownership
+# probing or a host UID:GID to the container.
+export FAKE_UNAME=MINGW64_NT-10.0
+bash "$RUNNER" list \
+  --backend docker \
+  --image custom-arca:ops \
+  --directory "$tmp/store" >/dev/null
+if grep -qx -- '--user' "$tmp/capture/docker.args"; then
+  echo "Expected Git Bash/Windows Docker backend to omit --user" >&2
+  exit 1
+fi
+unset FAKE_UNAME
 
 # A consumer-bound smoke key must fail closed when no context is supplied.
 if bash "$RUNNER" create \
