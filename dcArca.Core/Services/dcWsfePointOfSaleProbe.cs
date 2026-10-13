@@ -314,7 +314,7 @@ public sealed class dcWsfePointOfSaleProbe
             var blocked = string.Equals(blockedText, "S", StringComparison.OrdinalIgnoreCase);
             var disabledDate = Value(node, "FchBaja");
             var eligible = !blocked && string.IsNullOrWhiteSpace(disabledDate)
-                && string.Equals(emission, "CAE", StringComparison.OrdinalIgnoreCase);
+                && IsCaeEmissionType(emission);
             points.Add(new dcWsfePointOfSale(number, emission, blocked, disabledDate, eligible));
         }
 
@@ -325,6 +325,14 @@ public sealed class dcWsfePointOfSaleProbe
             dcPointOfSaleProbeStatus.Verified, "POINT_OF_SALE_LIST_VERIFIED",
             "ARCA devolvió el listado de puntos de venta del CUIT representado.",
             checkedAt, points);
+    }
+
+    private static bool IsCaeEmissionType(string? emissionType)
+    {
+        if (string.IsNullOrWhiteSpace(emissionType)) return false;
+        var value = emissionType.Trim();
+        return string.Equals(value, "CAE", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("CAE ", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string SafeDiagnosticText(string? message)
