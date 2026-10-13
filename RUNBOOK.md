@@ -33,7 +33,8 @@ Montajes confirmados con `docker inspect`:
 | Archivo/directorio host | Contenedor | Propósito |
 | --- | --- | --- |
 | `/home/ubuntu/apps/dcarca-mcpserver-config/appsettings.json` | `/app/appsettings.json:ro` | JSON privado |
-| `/home/ubuntu/apps/dcarca-mcpserver-config/certificado.pfx` | `/certs/certificado.pfx:ro` | Certificado |
+| `${CERTIFICATE_PATH}` (Cadencia: `diegocofre-homo.pfx`) | `/certs/certificado.pfx:ro` | Certificado de homologación; se conserva la ruta interna legacy para no rotar la assignment activa |
+| `${PRODUCTION_CERTIFICATE_PATH}` (Cadencia: `diegocofre-prod.pfx`) | `/certs/diegocofre-prod.pfx:ro` | Certificado de producción |
 | `/home/ubuntu/apps/dcarca-mcpserver-data/` | `/data` | Estado fiscal durable |
 
 No confundir el `docker-compose.yml` genérico en la raíz con el Compose efectivo del servidor.
@@ -66,10 +67,10 @@ python -m json.tool dcArca.McpServer/appsettings.prod.json > /dev/null
 # Subir configuración privada:
 bash scripts/upload-config.sh
 
-git check-ignore -v dcArca.McpServer/appsettings.prod.json secrets/certificado.pfx
+git check-ignore -v dcArca.McpServer/appsettings.prod.json secrets/diegocofre-homo.pfx secrets/diegocofre-prod.pfx
 ```
 
-Los scripts SCP **no** descargan/suben `/data`, **no** eliminan archivos sobrantes, **no** hacen rollback y **no** reinician Docker. En configuración productiva, el contenedor lee `/app/appsettings.json`. El certificado se referencia por su ruta **interna** `/certs/certificado.pfx`; no utilizar la ruta Windows/Ubuntu dentro de `FiscalCredentials`.
+Los scripts SCP **no** descargan/suben `/data`, **no** eliminan archivos sobrantes, **no** hacen rollback y **no** reinician Docker. En configuración productiva, el contenedor lee `/app/appsettings.json`. Las credenciales fiscales siempre referencian rutas **internas** del contenedor: homologación conserva `/certs/certificado.pfx` por compatibilidad con la assignment activa y producción usa `/certs/diegocofre-prod.pfx`. No utilizar rutas Windows/Ubuntu dentro de `FiscalCredentials`.
 
 La configuración fiscal vigente es V2. Los IDs de ambiente fiscal son estrictamente `homologacion` y `produccion`; no crear secciones alias (`homo`, `prod`, mayúsculas, espacios, etc.). La CLI puede normalizar casing/whitespace al crear un contexto nuevo, pero un catálogo persistido no canónico debe corregirse mediante procedimiento explícito y nunca se reinterpreta silenciosamente.
 
@@ -81,6 +82,10 @@ La configuración fiscal vigente es V2:
     "cadencia-homo": {
       "CertificatePath": "/certs/certificado.pfx",
       "CertificatePassword": "<valor-privado>"
+    },
+    "cadencia-prod": {
+      "CertificatePath": "/certs/diegocofre-prod.pfx",
+      "CertificatePassword": "<valor-privado>"
     }
   },
   "FiscalEnvironments": {
@@ -88,6 +93,11 @@ La configuración fiscal vigente es V2:
       "WsaaUrl": "https://wsaahomo.afip.gov.ar/ws/services/LoginCms",
       "WsfeUrl": "https://wswhomo.afip.gov.ar/wsfev1/service.asmx",
       "PadronUrl": "https://awshomo.afip.gov.ar/sr-padron/webservices/personaServiceA5"
+    },
+    "produccion": {
+      "WsaaUrl": "https://wsaa.afip.gov.ar/ws/services/LoginCms",
+      "WsfeUrl": "https://servicios1.afip.gov.ar/wsfev1/service.asmx",
+      "PadronUrl": "https://aws.arca.gob.ar/sr-padron/webservices/personaServiceA5"
     }
   },
   "ApiKeys": {"Directory": "/data"},
@@ -136,7 +146,7 @@ git pull --ff-only origin main
 git log -1 --oneline
 
 # La opción --env-file es NECESARIA: de lo contrario APPSETTINGS_PATH,
-# CERTIFICATE_PATH, PDF_API_KEY y DOMAIN pueden quedar vacíos.
+# CERTIFICATE_PATH, PRODUCTION_CERTIFICATE_PATH, PDF_API_KEY y DOMAIN pueden quedar vacíos.
 docker compose --env-file .env -f deploy/cadencia/docker-compose.yml config --services
 
 docker compose --env-file .env -f deploy/cadencia/docker-compose.yml \
@@ -178,6 +188,64 @@ docker exec dcarca-mcpserver dotnet /tools/dcArca.Cli.dll activate-representatio
 ```
 
 `register-representation` y `select-representation-pv` son idempotentes para la misma representación viva y pueden reintentarse de forma segura ante retries/carreras locales; igual conviene inspeccionar `list-contexts` y `list-representations` antes de una intervención manual. Activación/revocación siguen siendo decisiones administrativas explícitas. La API key se genera con `create-key --name ... --scope ... --consumer ... --grant ...`; el secreto `sk-arca-...` se devuelve una sola vez y se entrega de manera privada. La rotación o reset del store puede invalidar todas las keys anteriores.
+
+### Alta de producción
+
+Producción se provisiona como un contexto técnico separado; **no** se cambia el ambiente del contexto de homologación ni se reutiliza su certificado. Precondiciones:
+
+- el certificado de producción debe estar montado como `/certs/diegocofre-prod.pfx` y declarado como `FiscalCredentials:cadencia-prod`;
+- `FiscalEnvironments:produccion` debe contener los endpoints oficiales de WSAA, WSFEv1 y Padrón;
+- en ARCA, el certificado debe estar asociado al WSN de facturación electrónica (`wsfe`) mediante Administrador de Relaciones de Clave Fiscal;
+- el emisor debe disponer de un punto de venta habilitado para Web Services. No adivinar ni reutilizar automáticamente el PV de homologación.
+
+Antes del deploy, el `.env` privado de Cadencia debe apuntar a ambos PFX del host:
+
+```bash
+CERTIFICATE_PATH=/home/ubuntu/apps/dcarca-mcpserver-config/diegocofre-homo.pfx
+PRODUCTION_CERTIFICATE_PATH=/home/ubuntu/apps/dcarca-mcpserver-config/diegocofre-prod.pfx
+```
+
+Validar el Compose **antes** de recrear el contenedor:
+
+```bash
+docker compose --env-file .env -f deploy/cadencia/docker-compose.yml config >/dev/null
+```
+
+Crear y validar la credencial técnica de producción. `validate-assignment` autentica contra WSAA pero no emite comprobantes:
+
+```bash
+docker exec dcarca-mcpserver dotnet /tools/dcArca.Cli.dll add-context --id cadencia-arca-produccion --environment produccion
+docker exec dcarca-mcpserver dotnet /tools/dcArca.Cli.dll add-assignment --context cadencia-arca-produccion --revision v1 --credential cadencia-prod --actor admin
+docker exec dcarca-mcpserver dotnet /tools/dcArca.Cli.dll validate-assignment --context cadencia-arca-produccion --revision v1 --actor admin
+docker exec dcarca-mcpserver dotnet /tools/dcArca.Cli.dll activate-assignment --context cadencia-arca-produccion --revision v1 --actor admin
+docker exec dcarca-mcpserver dotnet /tools/dcArca.Cli.dll set-context-state --context cadencia-arca-produccion --state Active --actor admin
+```
+
+Registrar la representación productiva y descubrir los puntos de venta disponibles sin emitir:
+
+```bash
+docker exec dcarca-mcpserver dotnet /tools/dcArca.Cli.dll register-representation --context cadencia-arca-produccion --consumer cadencia --cuit 20236438989 --actor admin
+docker exec dcarca-mcpserver dotnet /tools/dcArca.Cli.dll list-points-of-sale --context cadencia-arca-produccion --consumer cadencia --cuit 20236438989
+```
+
+Con el PV real devuelto por ARCA, seleccionarlo y activarlo:
+
+```bash
+docker exec dcarca-mcpserver dotnet /tools/dcArca.Cli.dll select-representation-pv --context cadencia-arca-produccion --consumer cadencia --cuit 20236438989 --point-of-sale <PV> --actor admin
+docker exec dcarca-mcpserver dotnet /tools/dcArca.Cli.dll activate-representation --context cadencia-arca-produccion --consumer cadencia --cuit 20236438989 --point-of-sale <PV> --actor admin
+```
+
+Antes de cualquier CAE real, ejecutar diagnóstico no emisor:
+
+```bash
+docker exec dcarca-mcpserver dotnet /tools/dcArca.Cli.dll diagnose-v2 \
+  --context cadencia-arca-produccion --cuit 20236438989 \
+  --point-of-sale <PV> --tipo-comprobante 11
+```
+
+Las API keys existentes **no heredan** acceso al contexto nuevo. Inspeccionar `list-keys` y agregar explícitamente grants de `cadencia-arca-produccion` conservando los grants vigentes. `set-key-grants` reemplaza el conjunto completo de grants de la key: no ejecutarlo con sólo el grant nuevo. Para SecretarIA se requieren, según la función de cada key, scopes/grants `consultar`, `facturar` y/o `administrar`. Nunca copiar el secreto de una API key al repositorio, logs o tickets.
+
+No ejecutar una factura de prueba hasta que WSAA, WSFE/PV, representación y grants estén validados. La primera emisión en este contexto solicita un CAE **real** de producción y debe tratarse como comprobante fiscal definitivo.
 
 ## 7. Diagnóstico fiscal no emisor
 
