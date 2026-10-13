@@ -14,6 +14,7 @@ services:
     volumes:
       - ${APPSETTINGS_PATH}:/app/appsettings.json:ro
       - ${CERTIFICATE_PATH}:/certs/certificado.pfx:ro
+      - ${PRODUCTION_CERTIFICATE_PATH}:/certs/diegocofre-prod.pfx:ro
       - /home/ubuntu/apps/dcarca-mcpserver-data:/data
     environment:
       ApiKeys__Directory: /data
