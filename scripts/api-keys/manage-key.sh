@@ -229,8 +229,12 @@ case "$use_backend" in
       -e ApiKeys__Directory=/data \
       -v "$directory:/data" \
       --entrypoint dotnet)
-    if command -v id >/dev/null 2>&1 && [[ "$(uname -s 2>/dev/null || true)" != MINGW* ]]; then
-      docker_args+=(--user "$(id -u):$(id -g)")
+    platform="$(uname -s 2>/dev/null || true)"
+    if [[ "$platform" == Linux* ]] && command -v stat >/dev/null 2>&1; then
+      store_owner="$(stat -c '%u:%g' -- "$directory" 2>/dev/null || true)"
+      if [[ "$store_owner" =~ ^[0-9]+:[0-9]+$ ]]; then
+        docker_args+=(--user "$store_owner")
+      fi
     fi
     docker_args+=("$image" /tools/dcArca.Cli.dll "${cli_args[@]}")
     docker "${docker_args[@]}"
