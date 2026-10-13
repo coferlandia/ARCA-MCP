@@ -312,7 +312,7 @@ public sealed class dcWsfePointOfSaleProbe
             if (blockedText is not ("S" or "N" or "s" or "n"))
                 return Failed("WSFE_RESPONSE_INVALID", "WSFE no informó un estado válido de bloqueo.", checkedAt);
             var blocked = string.Equals(blockedText, "S", StringComparison.OrdinalIgnoreCase);
-            var disabledDate = Value(node, "FchBaja");
+            var disabledDate = NormalizeDisabledDate(Value(node, "FchBaja"));
             var eligible = !blocked && string.IsNullOrWhiteSpace(disabledDate)
                 && IsCaeEmissionType(emission);
             points.Add(new dcWsfePointOfSale(number, emission, blocked, disabledDate, eligible));
@@ -325,6 +325,15 @@ public sealed class dcWsfePointOfSaleProbe
             dcPointOfSaleProbeStatus.Verified, "POINT_OF_SALE_LIST_VERIFIED",
             "ARCA devolvió el listado de puntos de venta del CUIT representado.",
             checkedAt, points);
+    }
+
+    private static string? NormalizeDisabledDate(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var normalized = value.Trim();
+        return string.Equals(normalized, "NULL", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : normalized;
     }
 
     private static bool IsCaeEmissionType(string? emissionType)
