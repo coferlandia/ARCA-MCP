@@ -72,7 +72,8 @@ public class WsfePointOfSaleDiscoveryTests
         Assert.True(result.Points.Single(x => x.Number == 7).EligibleForCae);
         Assert.True(result.Points.Single(x => x.Number == 8).Blocked);
         Assert.False(result.Points.Single(x => x.Number == 9).EligibleForCae);
-        Assert.False(result.Points.Single(x => x.Number == 10).EligibleForCae);\n        Assert.True(result.Points.Single(x => x.Number == 77).EligibleForCae);
+        Assert.False(result.Points.Single(x => x.Number == 10).EligibleForCae);
+        Assert.True(result.Points.Single(x => x.Number == 77).EligibleForCae);
     }
 
     [Theory]
