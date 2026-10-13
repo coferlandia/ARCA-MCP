@@ -49,6 +49,8 @@ docker   ejecuta /tools/dcArca.Cli.dll incluido en la imagen del MCP
 
 El backend `docker` no modifica el store por una implementación alternativa: ejecuta el mismo `dcArca.Cli` empaquetado en la imagen del servidor.
 
+En Linux, el wrapper ejecuta ese contenedor con el UID:GID del propietario real del directorio persistente del store cuando puede determinarlo de forma fiable. No usa el UID/GID del operador SSH. Si la identidad propietaria no puede obtenerse o validarse, o si se ejecuta desde Git Bash/Windows, no fuerza `--user` y deja que Docker use la identidad por defecto de la imagen. No cambiar ownership ni permisos del store para hacer funcionar el wrapper.
+
 ## Crear una key para un MCP local
 
 Si el servidor local usa `ApiKeys__Directory=./data`, desde la raíz del repositorio:
