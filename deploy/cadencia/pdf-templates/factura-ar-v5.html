@@ -6,7 +6,7 @@
 @page { size: A4; margin: 10mm; }
 * { box-sizing: border-box; }
 body { font-family: Arial, Helvetica, sans-serif; font-size: 10px; color: #111; margin: 0; }
-.page { page-break-after: always; border: 1px solid #000; padding: 6mm; min-height: 277mm; display: flex; flex-direction: column; }
+.page { page-break-after: always; border: 1px solid #000; padding: 6mm; min-height: 277mm; }
 .page:last-child { page-break-after: avoid; }
 .copia { text-align: center; border: 1px solid #000; padding: 4px; font-weight: bold; letter-spacing: 3px; margin-bottom: 4px; }
 .encabezado { display: flex; border: 1px solid #000; margin-bottom: 4px; }
@@ -21,12 +21,14 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 10px; color: #111; 
 .franja > div { flex: 1; padding: 4px; border-right: 1px solid #000; }
 .franja > div:last-child { border-right: none; }
 .receptor { border: 1px solid #000; padding: 6px; margin-bottom: 4px; }
-table.detalle { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+table.detalle { width: 100%; border-collapse: collapse; margin-bottom: 4px; break-inside: auto; }
 table.detalle th { background: #ddd; border: 1px solid #000; padding: 3px; font-size: 9px; }
 table.detalle td { border: 1px solid #000; padding: 3px; font-size: 9px; }
+table.detalle tr { break-inside: avoid; }
+table.detalle thead { display: table-header-group; }
 .num { text-align: right; }
-.detalle-area { flex: 1; min-height: 60mm; }
-.totales { margin-left: auto; width: 280px; border: 1px solid #000; border-collapse: collapse; }
+.detalle-area { min-height: 120mm; }
+.totales { margin-left: auto; width: 280px; border: 1px solid #000; border-collapse: collapse; break-inside: avoid; }
 .totales td { border-top: 1px solid #000; padding: 3px; }
 .totales tr:first-child td { border-top: none; }
 .footer { border-top: 1px solid #000; padding-top: 4px; display: flex; align-items: flex-start; margin-top: 4px; break-inside: avoid; }
@@ -34,6 +36,7 @@ table.detalle td { border: 1px solid #000; padding: 3px; font-size: 9px; }
 .footer .qr img { width: 80px; height: 80px; }
 .footer .qr .arca-id { font-weight: bold; font-size: 11px; margin-top: 2px; }
 .footer .pagina { flex: 1; text-align: center; align-self: center; }
+.footer .pagina::before { content: "Pág. " counter(page) "/" counter(pages); }
 .footer .cae { text-align: right; }
 .leyenda { font-size: 8px; color: #444; margin-top: 4px; }
 </style>
@@ -157,7 +160,7 @@ table.detalle td { border: 1px solid #000; padding: 3px; font-size: 9px; }
       <img src="{{ arcaQr.imageDataUri }}" alt="QR ARCA">
       <div class="arca-id">ARCA</div>
     </div>
-    <div class="pagina">Pág. 1/1</div>
+    <div class="pagina"></div>
     <div class="cae">
       <div>CAE N°: {{ fiscal.cae }}</div>
       <div>Fecha de Vto. de CAE: {{ fiscal.caeVencimiento[6:8] }}/{{ fiscal.caeVencimiento[4:6] }}/{{ fiscal.caeVencimiento[0:4] }}</div>

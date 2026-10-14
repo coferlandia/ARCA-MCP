@@ -88,7 +88,9 @@ public class FacturaArV5TemplateTests
 
         Assert.Contains("arcaQr.imageDataUri", template);
         Assert.Contains("ARCA", template);
-        Assert.Contains("Pág. 1/1", template);
+        Assert.Contains("class=\"pagina\"", template);
+        Assert.Contains("counter(page)", template);
+        Assert.Contains("counter(pages)", template);
         Assert.Contains("fiscal.cae", template);
         Assert.Contains("fiscal.caeVencimiento", template);
         Assert.Contains("Comprobante Autorizado", template);
