@@ -209,11 +209,12 @@ ARCA-MCP y CreadorPDF deben compartir una red Docker que permita resolver el ali
 deploy/cadencia/pdf-templates/
 ```
 
-Template actualmente incorporado:
+Templates actualmente incorporados:
 
 ```text
-factura-ar-v3.html
-factura-ar-v3.schema.json
+factura-ar-v3.html / factura-ar-v3.schema.json   (inmutable)
+factura-ar-v4.html / factura-ar-v4.schema.json   (inmutable)
+factura-ar-v5.html / factura-ar-v5.schema.json   (layout ARCA fiel + QR oficial, 3 páginas)
 ```
 
 ### Bootstrap
@@ -821,6 +822,27 @@ Razones:
 - evitar que una factura histórica cambie de representación sin cambiar la referencia.
 
 El issue #28 formaliza esta política mediante referencia lógica y manifest de deploy.
+
+## 18.1 `factura-ar:5` — layout ARCA fiel + QR oficial (#86)
+
+`factura-ar:5` reemplaza el alcance visual de `factura-ar:4` reproduciendo el layout estándar de ARCA (franja ORIGINAL/DUPLICADO/TRIPLICADO, encabezado con letra/COD, período de servicios, tabla de 8 columnas, totales y footer con QR oficial) para Factura y Nota de Crédito A/B/C (tipos 1/3/6/8/11/13). Genera siempre 3 páginas por comprobante; el consumidor no elige cantidad ni nombre de copias.
+
+El QR (`arcaQr.verificationUrl` / `arcaQr.imageDataUri`) es server-owned: lo construye `ArcaQrPayloadBuilder`/`ArcaQrImageGenerator` desde el `FiscalDocumentSnapshot`, nunca desde `templateData`. Ver `docs/CREADORPDF_INTEGRATION.md`.
+
+Publicar `factura-ar:5` sigue el mismo bootstrap idempotente de la sección 10 (el manifest ya declara la entrada `key=factura-ar, version=5`). Antes de migrar un consumidor a `templateVersion=5`:
+
+1. ejecutar el checklist de la sección 19 contra homologación;
+2. confirmar visualmente el PDF generado (3 páginas, QR escaneable hacia el dominio oficial ARCA, Factura/NC A/B/C con letra/COD/título correctos);
+3. la fidelidad pixel/geométrica contra el comprobante de referencia privado la aprueba Diego o una autoridad de control con acceso a esa referencia; no es un gate automatizable en CI.
+4. `factura-ar:3` y `factura-ar:4` siguen disponibles e inmutables para snapshots históricos que ya las referencian.
+
+### Validación local realizada durante #86
+
+El template se validó con un render real usando el mismo stack que `creadorpdf` (Jinja2 + WeasyPrint 62, autoescape habilitado), reproducido localmente a partir de `enerone/creadorpdf`, con fixtures sintéticas de Factura A/B/C y Nota de Crédito C, incluyendo un caso de desborde de ítems. Esto permitió detectar y corregir una superposición real de totales/footer con muchos ítems (ver Git log) antes de publicar. No reemplaza el gate operativo de esta sección: no se ejecutó contra una instancia de `creadorpdf` desplegada ni se comparó contra el comprobante de referencia privado.
+
+**Verificación de extremo a extremo realizada durante #86:** `enerone/creadorpdf` tiene dos ramas relevantes: `creadorpdf-v1-impl` (sólo el registro de templates embebidos en código, sin API administrado) y `main` (con la "internal template platform": `POST /v1/templates`, `/v1/templates/{id}/publish`, `/v1/templates/managed`, `/v1/admin/api-keys`, render con `SandboxedEnvironment(undefined=StrictUndefined, autoescape=True)` + validación JSON Schema Draft 2020-12). `main` coincide exactamente con lo que documenta esta sección y con lo que esperan `CreadorPdfTemplateResolver`/`PdfClient`. Se corrió `main` localmente (mismas versiones de Jinja2/WeasyPrint/pydyf que usa el servicio) y se ejecutó el flujo real completo: crear credencial admin → `create-key` scope `templates:write/publish/read/documents:render` → `POST /v1/templates` con el HTML/schema reales de `factura-ar:5` → `POST /.../publish` → `GET /v1/templates/managed` → `POST /v1/documents` con el mismo payload que arma `PdfDocumentRenderer` (bloque `fiscal` + `arcaQr`). Resultado: 201/200 en cada paso y un PDF de 3 páginas válido. Si el `creadorpdf` desplegado en Cadencia todavía está en `creadorpdf-v1-impl`, actualizarlo a `main` antes de bootstrapear `factura-ar:5`.
+
+Durante esa verificación se encontró un bug real en `creadorpdf` `main` (no en ARCA-MCP): `app/dynamic_render.py` bloqueaba en su `url_fetcher` **cualquier** URL, incluidas las `data:` que no implican red ni filesystem, por lo que el QR (y cualquier imagen embebida en base64) quedaba como texto alternativo en vez de renderizarse. Se corrigió y pusheó a `enerone/creadorpdf` `main` en el commit `5c4a506` (permite `data:`, sigue bloqueando `http(s)/file/ftp` en ese path, igual que ya hacía `app/weasyprint_fetcher.py` para el template built-in). Verificar que el `creadorpdf` desplegado en Cadencia incluya ese commit antes de dar por buena la visualización del QR en `factura-ar:5`.
 
 ## 19. Checklist para publicar una versión nueva
 

@@ -122,7 +122,7 @@ Formato actual:
 - prioriza en su salida `TEMPLATE_KEY`, `TEMPLATE_VERSION`, `TEMPLATE_OWNER` y `TEMPLATE_STATUS`;
 - el ID físico se imprime únicamente como diagnóstico y no debe copiarse a SecretarIA.
 
-La versión `factura-ar:4` mantiene Factura A/B/C y agrega identificación visual explícita para Nota de Crédito A/B/C (tipos 3/8/13). La versión `factura-ar:3` permanece disponible e inmutable para snapshots históricos que la referencian.
+La versión `factura-ar:4` mantiene Factura A/B/C y agrega identificación visual explícita para Nota de Crédito A/B/C (tipos 3/8/13). La versión `factura-ar:5` reproduce el layout fiel de ARCA (franja de copia, encabezado con letra/COD, período de servicios, tabla de 8 columnas, recuadro de totales y footer con QR oficial) y genera siempre tres páginas por comprobante: ORIGINAL, DUPLICADO y TRIPLICADO. Las versiones `factura-ar:3` y `factura-ar:4` permanecen disponibles e inmutables para snapshots históricos que las referencian.
 
 Una versión publicada es inmutable:
 
@@ -247,6 +247,24 @@ FISCAL_DOCUMENT_ASSOCIATION_UNAVAILABLE
 
 hasta que el adapter de consulta incorpore ese dato. No se inventa ni se reutiliza una asociación aportada por presentación.
 
+## QR oficial server-owned (`arcaQr`)
+
+A partir de `factura-ar:5`, `PdfDocumentRenderer` deriva un bloque adicional reservado `arcaQr` directamente desde el `FiscalDocumentSnapshot`, antes de invocar al provider:
+
+```json
+{
+  "arcaQr": {
+    "verificationUrl": "https://www.arca.gob.ar/fe/qr/?p=<json-v1-base64>",
+    "imageDataUri": "data:image/png;base64,..."
+  }
+}
+```
+
+- `ArcaQrPayloadBuilder` construye el JSON v1 oficial (`ver`, `fecha`, `cuit`, `ptoVta`, `tipoCmp`, `nroCmp`, `importe`, `moneda`, `ctz`, `tipoDocRec`/`nroDocRec` opcionales, `tipoCodAut="E"`, `codAut`=CAE) y la URL de verificación oficial. Falla cerrado (`ArcaQrPayloadException`) ante CUIT/CAE/fecha/PV/moneda/cotización inválidos o un documento de receptor parcialmente informado; nunca redondea ni inventa un valor fiscal ausente.
+- `ArcaQrImageGenerator` renderiza el PNG localmente con QRCoder (sin `System.Drawing`, compatible Linux/Docker) y lo codifica como `data:image/png;base64,...`. No se usan recursos remotos en tiempo de render.
+- `arcaQr` es un nombre raíz reservado: un intento del caller de aportarlo en `templateData` (case-insensitive) se rechaza localmente sin llamar al provider.
+- Si el QR no puede construirse, el render documental falla con `PDF_QR_UNAVAILABLE` sin invocar a `creadorpdf`. El CAE ya autorizado no se ve afectado y nunca se solicita una nueva emisión por este motivo.
+
 ## Datos de presentación (`templateData`)
 
 Los datos comerciales o visuales —por ejemplo razón social mostrada, domicilio, logo, items/descripciones y branding— pertenecen a `templateData`.
@@ -262,6 +280,17 @@ Los datos comerciales o visuales —por ejemplo razón social mostrada, domicili
 En la raíz se rechazan, sin distinguir mayúsculas/minúsculas, `fiscal` y los aliases del contrato fiscal como `cae`, `importeTotal`, `puntoVenta`, `numeroComprobante`, `monedaId`, etc.
 
 Un template puede mostrar líneas monetarias provenientes de `items`, pero los totales, IVA, tributos, moneda, número y CAE deben renderizarse desde el bloque reservado `fiscal`. Una discrepancia visual en `items` nunca modifica el comprobante autorizado.
+
+### Contrato de presentación `factura-ar:5`
+
+`factura-ar-v5.schema.json` amplía exclusivamente presentación respecto de `factura-ar:4`:
+
+- `emisor`: `razonSocial`, `domicilio`, `condicionIva`, `ingresosBrutos`, `fechaInicioActividades` (todos obligatorios como texto a mostrar).
+- `receptor`: `razonSocial` obligatorio, `domicilio` opcional.
+- `condicionVenta`: opcional en la raíz; si falta, el template oculta la línea sin dejar texto vacío.
+- `conceptos[]`: `descripcion`, `cantidad`, `unidadMedida`, `precioUnitario`, `importe` obligatorios; `codigo` opcional; `porcentajeBonificacion`/`importeBonificacion` opcionales con default visual `0,00` cuando están ausentes.
+
+La condición frente al IVA del receptor, el tipo/número de documento, las fechas fiscales, los comprobantes/período asociados de una Nota de Crédito y el CAE/vencimiento se renderizan siempre desde `fiscal`, nunca desde `templateData`. El template numera punto de venta (5 dígitos) y comprobante (8 dígitos) con ceros a la izquierda como en ARCA.
 
 ## Resultado documental independiente
 

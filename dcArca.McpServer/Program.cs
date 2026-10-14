@@ -92,6 +92,7 @@ builder.Services.AddSingleton(sp => new FiscalLocalReadinessValidator(
     fiscalContextsDirectory,
     builder.Configuration));
 
+builder.Services.AddSingleton<IArcaQrImageGenerator, ArcaQrImageGenerator>();
 builder.Services.AddSingleton<PdfDocumentRenderer>();
 builder.Services.AddSingleton<ObservablePdfDocumentRenderer>();
 builder.Services.AddSingleton<IPdfDocumentRenderer>(sp =>

@@ -39,7 +39,7 @@ public class InvoicePdfFailureIsolationTests
         Assert.Same(fiscal, result.Fiscal);
         Assert.True(result.Fiscal.Success);
         Assert.Equal(dcEmissionOutcome.Authorized, result.Fiscal.EmissionOutcome);
-        Assert.Equal("CAE123", result.Fiscal.Cae);
+        Assert.Equal("12345678901234", result.Fiscal.Cae);
         Assert.Equal(123, result.Fiscal.NumeroComprobante);
         Assert.Equal(1, issuer.CallCount);
         Assert.Equal(1, renderer.RenderCallCount);
@@ -84,7 +84,7 @@ public class InvoicePdfFailureIsolationTests
         Assert.Same(fiscal, result.Fiscal);
         Assert.True(result.Fiscal.Success);
         Assert.Equal(dcEmissionOutcome.Authorized, result.Fiscal.EmissionOutcome);
-        Assert.Equal("CAE123", result.Fiscal.Cae);
+        Assert.Equal("12345678901234", result.Fiscal.Cae);
         Assert.Equal(123, result.Fiscal.NumeroComprobante);
         Assert.Equal(1, issuer.CallCount);
         Assert.Equal(PdfRenderStatus.Failed, result.Pdf.Status);
@@ -120,7 +120,7 @@ public class InvoicePdfFailureIsolationTests
         EmissionOutcome = dcEmissionOutcome.Authorized,
         NumeroComprobante = 123,
         PuntoVenta = 7,
-        Cae = "CAE123",
+        Cae = "12345678901234",
         CaeVencimiento = "20261011",
         Resultado = "A"
     };

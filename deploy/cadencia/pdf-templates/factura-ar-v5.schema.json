@@ -1,0 +1,89 @@
+{
+  "type": "object",
+  "required": ["emisor", "receptor", "conceptos", "fiscal"],
+  "properties": {
+    "emisor": {
+      "type": "object",
+      "required": ["razonSocial", "domicilio", "condicionIva", "ingresosBrutos", "fechaInicioActividades"],
+      "properties": {
+        "razonSocial": { "type": "string" },
+        "domicilio": { "type": "string" },
+        "condicionIva": { "type": "string" },
+        "ingresosBrutos": { "type": "string" },
+        "fechaInicioActividades": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "receptor": {
+      "type": "object",
+      "required": ["razonSocial"],
+      "properties": {
+        "razonSocial": { "type": "string" },
+        "domicilio": {
+          "anyOf": [
+            { "type": "string" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "condicionVenta": {
+      "anyOf": [
+        { "type": "string" },
+        { "type": "null" }
+      ]
+    },
+    "conceptos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["descripcion", "cantidad", "unidadMedida", "precioUnitario", "importe"],
+        "properties": {
+          "codigo": {
+            "anyOf": [
+              { "type": "string" },
+              { "type": "null" }
+            ]
+          },
+          "descripcion": { "type": "string" },
+          "cantidad": { "type": "number" },
+          "unidadMedida": { "type": "string" },
+          "precioUnitario": { "type": "number" },
+          "porcentajeBonificacion": { "type": "number" },
+          "importeBonificacion": { "type": "number" },
+          "importe": { "type": "number" }
+        },
+        "additionalProperties": true
+      }
+    },
+    "fiscal": {
+      "type": "object",
+      "required": [
+        "emisorCuit",
+        "puntoVenta",
+        "tipoComprobante",
+        "numeroComprobante",
+        "fechaComprobante",
+        "importeNeto",
+        "importeIva",
+        "importeTributos",
+        "importeTotal",
+        "monedaId",
+        "cae",
+        "caeVencimiento"
+      ],
+      "additionalProperties": true
+    },
+    "arcaQr": {
+      "type": "object",
+      "required": ["verificationUrl", "imageDataUri"],
+      "properties": {
+        "verificationUrl": { "type": "string" },
+        "imageDataUri": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

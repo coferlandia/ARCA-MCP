@@ -70,7 +70,7 @@ public class PdfStructuredFailureTests
         ImporteTotal = 121m,
         MonedaId = "PES",
         MonedaCotizacion = 1m,
-        Cae = "CAE123",
+        Cae = "12345678901234",
         CaeVencimiento = "20261011",
         Resultado = "A"
     };
