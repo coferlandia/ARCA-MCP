@@ -209,11 +209,12 @@ ARCA-MCP y CreadorPDF deben compartir una red Docker que permita resolver el ali
 deploy/cadencia/pdf-templates/
 ```
 
-Template actualmente incorporado:
+Templates actualmente incorporados:
 
 ```text
-factura-ar-v3.html
-factura-ar-v3.schema.json
+factura-ar-v3.html / factura-ar-v3.schema.json   (inmutable)
+factura-ar-v4.html / factura-ar-v4.schema.json   (inmutable)
+factura-ar-v5.html / factura-ar-v5.schema.json   (layout ARCA fiel + QR oficial, 3 páginas)
 ```
 
 ### Bootstrap
@@ -821,6 +822,19 @@ Razones:
 - evitar que una factura histórica cambie de representación sin cambiar la referencia.
 
 El issue #28 formaliza esta política mediante referencia lógica y manifest de deploy.
+
+## 18.1 `factura-ar:5` — layout ARCA fiel + QR oficial (#86)
+
+`factura-ar:5` reemplaza el alcance visual de `factura-ar:4` reproduciendo el layout estándar de ARCA (franja ORIGINAL/DUPLICADO/TRIPLICADO, encabezado con letra/COD, período de servicios, tabla de 8 columnas, totales y footer con QR oficial) para Factura y Nota de Crédito A/B/C (tipos 1/3/6/8/11/13). Genera siempre 3 páginas por comprobante; el consumidor no elige cantidad ni nombre de copias.
+
+El QR (`arcaQr.verificationUrl` / `arcaQr.imageDataUri`) es server-owned: lo construye `ArcaQrPayloadBuilder`/`ArcaQrImageGenerator` desde el `FiscalDocumentSnapshot`, nunca desde `templateData`. Ver `docs/CREADORPDF_INTEGRATION.md`.
+
+Publicar `factura-ar:5` sigue el mismo bootstrap idempotente de la sección 10 (el manifest ya declara la entrada `key=factura-ar, version=5`). Antes de migrar un consumidor a `templateVersion=5`:
+
+1. ejecutar el checklist de la sección 19 contra homologación;
+2. confirmar visualmente el PDF generado (3 páginas, QR escaneable hacia el dominio oficial ARCA, Factura/NC A/B/C con letra/COD/título correctos);
+3. la fidelidad pixel/geométrica contra el comprobante de referencia privado la aprueba Diego o una autoridad de control con acceso a esa referencia; no es un gate automatizable en CI.
+4. `factura-ar:3` y `factura-ar:4` siguen disponibles e inmutables para snapshots históricos que ya las referencian.
 
 ## 19. Checklist para publicar una versión nueva
 

@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<style>
+@page { size: A4; margin: 10mm; }
+* { box-sizing: border-box; }
+body { font-family: Arial, Helvetica, sans-serif; font-size: 10px; color: #111; margin: 0; }
+.page { page-break-after: always; border: 1px solid #000; padding: 6mm; min-height: 277mm; display: flex; flex-direction: column; }
+.page:last-child { page-break-after: avoid; }
+.copia { text-align: center; border: 1px solid #000; padding: 4px; font-weight: bold; letter-spacing: 3px; margin-bottom: 4px; }
+.encabezado { display: flex; border: 1px solid #000; margin-bottom: 4px; }
+.encabezado .col-izq { flex: 1; padding: 6px; border-right: 1px solid #000; }
+.encabezado .col-izq h1 { font-size: 14px; margin: 0 0 4px 0; }
+.encabezado .col-centro { width: 100px; padding: 6px; border-right: 1px solid #000; text-align: center; }
+.encabezado .col-der { flex: 1; padding: 6px; text-align: right; }
+.letra-box { border: 2px solid #000; font-size: 30px; font-weight: bold; text-align: center; padding: 2px 10px; }
+.cod-box { font-size: 10px; text-align: center; margin-top: 2px; }
+.tipo-titulo { font-size: 16px; font-weight: bold; margin-bottom: 4px; }
+.franja { display: flex; border: 1px solid #000; margin-bottom: 4px; }
+.franja > div { flex: 1; padding: 4px; border-right: 1px solid #000; }
+.franja > div:last-child { border-right: none; }
+.receptor { border: 1px solid #000; padding: 6px; margin-bottom: 4px; }
+table.detalle { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+table.detalle th { background: #ddd; border: 1px solid #000; padding: 3px; font-size: 9px; }
+table.detalle td { border: 1px solid #000; padding: 3px; font-size: 9px; }
+.num { text-align: right; }
+.detalle-area { flex: 1; min-height: 60mm; }
+.totales { margin-left: auto; width: 280px; border: 1px solid #000; border-collapse: collapse; }
+.totales td { border-top: 1px solid #000; padding: 3px; }
+.totales tr:first-child td { border-top: none; }
+.footer { border-top: 1px solid #000; padding-top: 4px; display: flex; align-items: flex-start; margin-top: 4px; break-inside: avoid; }
+.footer .qr { width: 100px; text-align: center; }
+.footer .qr img { width: 80px; height: 80px; }
+.footer .qr .arca-id { font-weight: bold; font-size: 11px; margin-top: 2px; }
+.footer .pagina { flex: 1; text-align: center; align-self: center; }
+.footer .cae { text-align: right; }
+.leyenda { font-size: 8px; color: #444; margin-top: 4px; }
+</style>
+</head>
+<body>
+{% for copia in ["ORIGINAL", "DUPLICADO", "TRIPLICADO"] %}
+<div class="page">
+  <div class="copia">{{ copia }}</div>
+
+  <div class="encabezado">
+    <div class="col-izq">
+      <h1>{{ emisor.razonSocial }}</h1>
+      <div>Razón Social: {{ emisor.razonSocial }}</div>
+      <div>Domicilio Comercial: {{ emisor.domicilio }}</div>
+      <div>Condición frente al IVA: {{ emisor.condicionIva }}</div>
+    </div>
+    <div class="col-centro">
+      <div class="letra-box">{% if fiscal.tipoComprobante == 1 or fiscal.tipoComprobante == 3 %}A{% elif fiscal.tipoComprobante == 6 or fiscal.tipoComprobante == 8 %}B{% elif fiscal.tipoComprobante == 11 or fiscal.tipoComprobante == 13 %}C{% else %}-{% endif %}</div>
+      <div class="cod-box">COD. {% if fiscal.tipoComprobante == 1 %}001{% elif fiscal.tipoComprobante == 3 %}003{% elif fiscal.tipoComprobante == 6 %}006{% elif fiscal.tipoComprobante == 8 %}008{% elif fiscal.tipoComprobante == 11 %}011{% elif fiscal.tipoComprobante == 13 %}013{% else %}000{% endif %}</div>
+    </div>
+    <div class="col-der">
+      <div class="tipo-titulo">{% if fiscal.tipoComprobante == 3 or fiscal.tipoComprobante == 8 or fiscal.tipoComprobante == 13 %}NOTA DE CRÉDITO{% else %}FACTURA{% endif %}</div>
+      <div>Punto de Venta: {{ "%05d"|format(fiscal.puntoVenta) }}</div>
+      <div>Comp. Nro: {{ "%08d"|format(fiscal.numeroComprobante) }}</div>
+      <div>Fecha de Emisión: {{ fiscal.fechaComprobante[6:8] }}/{{ fiscal.fechaComprobante[4:6] }}/{{ fiscal.fechaComprobante[0:4] }}</div>
+      <div>CUIT: {{ fiscal.emisorCuit }}</div>
+      <div>Ingresos Brutos: {{ emisor.ingresosBrutos }}</div>
+      <div>Fecha de Inicio de Actividades: {{ emisor.fechaInicioActividades }}</div>
+    </div>
+  </div>
+
+  {% if fiscal.concepto == 2 or fiscal.concepto == 3 %}
+  <div class="franja">
+    <div>Período Facturado Desde: {{ fiscal.fechaServicioDesde[6:8] }}/{{ fiscal.fechaServicioDesde[4:6] }}/{{ fiscal.fechaServicioDesde[0:4] }}</div>
+    <div>Hasta: {{ fiscal.fechaServicioHasta[6:8] }}/{{ fiscal.fechaServicioHasta[4:6] }}/{{ fiscal.fechaServicioHasta[0:4] }}</div>
+    <div>Fecha de Vto. para el pago: {{ fiscal.fechaVencimientoPago[6:8] }}/{{ fiscal.fechaVencimientoPago[4:6] }}/{{ fiscal.fechaVencimientoPago[0:4] }}</div>
+  </div>
+  {% endif %}
+
+  {% if fiscal.tipoComprobante == 3 or fiscal.tipoComprobante == 8 or fiscal.tipoComprobante == 13 %}
+    {% if fiscal.comprobantesAsociados %}
+    <div class="franja">
+      {% for asociado in fiscal.comprobantesAsociados %}
+      <div>Comprobante Asociado: Tipo {{ asociado.tipo }} PV {{ "%05d"|format(asociado.puntoVenta) }} Nro {{ "%08d"|format(asociado.numero) }}</div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if fiscal.periodoAsociado is defined and fiscal.periodoAsociado %}
+    <div class="franja">
+      <div>Período Asociado Desde: {{ fiscal.periodoAsociado.desde[6:8] }}/{{ fiscal.periodoAsociado.desde[4:6] }}/{{ fiscal.periodoAsociado.desde[0:4] }}</div>
+      <div>Hasta: {{ fiscal.periodoAsociado.hasta[6:8] }}/{{ fiscal.periodoAsociado.hasta[4:6] }}/{{ fiscal.periodoAsociado.hasta[0:4] }}</div>
+    </div>
+    {% endif %}
+  {% endif %}
+
+  <div class="receptor">
+    {% if fiscal.documentoReceptorNumero is not none %}
+    <div>
+      {% if fiscal.documentoReceptorTipo == 80 %}CUIT{% elif fiscal.documentoReceptorTipo == 86 %}CUIL{% elif fiscal.documentoReceptorTipo == 96 %}DNI{% elif fiscal.documentoReceptorTipo == 99 %}Consumidor Final{% else %}Documento{% endif %}: {{ fiscal.documentoReceptorNumero }}
+    </div>
+    {% endif %}
+    <div>Apellido y Nombre / Razón Social: {{ receptor.razonSocial }}</div>
+    <div>Condición frente al IVA:
+      {%- if fiscal.condicionIvaReceptor == 1 %} IVA Responsable Inscripto
+      {%- elif fiscal.condicionIvaReceptor == 4 %} IVA Sujeto Exento
+      {%- elif fiscal.condicionIvaReceptor == 5 %} Consumidor Final
+      {%- elif fiscal.condicionIvaReceptor == 6 %} Responsable Monotributo
+      {%- elif fiscal.condicionIvaReceptor == 13 %} Monotributista Social
+      {%- elif fiscal.condicionIvaReceptor == 15 %} IVA No Alcanzado
+      {%- else %} No especificada
+      {%- endif %}
+    </div>
+    {% if receptor.domicilio is defined and receptor.domicilio %}<div>Domicilio: {{ receptor.domicilio }}</div>{% endif %}
+    {% if condicionVenta is defined and condicionVenta %}<div>Condición de venta: {{ condicionVenta }}</div>{% endif %}
+  </div>
+
+  <div class="detalle-area">
+  <table class="detalle">
+    <thead>
+      <tr>
+        <th>Código</th>
+        <th>Producto / Servicio</th>
+        <th>Cantidad</th>
+        <th>U. Medida</th>
+        <th>Precio Unit.</th>
+        <th>% Bonif</th>
+        <th>Imp. Bonif.</th>
+        <th>Subtotal</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for item in conceptos %}
+      <tr>
+        <td>{% if item.codigo is defined and item.codigo %}{{ item.codigo }}{% endif %}</td>
+        <td>{{ item.descripcion }}</td>
+        <td class="num">{{ item.cantidad }}</td>
+        <td>{{ item.unidadMedida }}</td>
+        <td class="num">{{ item.precioUnitario }}</td>
+        <td class="num">{% if item.porcentajeBonificacion is defined %}{{ item.porcentajeBonificacion }}{% else %}0,00{% endif %}</td>
+        <td class="num">{% if item.importeBonificacion is defined %}{{ item.importeBonificacion }}{% else %}0,00{% endif %}</td>
+        <td class="num">{{ item.importe }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  <table class="totales">
+    <tr><td>Subtotal</td><td class="num">{{ fiscal.importeNeto + fiscal.importeExento + fiscal.importeNoGravado }}</td></tr>
+    {% if fiscal.tipoComprobante == 1 or fiscal.tipoComprobante == 3 or fiscal.tipoComprobante == 6 or fiscal.tipoComprobante == 8 %}
+    {% for linea in fiscal.iva %}
+    <tr><td>IVA {{ linea.alicuota }}%</td><td class="num">{{ linea.importe }}</td></tr>
+    {% endfor %}
+    {% endif %}
+    <tr><td>Importe Otros Tributos</td><td class="num">{{ fiscal.importeTributos }}</td></tr>
+    <tr><td><strong>Importe Total</strong></td><td class="num"><strong>{{ fiscal.importeTotal }}</strong></td></tr>
+  </table>
+
+  <div class="footer">
+    <div class="qr">
+      <img src="{{ arcaQr.imageDataUri }}" alt="QR ARCA">
+      <div class="arca-id">ARCA</div>
+    </div>
+    <div class="pagina">Pág. 1/1</div>
+    <div class="cae">
+      <div>CAE N°: {{ fiscal.cae }}</div>
+      <div>Fecha de Vto. de CAE: {{ fiscal.caeVencimiento[6:8] }}/{{ fiscal.caeVencimiento[4:6] }}/{{ fiscal.caeVencimiento[0:4] }}</div>
+      <div><strong>Comprobante Autorizado</strong></div>
+    </div>
+  </div>
+  <div class="leyenda">Esta Agencia no se responsabiliza por los datos ingresados en el detalle de la operación.</div>
+</div>
+{% endfor %}
+</body>
+</html>
