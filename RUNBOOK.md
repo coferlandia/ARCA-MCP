@@ -74,6 +74,8 @@ Los scripts SCP **no** descargan/suben `/data`, **no** eliminan archivos sobrant
 
 La configuración fiscal vigente es V2. Los IDs de ambiente fiscal son estrictamente `homologacion` y `produccion`; no crear secciones alias (`homo`, `prod`, mayúsculas, espacios, etc.). La CLI puede normalizar casing/whitespace al crear un contexto nuevo, pero un catálogo persistido no canónico debe corregirse mediante procedimiento explícito y nunca se reinterpreta silenciosamente.
 
+La configuración fiscal vigente es V2. Los IDs de ambiente fiscal son estrictamente `homologacion` y `produccion`; no crear secciones alias (`homo`, `prod`, mayúsculas, espacios, etc.). La CLI puede normalizar casing/whitespace al crear un contexto nuevo, pero un catálogo persistido no canónico debe corregirse mediante procedimiento explícito y nunca se reinterpreta silenciosamente.
+
 La configuración fiscal vigente es V2:
 
 ```json
