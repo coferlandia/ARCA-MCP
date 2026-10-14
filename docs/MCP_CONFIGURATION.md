@@ -109,6 +109,8 @@ Pdf__TemplateKey=factura-ar
 Pdf__TemplateVersion=5
 ```
 
+Los Compose versionados leen esas mismas variables desde el `.env`/entorno del host y aplican `factura-ar` / `5` sólo como fallback si no fueron definidas. Por lo tanto cambiar el default no requiere modificar ni recompilar ARCA-MCP.
+
 Las tools PDF aceptan `templateId` y `templateVersion` nullable. Si ambos llegan null o vacíos se usa `Pdf:TemplateKey` + `Pdf:TemplateVersion`; si ambos llegan informados se respetan como override explícito del caller. Informar sólo uno es inválido. Si se requiere el default y cualquiera de las dos claves runtime falta o está vacía, la tool falla explícitamente con `PDF_TEMPLATE_DEFAULT_NOT_CONFIGURED` antes de consultar o emitir en ARCA.
 
 ## Store, migración y restore

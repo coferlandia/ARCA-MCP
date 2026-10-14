@@ -28,8 +28,8 @@ services:
       FiscalContext__CredentialAssignmentRevision: ${FISCAL_CONTEXT_CREDENTIAL_ASSIGNMENT_REVISION:-legacy-1}
       Pdf__BaseUrl: http://creadorpdf:8080
       Pdf__ApiKey: ${PDF_API_KEY}
-      Pdf__TemplateKey: factura-ar
-      Pdf__TemplateVersion: "5"
+      Pdf__TemplateKey: ${Pdf__TemplateKey:-factura-ar}
+      Pdf__TemplateVersion: "${Pdf__TemplateVersion:-5}"
     labels:
       - traefik.enable=true
       - traefik.docker.network=red-consultora
