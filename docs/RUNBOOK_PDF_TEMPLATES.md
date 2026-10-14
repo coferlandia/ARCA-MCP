@@ -836,6 +836,12 @@ Publicar `factura-ar:5` sigue el mismo bootstrap idempotente de la sección 10 (
 3. la fidelidad pixel/geométrica contra el comprobante de referencia privado la aprueba Diego o una autoridad de control con acceso a esa referencia; no es un gate automatizable en CI.
 4. `factura-ar:3` y `factura-ar:4` siguen disponibles e inmutables para snapshots históricos que ya las referencian.
 
+### Validación local realizada durante #86
+
+El template se validó con un render real usando el mismo stack que `creadorpdf` (Jinja2 + WeasyPrint 62, autoescape habilitado), reproducido localmente a partir de `enerone/creadorpdf`, con fixtures sintéticas de Factura A/B/C y Nota de Crédito C, incluyendo un caso de desborde de ítems. Esto permitió detectar y corregir una superposición real de totales/footer con muchos ítems (ver Git log) antes de publicar. No reemplaza el gate operativo de esta sección: no se ejecutó contra una instancia de `creadorpdf` desplegada ni se comparó contra el comprobante de referencia privado.
+
+**Nota de arquitectura detectada durante #86:** el código de `enerone/creadorpdf` inspeccionado (rama `creadorpdf-v1-impl`, un único commit) expone únicamente `GET /v1/templates`, `POST /v1/documents` y un registro de templates embebidos en código (`app/templates/<nombre>/`); no implementa el API de templates administrados (`POST /v1/templates`, `/v1/templates/{id}/publish`, `/v1/templates/managed`, `/v1/admin/api-keys`) que esta sección y `CreadorPdfTemplateResolver`/`PdfClient` asumen. Si el `creadorpdf` desplegado en Cadencia es esa misma versión, el bootstrap de `factura-ar:5` (y de `factura-ar:3`/`factura-ar:4`) no podrá publicarse tal como está documentado aquí hasta reconciliar ambos lados; verificarlo contra la instancia real antes de ejecutar el bootstrap.
+
 ## 19. Checklist para publicar una versión nueva
 
 1. Crear nuevos archivos versionados en `deploy/cadencia/pdf-templates/`.
