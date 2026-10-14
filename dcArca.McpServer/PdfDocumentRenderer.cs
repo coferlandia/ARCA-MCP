@@ -17,10 +17,13 @@ public interface IPdfDocumentRenderer
 
 public sealed class PdfDocumentRenderer(
     IPdfClient pdfClient,
-    ILogger<PdfDocumentRenderer>? logger = null) : IPdfDocumentRenderer
+    ILogger<PdfDocumentRenderer>? logger = null,
+    IArcaQrImageGenerator? qrImageGenerator = null) : IPdfDocumentRenderer
 {
     public const int MaxTemplateDataBytes = 128 * 1024;
     public const int MaxTemplateDataDepth = 16;
+
+    private readonly IArcaQrImageGenerator _qrImageGenerator = qrImageGenerator ?? new ArcaQrImageGenerator();
 
     private static readonly HashSet<string> ReservedFiscalRootNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -55,7 +58,8 @@ public sealed class PdfDocumentRenderer(
         "caeVencimiento",
         "resultado",
         "comprobantesAsociados",
-        "periodoAsociado"
+        "periodoAsociado",
+        "arcaQr"
     };
 
     public void ValidateRequest(PdfTemplateReference template, JsonElement templateData)
@@ -104,6 +108,27 @@ public sealed class PdfDocumentRenderer(
             data[property.Name] = property.Value.Clone();
         }
         data["fiscal"] = fiscal;
+
+        try
+        {
+            var verificationUrl = ArcaQrPayloadBuilder.BuildVerificationUrl(fiscal);
+            var imageDataUri = _qrImageGenerator.GeneratePngDataUri(verificationUrl);
+            data["arcaQr"] = new ArcaQrPresentation(verificationUrl, imageDataUri);
+        }
+        catch (Exception exception) when (exception is ArcaQrPayloadException or ArgumentException)
+        {
+            logger?.LogWarning(
+                "ARCA QR build failure: template_reference={PdfTemplateReference} template_version={PdfTemplateVersion}",
+                template.Key,
+                template.Version);
+
+            return new PdfRenderResult(
+                PdfRenderStatus.Failed,
+                null,
+                "PDF_QR_UNAVAILABLE",
+                "No fue posible generar el QR oficial del comprobante.");
+        }
+
         var element = JsonSerializer.SerializeToElement(data);
 
         try

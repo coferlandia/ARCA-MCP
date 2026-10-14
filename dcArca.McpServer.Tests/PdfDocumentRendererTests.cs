@@ -24,6 +24,9 @@ public class PdfDocumentRendererTests
     [InlineData("importeTotal")]
     [InlineData("CAE")]
     [InlineData("numeroComprobante")]
+    [InlineData("arcaQr")]
+    [InlineData("ArcaQr")]
+    [InlineData("ARCAQR")]
     public void AliasFiscalRaiz_SeRechazaSinRender(string propertyName)
     {
         var client = new FakePdfClient();
@@ -87,12 +90,48 @@ public class PdfDocumentRendererTests
         var fiscalJson = root.GetProperty("fiscal");
         Assert.Equal("arca-fiscal-snapshot/2.0", fiscalJson.GetProperty("contractVersion").GetString());
         Assert.Equal("produccion", fiscalJson.GetProperty("environment").GetString());
-        Assert.Equal("CAE123", fiscalJson.GetProperty("cae").GetString());
+        Assert.Equal("12345678901234", fiscalJson.GetProperty("cae").GetString());
         Assert.Equal(123, fiscalJson.GetProperty("numeroComprobante").GetInt64());
         Assert.Equal(121m, fiscalJson.GetProperty("importeTotal").GetDecimal());
         Assert.NotEqual(
             root.GetProperty("items")[0].GetProperty("importe").GetDecimal(),
             fiscalJson.GetProperty("importeTotal").GetDecimal());
+    }
+
+    [Fact]
+    public async Task Render_InyectaArcaQrServerOwned()
+    {
+        var client = new FakePdfClient();
+        var renderer = new PdfDocumentRenderer(client);
+        var fiscal = Snapshot();
+
+        var result = await renderer.RenderAsync(
+            fiscal,
+            new PdfTemplateReference("tpl", "1.0.0"),
+            JsonSerializer.SerializeToElement(new { }));
+
+        Assert.Equal(PdfRenderStatus.Rendered, result.Status);
+        var arcaQr = client.LastData!.Value.GetProperty("arcaQr");
+        var expectedUrl = ArcaQrPayloadBuilder.BuildVerificationUrl(fiscal);
+        Assert.Equal(expectedUrl, arcaQr.GetProperty("verificationUrl").GetString());
+        Assert.StartsWith("data:image/png;base64,", arcaQr.GetProperty("imageDataUri").GetString());
+    }
+
+    [Fact]
+    public async Task QRImposibleDeConstruir_DevuelveFailedSinLlamarProvider()
+    {
+        var client = new FakePdfClient();
+        var renderer = new PdfDocumentRenderer(client);
+        var fiscalConCaeInvalido = Snapshot() with { Cae = "no-es-numerico" };
+
+        var result = await renderer.RenderAsync(
+            fiscalConCaeInvalido,
+            new PdfTemplateReference("tpl", "1.0.0"),
+            JsonSerializer.SerializeToElement(new { }));
+
+        Assert.Equal(PdfRenderStatus.Failed, result.Status);
+        Assert.Equal("PDF_QR_UNAVAILABLE", result.ErrorCode);
+        Assert.Equal(0, client.RenderCallCount);
     }
 
     [Fact]
@@ -148,7 +187,7 @@ public class PdfDocumentRendererTests
         ImporteTotal = 121m,
         MonedaId = "PES",
         MonedaCotizacion = 1m,
-        Cae = "CAE123",
+        Cae = "12345678901234",
         CaeVencimiento = "20261011",
         Resultado = "A"
     };

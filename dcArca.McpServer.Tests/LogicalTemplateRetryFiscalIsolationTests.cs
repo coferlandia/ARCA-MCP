@@ -71,7 +71,7 @@ public class LogicalTemplateRetryFiscalIsolationTests
         Assert.Equal(2, resolver.ResolveCount);
         Assert.Equal(1, resolver.InvalidateCount);
         Assert.True(result.Fiscal.Success);
-        Assert.Equal("CAE123", result.Fiscal.Cae);
+        Assert.Equal("12345678901234", result.Fiscal.Cae);
         Assert.Equal(123, result.Fiscal.NumeroComprobante);
         Assert.Equal(PdfRenderStatus.Rendered, result.Pdf.Status);
         Assert.NotNull(result.Pdf.Base64);
@@ -104,7 +104,7 @@ public class LogicalTemplateRetryFiscalIsolationTests
         EmissionOutcome = dcEmissionOutcome.Authorized,
         NumeroComprobante = 123,
         PuntoVenta = 7,
-        Cae = "CAE123",
+        Cae = "12345678901234",
         CaeVencimiento = "20261011",
         Resultado = "A"
     };
