@@ -55,6 +55,8 @@ public sealed class FiscalAuthorizationRaceTests
         ], "test"));
         var tools = new ArcaTools(
             resolver, operations, coordinator, null!,
+            new PdfTemplateReferenceResolver(
+                new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build()),
             new McpOperationContractService(operations, null!, resolver, null!, coordinator),
             new HttpContextAccessor { HttpContext = new DefaultHttpContext { User = principal } });
 
@@ -122,6 +124,8 @@ public sealed class FiscalAuthorizationRaceTests
         ], "test"));
         var tools = new ArcaTools(
             resolver, operations, coordinator, null!,
+            new PdfTemplateReferenceResolver(
+                new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build()),
             new McpOperationContractService(operations, null!, resolver, null!, coordinator),
             new HttpContextAccessor { HttpContext = new DefaultHttpContext { User = principal } });
 
@@ -192,6 +196,8 @@ public sealed class FiscalAuthorizationRaceTests
         ], "test"));
         var tools = new ArcaTools(
             resolver, operations, coordinator, null!,
+            new PdfTemplateReferenceResolver(
+                new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build()),
             new McpOperationContractService(operations, null!, resolver, null!, coordinator),
             new HttpContextAccessor { HttpContext = new DefaultHttpContext { User = principal } });
 
