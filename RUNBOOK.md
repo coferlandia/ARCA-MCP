@@ -109,7 +109,7 @@ La configuración fiscal vigente es V2:
 }
 ```
 
-Este fragmento ilustra las claves; no sustituir el archivo completo. Las variables del Compose prevalecen sobre el JSON para sus claves correspondientes, incluida la configuración PDF. JWT/Auth0 ya no es el mecanismo de autenticación del MCP: se usan API keys Bearer con consumer, scopes y grants. `dcArcaConfig` es legacy y no es la fuente autoritativa del emisor V2.
+Este fragmento ilustra las claves; no sustituir el archivo completo. Las variables del Compose prevalecen sobre el JSON para sus claves correspondientes, incluida la configuración PDF. El runtime de Cadencia fija `Pdf__TemplateKey=factura-ar` y `Pdf__TemplateVersion=5` como referencia lógica por defecto: los callers que envían `templateId=null` y `templateVersion=null` usan esa versión, mientras un par explícito sigue actuando como override. Cambiar estos valores modifica la plantilla por defecto para nuevas generaciones/regeneraciones sin alterar la verdad fiscal ni el CAE. JWT/Auth0 ya no es el mecanismo de autenticación del MCP: se usan API keys Bearer con consumer, scopes y grants. `dcArcaConfig` es legacy y no es la fuente autoritativa del emisor V2.
 
 **No publicar** el archivo `.env`, valores de `PDF_API_KEY`, passwords de PFX ni el resultado completo de `docker inspect` cuando incluya variables sensibles.
 

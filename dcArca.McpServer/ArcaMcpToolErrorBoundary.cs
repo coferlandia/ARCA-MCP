@@ -91,6 +91,13 @@ public static class ArcaMcpToolErrorBoundary
         out string code,
         out string safeMessage)
     {
+        if (exception is PdfTemplateReferenceResolutionException pdfTemplate)
+        {
+            code = pdfTemplate.Code;
+            safeMessage = pdfTemplate.SafeMessage;
+            return true;
+        }
+
         if (exception is FiscalContextAccessException fiscal)
         {
             code = fiscal.Code;

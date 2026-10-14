@@ -19,6 +19,7 @@ public sealed class ArcaTools
     private readonly IEmissionIdempotencyStore _operationStore;
     private readonly IFiscalSeriesCoordinator _seriesCoordinator;
     private readonly IPdfDocumentRenderer _pdfRenderer;
+    private readonly PdfTemplateReferenceResolver _pdfTemplateReferenceResolver;
     private readonly McpOperationContractService _contract;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IFiscalTechnicalContextStore? _representationStore;
@@ -28,6 +29,7 @@ public sealed class ArcaTools
         IEmissionIdempotencyStore operationStore,
         IFiscalSeriesCoordinator seriesCoordinator,
         IPdfDocumentRenderer pdfRenderer,
+        PdfTemplateReferenceResolver pdfTemplateReferenceResolver,
         McpOperationContractService contract,
         IHttpContextAccessor httpContextAccessor,
         IFiscalTechnicalContextStore? representationStore = null)
@@ -36,6 +38,7 @@ public sealed class ArcaTools
         _operationStore = operationStore;
         _seriesCoordinator = seriesCoordinator;
         _pdfRenderer = pdfRenderer;
+        _pdfTemplateReferenceResolver = pdfTemplateReferenceResolver;
         _contract = contract;
         _httpContextAccessor = httpContextAccessor;
         _representationStore = representationStore;
@@ -167,14 +170,16 @@ public sealed class ArcaTools
     public async Task<InvoiceWithPdfResult> EmitirComprobanteConPdf(
         [Description("Modelo fiscal completo. La numeración es asignada por el servidor.")] dcFacturaRequest factura,
         [Description("Clave idempotente estable para esta emisión fiscal. Repetirla con el mismo request recupera la misma operación.")] string idempotencyKey,
-        [Description("Clave lógica estable de la plantilla (ej. factura-ar). Por compatibilidad también acepta temporalmente tpl_* legacy.")] string templateId,
-        [Description("Versión inmutable de la plantilla lógica.")] string templateVersion,
+        [Description("Clave lógica estable de la plantilla (ej. factura-ar). Informar junto con templateVersion; null/vacío usa el default runtime. Por compatibilidad también acepta temporalmente tpl_* legacy.")] string? templateId,
+        [Description("Versión inmutable de la plantilla lógica. Informar junto con templateId; null/vacío usa el default runtime.")] string? templateVersion,
         [Description("Datos visuales de la plantilla. No puede contener el campo reservado fiscal.")] JsonElement templateData,
         [Description("Contexto fiscal autorizado. Puede omitirse sólo si existe exactamente uno permitido para la operación.")] string? contextId = null,
         [Description("CUIT del emisor representado. Obligatorio si hay más de una representación activa.")] long? representedCuit = null,
         [Description("Punto de venta habilitado para el CUIT representado.")] int? pointOfSale = null,
         CancellationToken cancellationToken = default)
     {
+        var template = _pdfTemplateReferenceResolver.Resolve(templateId, templateVersion);
+
         if (!factura.TipoComprobante.HasValue)
             return new InvoiceWithPdfResult(
                 new dcFacturaResponse { Success = false, Codigo = "TIPOC_INVALID", EmissionOutcome = dcEmissionOutcome.InvalidRequest, Mensaje = "TipoComprobante es obligatorio." },
@@ -201,7 +206,7 @@ public sealed class ArcaTools
             return await replayService.EmitAsync(
                 factura,
                 idempotencyKey,
-                new PdfTemplateReference(templateId, templateVersion),
+                template,
                 templateData,
                 cancellationToken);
         }
@@ -219,7 +224,7 @@ public sealed class ArcaTools
         var result = await service.EmitAsync(
             factura,
             idempotencyKey,
-            new PdfTemplateReference(templateId, templateVersion),
+            template,
             templateData,
             cancellationToken);
         await FlagRemoteAuthorizationFailureAsync(runtime, result.Fiscal, cancellationToken);
@@ -239,20 +244,22 @@ public sealed class ArcaTools
     public async Task<InvoiceWithPdfResult> GenerarPdfComprobante(
         [Description("Número del comprobante ya emitido/autorizado.")] long numeroComprobante,
         [Description("Tipo de comprobante ARCA (ej: 1=Factura A, 6=Factura B, 11=Factura C).")] dcTipoComprobante tipoComprobante,
-        [Description("Clave lógica estable de la plantilla (ej. factura-ar). Por compatibilidad también acepta temporalmente tpl_* legacy.")] string templateId,
-        [Description("Versión inmutable de la plantilla lógica.")] string templateVersion,
+        [Description("Clave lógica estable de la plantilla (ej. factura-ar). Informar junto con templateVersion; null/vacío usa el default runtime. Por compatibilidad también acepta temporalmente tpl_* legacy.")] string? templateId,
+        [Description("Versión inmutable de la plantilla lógica. Informar junto con templateId; null/vacío usa el default runtime.")] string? templateVersion,
         [Description("Datos visuales originales de la plantilla. No puede contener el campo reservado fiscal.")] JsonElement templateData,
         [Description("Contexto fiscal autorizado. Puede omitirse sólo si existe exactamente uno permitido para la operación.")] string? contextId = null,
         [Description("CUIT del emisor representado. Obligatorio si hay más de una representación activa.")] long? representedCuit = null,
         [Description("Punto de venta habilitado para el CUIT representado.")] int? pointOfSale = null,
         CancellationToken cancellationToken = default)
     {
+        var template = _pdfTemplateReferenceResolver.Resolve(templateId, templateVersion);
+
         using var runtime = await _runtimeResolver.ResolveForReadAsync(Principal, contextId, representedCuit, pointOfSale, cancellationToken);
         var service = new ExistingInvoicePdfService(runtime.Wsfe, _pdfRenderer, runtime.Config);
         return await service.RenderAsync(
             tipoComprobante,
             numeroComprobante,
-            new PdfTemplateReference(templateId, templateVersion),
+            template,
             templateData,
             cancellationToken);
     }

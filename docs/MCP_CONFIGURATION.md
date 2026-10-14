@@ -102,6 +102,15 @@ El cache WSAA se namespacia por ambiente + `credentialId` + servicio para impedi
 
 `Pdf:BaseUrl` / `Pdf__BaseUrl` y `Pdf:ApiKey` / `Pdf__ApiKey` se requieren cuando se use creadorpdf. `Pdf:ApiKey` debe provenir del secret manager y nunca debe exponerse a SecretarIA.
 
+La referencia lógica por defecto del comprobante se configura server-side con:
+
+```text
+Pdf__TemplateKey=factura-ar
+Pdf__TemplateVersion=5
+```
+
+Las tools PDF aceptan `templateId` y `templateVersion` nullable. Si ambos llegan null o vacíos se usa `Pdf:TemplateKey` + `Pdf:TemplateVersion`; si ambos llegan informados se respetan como override explícito del caller. Informar sólo uno es inválido. Si se requiere el default y cualquiera de las dos claves runtime falta o está vacía, la tool falla explícitamente con `PDF_TEMPLATE_DEFAULT_NOT_CONFIGURED` antes de consultar o emitir en ARCA.
+
 ## Store, migración y restore
 
 Antes de arrancar sobre datos legacy, ejecutar `docs/EMISSION_STORE_MIGRATION.md`. El servidor falla cerrado ante registros legacy no migrados, versiones desconocidas, reservas incompatibles o contextos incoherentes.

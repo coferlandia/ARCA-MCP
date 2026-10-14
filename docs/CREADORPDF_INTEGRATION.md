@@ -31,7 +31,27 @@ Por compatibilidad del schema MCP actual, el parámetro público continúa llam�
 }
 ```
 
-`PdfTemplateReference.Key` y `Version` representan esa identidad lógica. ARCA-MCP resuelve internamente:
+`PdfTemplateReference.Key` y `Version` representan esa identidad lógica.
+
+### Default runtime y override del caller
+
+Las tools `emitir_comprobante_con_pdf` y `generar_pdf_comprobante` comparten una única resolución de referencia efectiva:
+
+- `templateId=null` y `templateVersion=null` (o ambos vacíos) usan `Pdf:TemplateKey` + `Pdf:TemplateVersion`;
+- ambos valores informados constituyen un override explícito y no dependen del default runtime;
+- un par parcial falla con `PDF_TEMPLATE_REFERENCE_INVALID`;
+- si el caller necesita el default y la configuración está incompleta, falla con `PDF_TEMPLATE_DEFAULT_NOT_CONFIGURED`.
+
+La configuración operativa recomendada para el template actual es:
+
+```text
+Pdf__TemplateKey=factura-ar
+Pdf__TemplateVersion=5
+```
+
+`templateData` sigue siendo input del caller y no participa de esta selección.
+
+ARCA-MCP resuelve internamente:
 
 ```text
 factura-ar:3
@@ -149,6 +169,8 @@ Se configura como:
 ```text
 Pdf__BaseUrl=http://creadorpdf:8080
 Pdf__ApiKey=...
+Pdf__TemplateKey=factura-ar
+Pdf__TemplateVersion=5
 ```
 
 ### Deploy/bootstrap
