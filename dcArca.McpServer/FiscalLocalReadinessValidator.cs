@@ -89,6 +89,12 @@ public sealed class FiscalLocalReadinessValidator
                     return NotReady("CREDENTIAL_PRINCIPAL_CUIT_REQUIRED");
                 if (principalCuit.Length != 11 || !principalCuit.All(char.IsDigit))
                     return NotReady("CREDENTIAL_PRINCIPAL_CUIT_INVALID");
+
+                var principalCuit = credential["PrincipalCuit"];
+                if (principalCuit is null)
+                    return NotReady("CREDENTIAL_PRINCIPAL_CUIT_REQUIRED");
+                if (principalCuit.Length != 11 || !principalCuit.All(char.IsDigit))
+                    return NotReady("CREDENTIAL_PRINCIPAL_CUIT_INVALID");
             }
 
             if (context.OperationalState == FiscalContextOperationalState.Active
