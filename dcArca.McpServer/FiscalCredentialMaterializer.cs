@@ -20,8 +20,7 @@ public sealed record FiscalCredentialMaterialization(
 
 public sealed record FiscalPadronMaterialization(
     dcArcaConfig Config,
-    dcArcaAuthService PadronAuth,
-    FiscalCredentialHostBinding HostBinding);
+    dcArcaAuthService PadronAuth);
 
 public interface IFiscalCredentialMaterializer
 {
@@ -57,22 +56,10 @@ public sealed class FiscalCredentialMaterializer : IFiscalCredentialMaterializer
         RepresentedFiscalContextRecord context,
         CredentialAssignmentRecord assignment)
     {
-        FiscalCredentialHostBinding binding;
-        try
-        {
-            binding = _bindingResolver.Resolve(context, assignment);
-        }
-        catch (InvalidOperationException exception) when (
-            exception.Message is "CREDENTIAL_REFERENCE_UNRESOLVED" or "FISCAL_ENVIRONMENT_UNRESOLVED")
-        {
-            var message = exception.Message == "CREDENTIAL_REFERENCE_UNRESOLVED"
-                ? "La referencia de credencial del contexto no está disponible en el host."
-                : "El ambiente fiscal del contexto no tiene endpoints server-owned completos.";
-            throw new FiscalContextAccessException(exception.Message, message);
-        }
+        var binding = ResolveBinding(() => _bindingResolver.Resolve(context, assignment));
 
-        // dcArcaAuthService's cuit constructor value is currently its token-cache namespace;
-        // the represented CUIT is taken from binding.Config by the WSFE SOAP builder.
+        // dcArcaAuthService's cuit constructor value is its token-cache namespace.
+        // WSFE obtains the represented CUIT exclusively from binding.Config.
         var wsfeAuth = new dcArcaAuthService(
             binding.Config.WsaaUrl,
             binding.Config.CertificatePath,
@@ -80,7 +67,27 @@ public sealed class FiscalCredentialMaterializer : IFiscalCredentialMaterializer
             binding.CacheIdentity,
             serviceName: "wsfe",
             logger: _logger);
-        var padronAuth = new dcArcaAuthService(
+        var padronAuth = CreatePadronAuth(binding);
+
+        return new FiscalCredentialMaterialization(
+            binding.Config,
+            wsfeAuth,
+            padronAuth,
+            binding);
+    }
+
+    public FiscalPadronMaterialization MaterializePadron(
+        FiscalTechnicalContextRecord context,
+        CredentialAssignmentRecord assignment)
+    {
+        var binding = ResolveBinding(() => _bindingResolver.Resolve(context, assignment));
+        return new FiscalPadronMaterialization(
+            binding.Config,
+            CreatePadronAuth(binding));
+    }
+
+    private dcArcaAuthService CreatePadronAuth(FiscalCredentialHostBinding binding)
+        => new(
             binding.Config.WsaaUrl,
             binding.Config.CertificatePath,
             binding.Config.CertificatePassword,
@@ -88,10 +95,32 @@ public sealed class FiscalCredentialMaterializer : IFiscalCredentialMaterializer
             serviceName: "ws_sr_constancia_inscripcion",
             logger: _logger);
 
-        return new FiscalCredentialMaterialization(
-            binding.Config,
-            wsfeAuth,
-            padronAuth,
-            binding);
+    private static FiscalCredentialHostBinding ResolveBinding(
+        Func<FiscalCredentialHostBinding> resolve)
+    {
+        try
+        {
+            return resolve();
+        }
+        catch (InvalidOperationException exception) when (
+            exception.Message is
+                "CREDENTIAL_REFERENCE_UNRESOLVED"
+                or "CREDENTIAL_PRINCIPAL_CUIT_REQUIRED"
+                or "CREDENTIAL_PRINCIPAL_CUIT_INVALID"
+                or "FISCAL_ENVIRONMENT_UNRESOLVED")
+        {
+            var message = exception.Message switch
+            {
+                "CREDENTIAL_REFERENCE_UNRESOLVED" =>
+                    "La referencia de credencial del contexto no está disponible en el host.",
+                "CREDENTIAL_PRINCIPAL_CUIT_REQUIRED" =>
+                    "La credencial técnica no tiene PrincipalCuit configurado.",
+                "CREDENTIAL_PRINCIPAL_CUIT_INVALID" =>
+                    "El PrincipalCuit de la credencial técnica no tiene un formato válido.",
+                _ =>
+                    "El ambiente fiscal del contexto no tiene endpoints server-owned completos."
+            };
+            throw new FiscalContextAccessException(exception.Message, message);
+        }
     }
 }
