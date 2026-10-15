@@ -82,19 +82,51 @@ public class FacturaArV6TemplateTests
     }
 
     [Fact]
-    public void IncluyeFooterConQrCaeYLeyendas()
+    public void ReplicaLaGeometriaBaseDelComprobanteArca()
+    {
+        var template = LoadTemplate();
+
+        Assert.Contains("class=\"invoice-header\"", template);
+        Assert.Contains("class=\"voucher-class\"", template);
+        Assert.Contains("grid-template-columns: 1fr 1fr", template);
+        Assert.Contains("left: 50%", template);
+        Assert.Contains("transform: translateX(-50%)", template);
+        Assert.Contains("class=\"receiver-box\"", template);
+        Assert.Contains("class=\"totals-box\"", template);
+        Assert.Contains("class=\"footer-grid\"", template);
+        Assert.Contains("table.detalle tbody td { border: none;", template);
+    }
+
+    [Fact]
+    public void IncluyeFooterConQrMarcaArcaCaeYLeyendas()
     {
         var template = LoadTemplate();
 
         Assert.Contains("arcaQr.imageDataUri", template);
-        Assert.Contains("ARCA", template);
-        Assert.Contains("class=\"pagina\"", template);
-        Assert.Contains("counter(page)", template);
-        Assert.Contains("counter(pages)", template);
+        Assert.Contains("class=\"arca-brand\"", template);
+        Assert.Contains("class=\"arca-word\">ARCA</div>", template);
+        Assert.Contains("AGENCIA DE RECAUDACIÓN", template);
+        Assert.Contains("class=\"pagina\">Pág. 1/1</div>", template);
+        Assert.DoesNotContain("counter(pages)", template);
         Assert.Contains("fiscal.cae", template);
         Assert.Contains("fiscal.caeVencimiento", template);
         Assert.Contains("Comprobante Autorizado", template);
         Assert.Contains("Esta Agencia no se responsabiliza por los datos ingresados en el detalle de la operación", template);
+    }
+
+    [Fact]
+    public void FormateaImportesComoElModeloConDosDecimalesYComa()
+    {
+        var template = LoadTemplate();
+
+        Assert.Contains("{% macro dec2(value) -%}", template);
+        Assert.Contains("(\"%.2f\"|format(value))|replace(\".\", \",\")", template);
+        Assert.Contains("{{ dec2(item.cantidad) }}", template);
+        Assert.Contains("{{ dec2(item.precioUnitario) }}", template);
+        Assert.Contains("{{ dec2(item.importe) }}", template);
+        Assert.Contains("Importe Total: $", template);
+        Assert.Contains("{% macro date_ar(value) -%}", template);
+        Assert.Contains("{{ date_ar(emisor.fechaInicioActividades) }}", template);
     }
 
     [Fact]
