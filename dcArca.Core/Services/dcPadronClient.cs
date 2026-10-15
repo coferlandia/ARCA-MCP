@@ -234,8 +234,7 @@ public class dcPadronClient : IdcPadronClient, IDisposable
             return result;
         }
 
-        var datosGeneralesNode = personaNode.SelectSingleNode("datosGenerales")
-            ?? personaNode.SelectSingleNode("*[local-name()='datosGenerales']");
+        var datosGeneralesNode = ChildNode(personaNode, "datosGenerales");
         if (datosGeneralesNode == null)
         {
             result.Success = false;
@@ -244,29 +243,16 @@ public class dcPadronClient : IdcPadronClient, IDisposable
         }
 
         result.Success = true;
-        result.TipoPersona = datosGeneralesNode.SelectSingleNode("tipoPersona")?.InnerText?.Trim();
-        result.TipoClave = datosGeneralesNode.SelectSingleNode("tipoClave")?.InnerText?.Trim();
-        result.EstadoClave = datosGeneralesNode.SelectSingleNode("estadoClave")?.InnerText?.Trim();
-        result.RazonSocial = datosGeneralesNode.SelectSingleNode("razonSocial")?.InnerText?.Trim();
-        result.Nombre = datosGeneralesNode.SelectSingleNode("nombre")?.InnerText?.Trim();
-        result.Apellido = datosGeneralesNode.SelectSingleNode("apellido")?.InnerText?.Trim();
-        result.NumeroDocumento = datosGeneralesNode.SelectSingleNode("numeroDocumento")?.InnerText?.Trim();
+        result.TipoPersona = ChildValue(datosGeneralesNode, "tipoPersona");
+        result.TipoClave = ChildValue(datosGeneralesNode, "tipoClave");
+        result.EstadoClave = ChildValue(datosGeneralesNode, "estadoClave");
+        result.RazonSocial = ChildValue(datosGeneralesNode, "razonSocial");
+        result.Nombre = ChildValue(datosGeneralesNode, "nombre");
+        result.Apellido = ChildValue(datosGeneralesNode, "apellido");
+        result.NumeroDocumento = ChildValue(datosGeneralesNode, "numeroDocumento");
 
-        var caracterNodes = personaNode.SelectNodes(".//*[local-name()='caracterizacion']");
-        if (caracterNodes != null)
-        {
-            foreach (XmlNode node in caracterNodes)
-            {
-                var descripcion = node.SelectSingleNode("descripcion")?.InnerText
-                    ?? node.InnerText;
-                if (!string.IsNullOrWhiteSpace(descripcion))
-                    result.Caracterizaciones.Add(descripcion.Trim());
-            }
-        }
-
-        AddActividadDescriptions(personaNode.SelectNodes(".//*[local-name()='actividad']"), result.Actividades);
-        AddActividadDescriptions(personaNode.SelectNodes(".//*[local-name()='actividadMonotributista']"), result.Actividades);
-        AddRegimenDescriptions(personaNode.SelectNodes(".//*[local-name()='regimen']"), result.Regimenes);
+        PopulateStructuredFacts(personaNode, datosGeneralesNode, result);
+        PopulateLegacyCollections(personaNode, result);
 
         result.Mensaje = result.EstaActivo
             ? "CUIT registrado y activo en el padrón de AFIP"
@@ -277,23 +263,150 @@ public class dcPadronClient : IdcPadronClient, IDisposable
         return result;
     }
 
+    private static void PopulateStructuredFacts(
+        XmlNode personaNode,
+        XmlNode datosGeneralesNode,
+        dcPadronPersonaResult result)
+    {
+        var explicitRegistrationDate = ChildValue(datosGeneralesNode, "fechaInscripcion");
+        if (!string.IsNullOrWhiteSpace(explicitRegistrationDate))
+        {
+            result.FechaInscripcion = explicitRegistrationDate;
+            result.FechaInscripcionFuente = "datosGenerales.fechaInscripcion";
+        }
+
+        var domicilioNode = ChildNode(datosGeneralesNode, "domicilioFiscal");
+        if (domicilioNode != null)
+        {
+            result.DomicilioFiscal = new dcPadronDomicilioFiscal
+            {
+                TipoDomicilio = ChildValue(domicilioNode, "tipoDomicilio"),
+                Direccion = ChildValue(domicilioNode, "direccion"),
+                Localidad = ChildValue(domicilioNode, "localidad"),
+                CodigoPostal = ChildValue(domicilioNode, "codPostal"),
+                IdProvincia = ChildValue(domicilioNode, "idProvincia"),
+                DescripcionProvincia = ChildValue(domicilioNode, "descripcionProvincia"),
+                TipoDatoAdicional = ChildValue(domicilioNode, "tipoDatoAdicional"),
+                DatoAdicional = ChildValue(domicilioNode, "datoAdicional")
+            };
+        }
+
+        var regimenGeneralNode = ChildNode(personaNode, "datosRegimenGeneral");
+        AddStructuredTaxes(regimenGeneralNode, "datosRegimenGeneral", result.Impuestos);
+
+        var monotributoNode = ChildNode(personaNode, "datosMonotributo");
+        if (monotributoNode == null)
+        {
+            return;
+        }
+
+        var monotributo = new dcPadronMonotributo();
+
+        var categoryNode = ChildNode(monotributoNode, "categoriaMonotributo");
+        if (categoryNode != null)
+        {
+            monotributo.Categoria = new dcPadronCategoriaMonotributo
+            {
+                IdCategoria = ChildValue(categoryNode, "idCategoria"),
+                Descripcion = ChildValue(categoryNode, "descripcionCategoria"),
+                IdImpuesto = ChildValue(categoryNode, "idImpuesto"),
+                Periodo = ChildValue(categoryNode, "periodo")
+            };
+        }
+
+        var activityNodes = monotributoNode.SelectNodes("./*[local-name()='actividadMonotributista']");
+        if (activityNodes != null)
+        {
+            foreach (XmlNode activityNode in activityNodes)
+            {
+                monotributo.Actividades.Add(new dcPadronActividad
+                {
+                    IdActividad = ChildValue(activityNode, "idActividad"),
+                    Descripcion = ChildValue(activityNode, "descripcionActividad"),
+                    Nomenclador = ChildValue(activityNode, "nomenclador"),
+                    Orden = ChildValue(activityNode, "orden"),
+                    Periodo = ChildValue(activityNode, "periodo")
+                });
+            }
+        }
+
+        AddStructuredTaxes(monotributoNode, "datosMonotributo", monotributo.Impuestos);
+        foreach (var tax in monotributo.Impuestos)
+        {
+            result.Impuestos.Add(tax);
+        }
+
+        result.Monotributo = monotributo;
+    }
+
+    private static void AddStructuredTaxes(
+        XmlNode? container,
+        string source,
+        List<dcPadronImpuesto> target)
+    {
+        if (container == null)
+        {
+            return;
+        }
+
+        var nodes = container.SelectNodes("./*[local-name()='impuesto']");
+        if (nodes == null)
+        {
+            return;
+        }
+
+        foreach (XmlNode node in nodes)
+        {
+            target.Add(new dcPadronImpuesto
+            {
+                IdImpuesto = ChildValue(node, "idImpuesto"),
+                Descripcion = ChildValue(node, "descripcionImpuesto"),
+                Estado = ChildValue(node, "estadoImpuesto"),
+                Motivo = ChildValue(node, "motivo"),
+                Periodo = ChildValue(node, "periodo"),
+                Origen = source
+            });
+        }
+    }
+
+    private static void PopulateLegacyCollections(XmlNode personaNode, dcPadronPersonaResult result)
+    {
+        var caracterNodes = personaNode.SelectNodes(".//*[local-name()='caracterizacion']");
+        if (caracterNodes != null)
+        {
+            foreach (XmlNode node in caracterNodes)
+            {
+                // Compatibilidad estricta: #100 es aditivo y no redefine el valor legacy.
+                var descripcion = node.SelectSingleNode("descripcion")?.InnerText
+                    ?? node.InnerText;
+                if (!string.IsNullOrWhiteSpace(descripcion))
+                {
+                    result.Caracterizaciones.Add(descripcion.Trim());
+                }
+            }
+        }
+
+        AddActividadDescriptions(personaNode.SelectNodes(".//*[local-name()='actividad']"), result.Actividades);
+        AddActividadDescriptions(personaNode.SelectNodes(".//*[local-name()='actividadMonotributista']"), result.Actividades);
+        AddRegimenDescriptions(personaNode.SelectNodes(".//*[local-name()='regimen']"), result.Regimenes);
+    }
+
     private static List<string> ExtractPadronErrors(XmlNode personaNode)
     {
         var errors = new List<string>();
 
         void CollectErrors(string containerName)
         {
-            var node = personaNode.SelectSingleNode(containerName)
-                ?? personaNode.SelectSingleNode($"*[local-name()='{containerName}']");
+            var node = ChildNode(personaNode, containerName);
             if (node == null) return;
 
-            var message = node.SelectSingleNode("mensaje")?.InnerText;
+            var message = ChildValue(node, "mensaje");
             if (!string.IsNullOrWhiteSpace(message))
             {
-                errors.Add($"{containerName}: {message.Trim()}");
+                errors.Add($"{containerName}: {message}");
             }
 
-            var errorNodes = node.SelectNodes(".//error");
+            var errorNodes = node.SelectNodes(".//*[local-name()='error']");
             if (errorNodes == null) return;
 
             foreach (XmlNode errorNode in errorNodes)
@@ -319,13 +432,13 @@ public class dcPadronClient : IdcPadronClient, IDisposable
 
         foreach (XmlNode node in nodes)
         {
-            var descripcion = node.SelectSingleNode("descripcionActividad")?.InnerText
-                ?? node.SelectSingleNode("descripcion")?.InnerText
-                ?? node.InnerText;
+            var descripcion = ChildValue(node, "descripcionActividad")
+                ?? ChildValue(node, "descripcion")
+                ?? node.InnerText?.Trim();
 
             if (!string.IsNullOrWhiteSpace(descripcion))
             {
-                target.Add(descripcion.Trim());
+                target.Add(descripcion);
             }
         }
     }
@@ -336,15 +449,24 @@ public class dcPadronClient : IdcPadronClient, IDisposable
 
         foreach (XmlNode node in nodes)
         {
-            var descripcion = node.SelectSingleNode("descripcionRegimen")?.InnerText
-                ?? node.SelectSingleNode("descripcion")?.InnerText
-                ?? node.InnerText;
+            var descripcion = ChildValue(node, "descripcionRegimen")
+                ?? ChildValue(node, "descripcion")
+                ?? node.InnerText?.Trim();
 
             if (!string.IsNullOrWhiteSpace(descripcion))
             {
-                target.Add(descripcion.Trim());
+                target.Add(descripcion);
             }
         }
+    }
+
+    private static XmlNode? ChildNode(XmlNode parent, string localName)
+        => parent.SelectSingleNode($"./*[local-name()='{localName}']");
+
+    private static string? ChildValue(XmlNode parent, string localName)
+    {
+        var value = ChildNode(parent, localName)?.InnerText?.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
     public void Dispose()

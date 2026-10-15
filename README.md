@@ -15,6 +15,8 @@ Para instalar y consumir `dcArca.McpServer` con API keys, scopes, numeración se
 
 En MCP V2 las identidades fiscales están separadas explícitamente: `PrincipalCuit` es el titular server-owned de la credencial técnica y Padrón lo envía como `cuitRepresentada`; `RepresentedCuit` es el CUIT del tenant emisor y WSFE lo envía como `Auth.Cuit`. La consulta administrativa `consultar_padron_administrativo(contextId, cuit)` usa el CUIT solicitado sólo como `idPersona`, requiere `arca:administrar` + grant administrativo del contexto y no necesita una representación WSFE ni punto de venta.
 
+La respuesta de `consultar_padron_administrativo` mantiene el contrato legacy y agrega facts registrales estructurados cuando ARCA los informa: `DomicilioFiscal`, `Impuestos` (con `Origen` para distinguir régimen general de Monotributo) y `Monotributo` con categoría, actividades e impuestos. `FechaInscripcion` sólo se completa ante un campo XML explícito `datosGenerales.fechaInscripcion`; los campos `periodo` de actividades, impuestos o categorías nunca se reinterpretan como fecha de inscripción. `FechaInscripcionFuente` queda `null` cuando ARCA no informó una fecha inequívoca.
+
 ## � Quick Start (5 minutos)
 
 ### 1. Requisitos previos

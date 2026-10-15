@@ -61,6 +61,94 @@ public sealed class FiscalPadronAdministrationTests
     }
 
     [Fact]
+    public async Task AdministrativePadron_ExposesStructuredRegistryFacts_WithoutInferringRegistrationDate()
+    {
+        var result = await QueryAsync(StructuredResponse(includeExplicitRegistrationDate: false));
+
+        Assert.True(result.Success);
+
+        Assert.NotNull(result.DomicilioFiscal);
+        Assert.Equal("FISCAL", result.DomicilioFiscal!.TipoDomicilio);
+        Assert.Equal("CALLE FALSA 123", result.DomicilioFiscal.Direccion);
+        Assert.Equal("SAN ISIDRO", result.DomicilioFiscal.Localidad);
+        Assert.Equal("1642", result.DomicilioFiscal.CodigoPostal);
+        Assert.Equal("1", result.DomicilioFiscal.IdProvincia);
+        Assert.Equal("BUENOS AIRES", result.DomicilioFiscal.DescripcionProvincia);
+        Assert.Equal("BARRIO", result.DomicilioFiscal.TipoDatoAdicional);
+        Assert.Equal("CENTRO", result.DomicilioFiscal.DatoAdicional);
+
+        Assert.Collection(
+            result.Impuestos,
+            impuesto =>
+            {
+                Assert.Equal("30", impuesto.IdImpuesto);
+                Assert.Equal("IVA", impuesto.Descripcion);
+                Assert.Equal("AC", impuesto.Estado);
+                Assert.Equal("INSCRIPCIÓN TRAMITADA EN AGENCIA", impuesto.Motivo);
+                Assert.Equal("202001", impuesto.Periodo);
+                Assert.Equal("datosRegimenGeneral", impuesto.Origen);
+            },
+            impuesto =>
+            {
+                Assert.Equal("20", impuesto.IdImpuesto);
+                Assert.Equal("MONOTRIBUTO", impuesto.Descripcion);
+                Assert.Equal("AC", impuesto.Estado);
+                Assert.Equal("RECATEGORIZACIÓN", impuesto.Motivo);
+                Assert.Equal("202405", impuesto.Periodo);
+                Assert.Equal("datosMonotributo", impuesto.Origen);
+            });
+
+        Assert.NotNull(result.Monotributo);
+        Assert.NotNull(result.Monotributo!.Categoria);
+        Assert.Equal("36", result.Monotributo.Categoria!.IdCategoria);
+        Assert.Equal("B LOCACIONES DE SERVICIO", result.Monotributo.Categoria.Descripcion);
+        Assert.Equal("20", result.Monotributo.Categoria.IdImpuesto);
+        Assert.Equal("202405", result.Monotributo.Categoria.Periodo);
+
+        var actividad = Assert.Single(result.Monotributo.Actividades);
+        Assert.Equal("8", actividad.IdActividad);
+        Assert.Equal("PRESTACIÓN DE SERVICIOS", actividad.Descripcion);
+        Assert.Equal("1", actividad.Nomenclador);
+        Assert.Equal("1", actividad.Orden);
+        Assert.Equal("202405", actividad.Periodo);
+
+        var impuestoMonotributo = Assert.Single(result.Monotributo.Impuestos);
+        Assert.Equal("20", impuestoMonotributo.IdImpuesto);
+        Assert.Equal("datosMonotributo", impuestoMonotributo.Origen);
+
+        Assert.Contains("ACTIVIDAD GENERAL", result.Actividades);
+        Assert.Contains("PRESTACIÓN DE SERVICIOS", result.Actividades);
+
+        // ARCA documenta periodos para impuestos/actividades/categorías, pero no una fecha de inscripción
+        // general. Esos periodos no deben convertirse silenciosamente en FechaInscripcion.
+        Assert.Null(result.FechaInscripcion);
+        Assert.Null(result.FechaInscripcionFuente);
+    }
+
+    [Fact]
+    public async Task AdministrativePadron_KeepsAbsentStructuredFactsNullOrEmpty()
+    {
+        var result = await QueryAsync(SuccessResponse());
+
+        Assert.True(result.Success);
+        Assert.Null(result.DomicilioFiscal);
+        Assert.Empty(result.Impuestos);
+        Assert.Null(result.Monotributo);
+        Assert.Null(result.FechaInscripcion);
+        Assert.Null(result.FechaInscripcionFuente);
+    }
+
+    [Fact]
+    public async Task AdministrativePadron_ReportsExplicitRegistrationDateWithProvenance()
+    {
+        var result = await QueryAsync(StructuredResponse(includeExplicitRegistrationDate: true));
+
+        Assert.True(result.Success);
+        Assert.Equal("20190315", result.FechaInscripcion);
+        Assert.Equal("datosGenerales.fechaInscripcion", result.FechaInscripcionFuente);
+    }
+
+    [Fact]
     public async Task AdministrativePadron_RequiresAdminGrantForTechnicalContext()
     {
         using var temp = new TempCatalog();
@@ -121,6 +209,49 @@ public sealed class FiscalPadronAdministrationTests
             .GetField("_cacheKey", BindingFlags.Instance | BindingFlags.NonPublic)!
             .GetValue(auth);
         Assert.Equal("homologacion:cred-root_ws_sr_constancia_inscripcion", cacheKey);
+    }
+
+    private static async Task<dcPadronPersonaResult> QueryAsync(string responseXml)
+    {
+        using var temp = new TempCatalog();
+        var catalog = await ActiveCatalogAsync(temp.Path);
+
+        var tokenStore = new MemoryWsaaTokenStore();
+        await tokenStore.WriteAsync(
+            "admin-padron-cache_ws_sr_constancia_inscripcion",
+            new WsaaTokenEntry("test-token", "test-sign", DateTime.UtcNow.AddHours(1)));
+
+        var config = PadronConfig();
+        var auth = new dcArcaAuthService(
+            config.WsaaUrl,
+            config.CertificatePath,
+            config.CertificatePassword,
+            "admin-padron-cache",
+            serviceName: "ws_sr_constancia_inscripcion",
+            tokenStore: tokenStore);
+        var materializer = DispatchProxy.Create<IFiscalCredentialMaterializer, MaterializerProxy>();
+        var proxy = (MaterializerProxy)(object)materializer;
+        proxy.Config = config;
+        proxy.PadronAuth = auth;
+
+        var serviceType = typeof(FiscalRepresentationAdministration).Assembly
+            .GetType("dcArca.McpServer.FiscalPadronAdministration");
+        Assert.NotNull(serviceType);
+
+        var service = Activator.CreateInstance(
+            serviceType!,
+            catalog,
+            materializer,
+            new SingleClientFactory(new CapturingHandler(responseXml)));
+        Assert.NotNull(service);
+
+        var method = serviceType!.GetMethod("GetPersonaAsync");
+        Assert.NotNull(method);
+
+        var task = (Task<dcPadronPersonaResult>)method!.Invoke(
+            service,
+            [Administrator(includeGrant: true), ContextId, TargetCuit, CancellationToken.None])!;
+        return await task;
     }
 
     private static async Task<FileSystemFiscalTechnicalContextStore> ActiveCatalogAsync(string path)
@@ -199,6 +330,79 @@ public sealed class FiscalPadronAdministrationTests
              </soapenv:Body>
            </soapenv:Envelope>
            """;
+
+    private static string StructuredResponse(bool includeExplicitRegistrationDate)
+    {
+        var registrationDate = includeExplicitRegistrationDate
+            ? "<fechaInscripcion>20190315</fechaInscripcion>"
+            : string.Empty;
+
+        return $$"""
+           <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+             <soapenv:Body>
+               <getPersona_v2Response>
+                 <personaReturn>
+                   <datosGenerales>
+                     <razonSocial>Persona de prueba</razonSocial>
+                     <estadoClave>ACTIVO</estadoClave>
+                     <tipoClave>CUIT</tipoClave>
+                     <tipoPersona>FISICA</tipoPersona>
+                     {{registrationDate}}
+                     <domicilioFiscal>
+                       <codPostal>1642</codPostal>
+                       <datoAdicional>CENTRO</datoAdicional>
+                       <descripcionProvincia>BUENOS AIRES</descripcionProvincia>
+                       <direccion>CALLE FALSA 123</direccion>
+                       <idProvincia>1</idProvincia>
+                       <localidad>SAN ISIDRO</localidad>
+                       <tipoDatoAdicional>BARRIO</tipoDatoAdicional>
+                       <tipoDomicilio>FISCAL</tipoDomicilio>
+                     </domicilioFiscal>
+                   </datosGenerales>
+                   <datosRegimenGeneral>
+                     <actividad>
+                       <descripcionActividad>ACTIVIDAD GENERAL</descripcionActividad>
+                       <idActividad>620100</idActividad>
+                       <nomenclador>883</nomenclador>
+                       <orden>1</orden>
+                       <periodo>202001</periodo>
+                     </actividad>
+                     <impuesto>
+                       <descripcionImpuesto>IVA</descripcionImpuesto>
+                       <estadoImpuesto>AC</estadoImpuesto>
+                       <idImpuesto>30</idImpuesto>
+                       <motivo>INSCRIPCIÓN TRAMITADA EN AGENCIA</motivo>
+                       <periodo>202001</periodo>
+                     </impuesto>
+                   </datosRegimenGeneral>
+                   <datosMonotributo>
+                     <actividadMonotributista>
+                       <descripcionActividad>PRESTACIÓN DE SERVICIOS</descripcionActividad>
+                       <idActividad>8</idActividad>
+                       <nomenclador>1</nomenclador>
+                       <orden>1</orden>
+                       <periodo>202405</periodo>
+                     </actividadMonotributista>
+                     <categoriaMonotributo>
+                       <descripcionCategoria>B LOCACIONES DE SERVICIO</descripcionCategoria>
+                       <idCategoria>36</idCategoria>
+                       <idImpuesto>20</idImpuesto>
+                       <periodo>202405</periodo>
+                     </categoriaMonotributo>
+                     <impuesto>
+                       <descripcionImpuesto>MONOTRIBUTO</descripcionImpuesto>
+                       <estadoImpuesto>AC</estadoImpuesto>
+                       <idImpuesto>20</idImpuesto>
+                       <motivo>RECATEGORIZACIÓN</motivo>
+                       <periodo>202405</periodo>
+                     </impuesto>
+                   </datosMonotributo>
+                 </personaReturn>
+               </getPersona_v2Response>
+             </soapenv:Body>
+           </soapenv:Envelope>
+           """;
+    }
 
     private class MaterializerProxy : DispatchProxy
     {
