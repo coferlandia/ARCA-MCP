@@ -6,19 +6,16 @@ namespace dcArca.McpServer.Tests;
 public class FacturaArV5SchemaTests
 {
     [Fact]
-    public void Schema_EmisorExigeCamposBaseYPermitePresentacionOpcionalNula()
+    public void Schema_RequiereCamposDePresentacionDelEmisor()
     {
         var schema = LoadSchema();
-        var emisor = schema.GetProperty("properties").GetProperty("emisor");
-        var emisorRequired = emisor.GetProperty("required")
+        var emisorRequired = schema
+            .GetProperty("properties").GetProperty("emisor").GetProperty("required")
             .EnumerateArray().Select(x => x.GetString()).ToArray();
 
         Assert.Equal(
-            new[] { "razonSocial", "domicilio", "condicionIva" },
+            new[] { "razonSocial", "domicilio", "condicionIva", "ingresosBrutos", "fechaInicioActividades" },
             emisorRequired);
-
-        AssertAllowsStringOrNull(emisor.GetProperty("properties").GetProperty("ingresosBrutos"));
-        AssertAllowsStringOrNull(emisor.GetProperty("properties").GetProperty("fechaInicioActividades"));
     }
 
     [Fact]
@@ -33,17 +30,18 @@ public class FacturaArV5SchemaTests
     }
 
     [Fact]
-    public void Schema_ConceptosExigeCamposBaseYPermiteUnidadOpcionalNula()
+    public void Schema_ConceptosExigenUnidadMedidaYPermitenCodigoOpcional()
     {
         var schema = LoadSchema();
         var itemSchema = schema.GetProperty("properties").GetProperty("conceptos").GetProperty("items");
         var required = itemSchema.GetProperty("required").EnumerateArray().Select(x => x.GetString()).ToArray();
 
-        Assert.Equal(
-            new[] { "descripcion", "cantidad", "precioUnitario", "importe" },
-            required);
+        Assert.Contains("unidadMedida", required);
+        Assert.Contains("descripcion", required);
+        Assert.Contains("cantidad", required);
+        Assert.Contains("precioUnitario", required);
+        Assert.Contains("importe", required);
         Assert.DoesNotContain("codigo", required);
-        AssertAllowsStringOrNull(itemSchema.GetProperty("properties").GetProperty("unidadMedida"));
         Assert.True(itemSchema.GetProperty("properties").TryGetProperty("porcentajeBonificacion", out _));
         Assert.True(itemSchema.GetProperty("properties").TryGetProperty("importeBonificacion", out _));
     }
@@ -64,16 +62,6 @@ public class FacturaArV5SchemaTests
             .GetProperty("properties").GetProperty("arcaQr").GetProperty("required")
             .EnumerateArray().Select(x => x.GetString()).ToArray();
         Assert.Equal(new[] { "verificationUrl", "imageDataUri" }, arcaQrRequired);
-    }
-
-    private static void AssertAllowsStringOrNull(JsonElement propertySchema)
-    {
-        var types = propertySchema.GetProperty("anyOf")
-            .EnumerateArray()
-            .Select(x => x.GetProperty("type").GetString())
-            .ToArray();
-
-        Assert.Equal(new[] { "string", "null" }, types);
     }
 
     private static JsonElement LoadSchema()
