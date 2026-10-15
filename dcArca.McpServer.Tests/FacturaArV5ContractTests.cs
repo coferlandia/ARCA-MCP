@@ -140,6 +140,173 @@ public class FacturaArV5ContractTests
     }
 
     [Fact]
+    public void SchemaAceptaFacturaCDeServiciosConPeriodoYConsumidorFinal()
+    {
+        using var schema = LoadSchema();
+        using var fixture = JsonDocument.Parse("""
+        {
+          "emisor": {
+            "razonSocial": "Prestador Sintetico",
+            "domicilio": "Calle Falsa 123",
+            "condicionIva": "Responsable Monotributo",
+            "ingresosBrutos": null,
+            "fechaInicioActividades": null
+          },
+          "receptor": {
+            "razonSocial": "Consumidor Final",
+            "domicilio": null
+          },
+          "condicionVenta": null,
+          "conceptos": [
+            {
+              "descripcion": "Servicio profesional",
+              "cantidad": 1,
+              "unidadMedida": null,
+              "precioUnitario": 150,
+              "importe": 150
+            }
+          ],
+          "fiscal": {
+            "emisorCuit": 20236438989,
+            "puntoVenta": 1,
+            "tipoComprobante": 11,
+            "numeroComprobante": 3,
+            "fechaComprobante": "20261015",
+            "concepto": 2,
+            "fechaServicioDesde": "20261001",
+            "fechaServicioHasta": "20261031",
+            "fechaVencimientoPago": "20261110",
+            "receptorTipoDocumento": 99,
+            "receptorNumeroDocumento": 0,
+            "receptorCondicionIva": "Consumidor Final",
+            "importeNeto": 150,
+            "importeIva": 0,
+            "importeTributos": 0,
+            "importeTotal": 150,
+            "monedaId": "PES",
+            "cae": "12345678901236",
+            "caeVencimiento": "20261025"
+          }
+        }
+        """);
+
+        Assert.True(
+            MatchesSchemaContract(schema.RootElement, fixture.RootElement),
+            "Una Factura C de servicios debe aceptar período fiscal y campos opcionales null.");
+
+        AssertAllowsStringOrNull(
+            schema.RootElement.GetProperty("properties").GetProperty("condicionVenta"));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(6)]
+    public void SchemaAceptaFacturaABConIvaServerOwned(int tipoComprobante)
+    {
+        using var schema = LoadSchema();
+        using var fixture = JsonDocument.Parse($"""
+        {
+          "emisor": {
+            "razonSocial": "Empresa Sintetica",
+            "domicilio": "Calle Fiscal 456",
+            "condicionIva": "Responsable Inscripto"
+          },
+          "receptor": {
+            "razonSocial": "Cliente Sintetico"
+          },
+          "conceptos": [
+            {
+              "descripcion": "Producto de prueba",
+              "cantidad": 2,
+              "precioUnitario": 50,
+              "importe": 100
+            }
+          ],
+          "fiscal": {
+            "emisorCuit": 20236438989,
+            "puntoVenta": 1,
+            "tipoComprobante": {{tipoComprobante}},
+            "numeroComprobante": 4,
+            "fechaComprobante": "20261015",
+            "importeNeto": 82.64,
+            "importeIva": 17.36,
+            "importeTributos": 0,
+            "importeTotal": 100,
+            "iva": [
+              {
+                "id": 5,
+                "baseImponible": 82.64,
+                "importe": 17.36
+              }
+            ],
+            "monedaId": "PES",
+            "cae": "12345678901237",
+            "caeVencimiento": "20261025"
+          }
+        }
+        """);
+
+        Assert.True(
+            MatchesSchemaContract(schema.RootElement, fixture.RootElement),
+            $"Factura tipo {tipoComprobante} debe conservar el detalle de IVA dentro de fiscal.");
+    }
+
+    [Fact]
+    public void SchemaAceptaNotaCreditoConAsociacionExclusivamenteFiscal()
+    {
+        using var schema = LoadSchema();
+        using var fixture = JsonDocument.Parse("""
+        {
+          "emisor": {
+            "razonSocial": "Prestador Sintetico",
+            "domicilio": "Calle Falsa 123",
+            "condicionIva": "Responsable Monotributo"
+          },
+          "receptor": {
+            "razonSocial": "Cliente Sintetico"
+          },
+          "conceptos": [
+            {
+              "descripcion": "Ajuste de servicio",
+              "cantidad": 1,
+              "precioUnitario": 25,
+              "importe": 25
+            }
+          ],
+          "fiscal": {
+            "emisorCuit": 20236438989,
+            "puntoVenta": 1,
+            "tipoComprobante": 13,
+            "numeroComprobante": 5,
+            "fechaComprobante": "20261015",
+            "importeNeto": 25,
+            "importeIva": 0,
+            "importeTributos": 0,
+            "importeTotal": 25,
+            "comprobantesAsociados": [
+              {
+                "tipo": 11,
+                "puntoVenta": 1,
+                "numero": 3
+              }
+            ],
+            "monedaId": "PES",
+            "cae": "12345678901238",
+            "caeVencimiento": "20261025"
+          }
+        }
+        """);
+
+        Assert.True(
+            MatchesSchemaContract(schema.RootElement, fixture.RootElement),
+            "La Nota de Crédito debe aceptar la asociación dentro del bloque fiscal server-owned.");
+
+        Assert.False(fixture.RootElement.TryGetProperty("comprobantesAsociados", out _));
+        Assert.True(
+            fixture.RootElement.GetProperty("fiscal").TryGetProperty("comprobantesAsociados", out _));
+    }
+
+    [Fact]
     public void TemplateDefineFallbacksDeterministicosSinMoverVerdadFiscal()
     {
         var template = LoadTemplate();
