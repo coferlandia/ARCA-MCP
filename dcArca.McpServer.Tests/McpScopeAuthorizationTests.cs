@@ -95,6 +95,7 @@ public class McpScopeAuthorizationTests : IClassFixture<WebApplicationFactory<Pr
         Assert.Contains("\"name\":\"consultar_comprobante\"", body);
         Assert.Contains("\"name\":\"consultar_ultimo_comprobante\"", body);
         Assert.Contains("\"name\":\"consultar_condiciones_iva\"", body);
+        Assert.DoesNotContain("\"name\":\"consultar_padron_administrativo\"", body);
     }
 
     [Fact]
@@ -111,6 +112,20 @@ public class McpScopeAuthorizationTests : IClassFixture<WebApplicationFactory<Pr
         Assert.DoesNotContain("\"name\":\"consultar_comprobante\"", body);
         Assert.DoesNotContain("\"name\":\"consultar_ultimo_comprobante\"", body);
         Assert.DoesNotContain("\"name\":\"consultar_condiciones_iva\"", body);
+        Assert.DoesNotContain("\"name\":\"consultar_padron_administrativo\"", body);
+    }
+
+    [Fact]
+    public async Task ToolsList_ConScopeAdministrar_IncluyePadronAdministrativo()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.SendAsync(BuildJsonRpcRequest("arca:administrar", "tools/list"));
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("\"name\":\"consultar_padron_administrativo\"", body);
+        Assert.DoesNotContain("\"name\":\"consultar_padron\"", body);
     }
 
     [Fact]
@@ -127,6 +142,7 @@ public class McpScopeAuthorizationTests : IClassFixture<WebApplicationFactory<Pr
         Assert.Contains("\"name\":\"consultar_comprobante\"", body);
         Assert.Contains("\"name\":\"consultar_ultimo_comprobante\"", body);
         Assert.Contains("\"name\":\"consultar_condiciones_iva\"", body);
+        Assert.DoesNotContain("\"name\":\"consultar_padron_administrativo\"", body);
     }
 
     [Fact]
