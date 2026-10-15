@@ -125,6 +125,8 @@ public class FacturaArV6TemplateTests
         Assert.Contains("{{ dec2(item.precioUnitario) }}", template);
         Assert.Contains("{{ dec2(item.importe) }}", template);
         Assert.Contains("Importe Total: $", template);
+        Assert.Contains("{% macro date_ar(value) -%}", template);
+        Assert.Contains("{{ date_ar(emisor.fechaInicioActividades) }}", template);
     }
 
     [Fact]
