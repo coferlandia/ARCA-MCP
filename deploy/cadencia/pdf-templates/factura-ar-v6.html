@@ -100,7 +100,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 8.4pt; line-height:
   border: 0.3mm solid #222;
   border-top: none;
   display: grid;
-  grid-template-columns: 37% 22% 41%;
+  grid-template-columns: 38.5% 23% 38.5%;
   align-items: center;
   padding: 0 2mm;
 }
@@ -127,7 +127,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 8.4pt; line-height:
 }
 .receiver-row:last-child { margin-bottom: 0; }
 .receiver-row.first { grid-template-columns: 35% 65%; }
-.receiver-row.second { grid-template-columns: 48% 52%; }
+.receiver-row.second { grid-template-columns: 52% 48%; }
 .receiver-row.third { grid-template-columns: 100%; }
 .receiver-cell { min-width: 0; }
 .receiver-cell strong { font-weight: 700; }
@@ -201,11 +201,14 @@ table.detalle tbody td { border: none; padding: 2.4mm 1.2mm 0 1.2mm; font-size: 
   break-inside: avoid;
 }
 .footer-grid {
-  display: grid;
-  grid-template-columns: 45% 15% 40%;
+  position: relative;
   height: 100%;
 }
 .footer-left {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 48%;
   display: flex;
   align-items: flex-start;
 }
@@ -230,15 +233,20 @@ table.detalle tbody td { border: none; padding: 2.4mm 1.2mm 0 1.2mm; font-size: 
   margin-top: 0.8mm;
 }
 .pagina {
-  margin-top: 14mm;
+  position: absolute;
+  left: 44%;
+  top: 14mm;
+  width: 12%;
   text-align: center;
   font-size: 9pt;
   font-weight: 700;
   white-space: nowrap;
 }
 .cae-block {
-  margin-top: 12mm;
-  padding-right: 4mm;
+  position: absolute;
+  left: 65%;
+  right: 4mm;
+  top: 12mm;
   font-size: 8.7pt;
 }
 .cae-line {
