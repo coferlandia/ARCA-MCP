@@ -343,6 +343,7 @@ public class McpHealthTests : IClassFixture<WebApplicationFactory<Program>>, IDi
             builder.UseSetting("FiscalEnvironments:homologacion:WsfeUrl", "https://wsfe.example.invalid");
             builder.UseSetting("FiscalEnvironments:homologacion:PadronUrl", "https://padron.example.invalid");
             builder.UseSetting("FiscalCredentials:cred-a:CertificatePath", "never-opened-placeholder.pfx");
+            builder.UseSetting("FiscalCredentials:cred-a:PrincipalCuit", "20123456789");
         });
         var client = factory.CreateClient();
 
