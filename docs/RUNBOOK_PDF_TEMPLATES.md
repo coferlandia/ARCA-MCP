@@ -848,7 +848,7 @@ Durante esa verificación se encontró un bug real en `creadorpdf` `main` (no en
 
 El incidente de #97 se observó con `factura-ar:5` ya publicada. Como la identidad lógica `key+version` es inmutable, **v5 no se sobrescribe**: el contrato corregido se publica como `factura-ar:6`.
 
-v6 conserva el layout de v5 salvo los fallbacks semánticos siguientes:
+v6 conserva el contrato fiscal/presentacional de #97 y, antes de su primera publicación operativa, #86 ajusta su layout para reproducir materialmente el comprobante ARCA privado de referencia. v5 permanece publicada e inmutable. Los fallbacks semánticos de v6 son:
 
 - `emisor.ingresosBrutos` es opcional/null; el valor explícito gana y, si falta, se muestra `fiscal.emisorCuit` formateado `XX-XXXXXXXX-X` cuando tiene 11 dígitos, o crudo en caso contrario.
 - `emisor.fechaInicioActividades` es opcional/null y la línea se omite si no existe.
@@ -857,17 +857,18 @@ v6 conserva el layout de v5 salvo los fallbacks semánticos siguientes:
 - `emisor.condicionIva`, los datos base del emisor/receptor y los importes comerciales requeridos conservan su obligatoriedad.
 - `fiscal` y `arcaQr` siguen siendo server-owned; no cambia `FiscalDocumentSnapshotContract.Version`.
 
-El manifest declara `factura-ar:6` y el default runtime pasa a `Pdf__TemplateVersion=6`. Los snapshots que ya referencian versiones anteriores continúan resolviendo su referencia histórica; los callers que envían un par explícito `templateId/templateVersion` conservan ese override.
+El manifest declara `factura-ar:6` y el default runtime pasa a `Pdf__TemplateVersion=6`. Los snapshots que ya referencian versiones anteriores continúan resolviendo su referencia histórica; los callers que envían un par explícito `templateId/templateVersion` conservan ese override. El layout final de v6 usa encabezado bipartido con letra/COD superpuesta al eje central, franja de período compacta, receptor sin grilla interna, tabla de ocho columnas con cuerpo sin bordes, caja inferior de totales de ancho completo y footer QR + marca ARCA + página + CAE, siguiendo la geometría del modelo privado.
 
-Para desplegar #97:
+Para el rollout conjunto de #97/#86 (diferido hasta completar el desarrollo relacionado):
 
 1. publicar `factura-ar:6` con el bootstrap idempotente de la sección 10;
 2. confirmar `owner=dcarca`, `version=6` y `status=published`;
 3. antes del restart, actualizar de forma durable el host: si el `.env` contiene `Pdf__TemplateVersion=5`, cambiarlo explícitamente a `Pdf__TemplateVersion=6`; un override persistido prevalece sobre el fallback del Compose;
 4. verificar con `docker compose --env-file .env -f deploy/cadencia/docker-compose.yml config` que el servicio efectivo recibe `Pdf__TemplateVersion: "6"`, y recién entonces desplegar/reiniciar ARCA-MCP;
-5. regenerar un comprobante ya autorizado que fallaba con v5, sin reemitir CAE;
+5. desde SecretarIA local en `dev`, regenerar un comprobante ya autorizado sin reemitir CAE;
 6. verificar IIBB explícito/fallback, fecha de inicio opcional, unidad explícita/fallback y condición de venta explícita/fallback;
-7. conservar `factura-ar:5` publicado e intacto para referencias históricas.
+7. comparar visualmente las tres copias contra el modelo privado (header, receptor, tabla, caja de totales, QR/marca ARCA, página y CAE);
+8. conservar `factura-ar:5` publicado e intacto para referencias históricas.
 
 ## 19. Checklist para publicar una versión nueva
 
