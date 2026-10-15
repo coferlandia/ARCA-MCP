@@ -60,6 +60,43 @@ public sealed class FiscalPrincipalCuitTests
         Assert.Equal(RepresentedCuit.ToString(), binding.Config.Cuit);
     }
 
+    [Fact]
+    public void SameCredential_TwoRepresentations_SharePrincipalAndCacheIdentity()
+    {
+        const string principalCuit = "20123456789";
+        var resolver = Resolver(BuildConfiguration(principalCuit));
+        var first = resolver.Resolve(
+            Context(representedCuit: 30712345678, pointOfSale: 7),
+            Assignment("rev-1"));
+        var second = resolver.Resolve(
+            Context(representedCuit: 30611111118, pointOfSale: 12),
+            Assignment("rev-2"));
+
+        Assert.Equal(principalCuit, first.PrincipalCuit);
+        Assert.Equal(principalCuit, second.PrincipalCuit);
+        Assert.Equal(first.CacheIdentity, second.CacheIdentity);
+        Assert.NotEqual(first.RepresentedCuit, second.RepresentedCuit);
+        Assert.NotEqual(first.Config.PuntoVenta, second.Config.PuntoVenta);
+    }
+
+    [Fact]
+    public void SameCredential_AcrossEnvironments_KeepsPrincipalButNamespacesCacheByEnvironment()
+    {
+        const string principalCuit = "20123456789";
+        var resolver = Resolver(BuildConfiguration(principalCuit));
+        var homo = resolver.Resolve(
+            Context(environment: "homologacion"),
+            Assignment());
+        var prod = resolver.Resolve(
+            Context(environment: "produccion"),
+            Assignment());
+
+        Assert.Equal(principalCuit, homo.PrincipalCuit);
+        Assert.Equal(principalCuit, prod.PrincipalCuit);
+        Assert.Equal("homologacion:cred-shared", homo.CacheIdentity);
+        Assert.Equal("produccion:cred-shared", prod.CacheIdentity);
+    }
+
     private static FiscalCredentialHostBindingResolver Resolver(IConfiguration configuration)
         => new(
             configuration,
@@ -74,7 +111,10 @@ public sealed class FiscalPrincipalCuitTests
             ["FiscalCredentials:cred-shared:CertificatePassword"] = "",
             ["FiscalEnvironments:homologacion:WsaaUrl"] = "https://example.invalid/wsaa",
             ["FiscalEnvironments:homologacion:WsfeUrl"] = "https://example.invalid/wsfe",
-            ["FiscalEnvironments:homologacion:PadronUrl"] = "https://example.invalid/padron"
+            ["FiscalEnvironments:homologacion:PadronUrl"] = "https://example.invalid/padron",
+            ["FiscalEnvironments:produccion:WsaaUrl"] = "https://prod.example.invalid/wsaa",
+            ["FiscalEnvironments:produccion:WsfeUrl"] = "https://prod.example.invalid/wsfe",
+            ["FiscalEnvironments:produccion:PadronUrl"] = "https://prod.example.invalid/padron"
         };
         if (principalCuit is not null)
             values["FiscalCredentials:cred-shared:PrincipalCuit"] = principalCuit;
@@ -84,20 +124,23 @@ public sealed class FiscalPrincipalCuitTests
             .Build();
     }
 
-    private static RepresentedFiscalContextRecord Context()
+    private static RepresentedFiscalContextRecord Context(
+        string environment = "homologacion",
+        long representedCuit = RepresentedCuit,
+        int pointOfSale = 7)
         => new(
-            "operator-homo",
-            "homologacion",
-            RepresentedCuit,
-            7,
+            "operator",
+            environment,
+            representedCuit,
+            pointOfSale,
             FiscalContextOperationalState.Active,
             1,
             false,
             [Assignment()]);
 
-    private static CredentialAssignmentRecord Assignment()
+    private static CredentialAssignmentRecord Assignment(string revision = "rev-1")
         => new(
-            "rev-1",
+            revision,
             "cred-shared",
             CredentialAssignmentStatus.Active,
             "wsaa-ok",
