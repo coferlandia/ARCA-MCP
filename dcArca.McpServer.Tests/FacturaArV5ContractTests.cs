@@ -55,10 +55,13 @@ public class FacturaArV5ContractTests
             "numeroComprobante": 1,
             "fechaComprobante": "20261015",
             "importeNeto": 100,
+            "importeNoGravado": 0,
+            "importeExento": 0,
             "importeIva": 0,
             "importeTributos": 0,
             "importeTotal": 100,
             "monedaId": "PES",
+            "monedaCotizacion": 1,
             "cae": "12345678901234",
             "caeVencimiento": "20261025"
           }
@@ -124,10 +127,20 @@ public class FacturaArV5ContractTests
             "numeroComprobante": 2,
             "fechaComprobante": "20261015",
             "importeNeto": 82.64,
+            "importeNoGravado": 0,
+            "importeExento": 0,
             "importeIva": 17.36,
             "importeTributos": 0,
             "importeTotal": 100,
+            "iva": [
+              {
+                "alicuota": 21,
+                "baseImponible": 82.64,
+                "importe": 17.36
+              }
+            ],
             "monedaId": "PES",
+            "monedaCotizacion": 1,
             "cae": "12345678901235",
             "caeVencimiento": "20261025"
           }
@@ -176,14 +189,17 @@ public class FacturaArV5ContractTests
             "fechaServicioDesde": "20261001",
             "fechaServicioHasta": "20261031",
             "fechaVencimientoPago": "20261110",
-            "receptorTipoDocumento": 99,
-            "receptorNumeroDocumento": 0,
-            "receptorCondicionIva": "Consumidor Final",
+            "documentoReceptorTipo": 99,
+            "documentoReceptorNumero": 0,
+            "condicionIvaReceptor": 5,
             "importeNeto": 150,
+            "importeNoGravado": 0,
+            "importeExento": 0,
             "importeIva": 0,
             "importeTributos": 0,
             "importeTotal": 150,
             "monedaId": "PES",
+            "monedaCotizacion": 1,
             "cae": "12345678901236",
             "caeVencimiento": "20261025"
           }
@@ -229,17 +245,20 @@ public class FacturaArV5ContractTests
             "numeroComprobante": 4,
             "fechaComprobante": "20261015",
             "importeNeto": 82.64,
+            "importeNoGravado": 0,
+            "importeExento": 0,
             "importeIva": 17.36,
             "importeTributos": 0,
             "importeTotal": 100,
             "iva": [
               {
-                "id": 5,
+                "alicuota": 21,
                 "baseImponible": 82.64,
                 "importe": 17.36
               }
             ],
             "monedaId": "PES",
+            "monedaCotizacion": 1,
             "cae": "12345678901237",
             "caeVencimiento": "20261025"
           }
@@ -282,6 +301,8 @@ public class FacturaArV5ContractTests
             "numeroComprobante": 5,
             "fechaComprobante": "20261015",
             "importeNeto": 25,
+            "importeNoGravado": 0,
+            "importeExento": 0,
             "importeIva": 0,
             "importeTributos": 0,
             "importeTotal": 25,
@@ -293,6 +314,7 @@ public class FacturaArV5ContractTests
               }
             ],
             "monedaId": "PES",
+            "monedaCotizacion": 1,
             "cae": "12345678901238",
             "caeVencimiento": "20261025"
           }
