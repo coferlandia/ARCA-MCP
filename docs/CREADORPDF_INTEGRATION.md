@@ -46,7 +46,7 @@ La configuración operativa recomendada para el template actual es:
 
 ```text
 Pdf__TemplateKey=factura-ar
-Pdf__TemplateVersion=5
+Pdf__TemplateVersion=6
 ```
 
 `templateData` sigue siendo input del caller y no participa de esta selección.
@@ -136,7 +136,7 @@ Formato actual:
 - prioriza en su salida `TEMPLATE_KEY`, `TEMPLATE_VERSION`, `TEMPLATE_OWNER` y `TEMPLATE_STATUS`;
 - el ID físico se imprime únicamente como diagnóstico y no debe copiarse a SecretarIA.
 
-La versión `factura-ar:4` mantiene Factura A/B/C y agrega identificación visual explícita para Nota de Crédito A/B/C (tipos 3/8/13). La versión `factura-ar:5` reproduce el layout fiel de ARCA (franja de copia, encabezado con letra/COD, período de servicios, tabla de 8 columnas, recuadro de totales y footer con QR oficial) y genera siempre tres páginas por comprobante: ORIGINAL, DUPLICADO y TRIPLICADO. Las versiones `factura-ar:3` y `factura-ar:4` permanecen disponibles e inmutables para snapshots históricos que las referencian.
+La versión `factura-ar:4` mantiene Factura A/B/C y agrega identificación visual explícita para Nota de Crédito A/B/C (tipos 3/8/13). La versión `factura-ar:5` reproduce el layout fiel de ARCA y queda inmutable. La versión `factura-ar:6` conserva ese layout y corrige el contrato semántico de presentación definido en #97. Todas las versiones anteriores permanecen disponibles e inmutables para snapshots históricos que las referencian.
 
 Una versión publicada es inmutable:
 
@@ -164,7 +164,7 @@ Se configura como:
 Pdf__BaseUrl=http://creadorpdf:8080
 Pdf__ApiKey=...
 Pdf__TemplateKey=factura-ar
-Pdf__TemplateVersion=5
+Pdf__TemplateVersion=6
 ```
 
 ### Deploy/bootstrap
@@ -305,6 +305,20 @@ Un template puede mostrar líneas monetarias provenientes de `items`, pero los t
 - `receptor`: `razonSocial` obligatorio, `domicilio` opcional.
 - `condicionVenta`: opcional en la raíz; si falta, el template oculta la línea sin dejar texto vacío.
 - `conceptos[]`: `descripcion`, `cantidad`, `unidadMedida`, `precioUnitario`, `importe` obligatorios; `codigo` opcional; `porcentajeBonificacion`/`importeBonificacion` opcionales con default visual `0,00` cuando están ausentes.
+
+### `factura-ar:6` — contrato de presentación corregido (#97)
+
+`factura-ar:5` permanece inmutable porque ya fue publicada. El incidente de #97 se corrige en una nueva versión `factura-ar:6`, que conserva el layout de v5 y modifica únicamente el contrato semántico de presentación:
+
+- `emisor.razonSocial`, `emisor.domicilio` y `emisor.condicionIva` siguen siendo obligatorios.
+- `emisor.ingresosBrutos`: opcional (`string|null`). Si viene con valor se presenta exactamente ese valor; si falta o viene vacío, el template deriva sólo para presentación el CUIT fiscal `fiscal.emisorCuit` con formato `XX-XXXXXXXX-X` cuando tiene 11 dígitos. Si no tiene 11 dígitos, se muestra el valor fiscal sin reformatear.
+- `emisor.fechaInicioActividades`: opcional (`string|null`). Sólo se muestra cuando existe un valor no vacío; ARCA-MCP no inventa esa fecha.
+- `receptor.razonSocial` sigue siendo obligatorio y `receptor.domicilio` opcional.
+- `condicionVenta`: opcional (`string|null`); el valor explícito gana y, si falta o viene vacío, el fallback visual es `Contado`.
+- `conceptos[].unidadMedida`: opcional (`string|null`); el valor explícito gana y, si falta o viene vacío, el fallback visual es `unidades`.
+- `codigo`, `porcentajeBonificacion` e `importeBonificacion` conservan el comportamiento de v5; los dos últimos mantienen fallback visual cero.
+
+Estos fallbacks son exclusivamente de presentación: no modifican `templateData`, el `FiscalDocumentSnapshot` ni la evidencia persistida. `fiscal` y `arcaQr` continúan siendo server-owned.
 
 La condición frente al IVA del receptor, el tipo/número de documento, las fechas fiscales, los comprobantes/período asociados de una Nota de Crédito y el CAE/vencimiento se renderizan siempre desde `fiscal`, nunca desde `templateData`. El template numera punto de venta (5 dígitos) y comprobante (8 dígitos) con ceros a la izquierda como en ARCA.
 

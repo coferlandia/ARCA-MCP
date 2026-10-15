@@ -18,6 +18,12 @@
       "version": "5",
       "template": "factura-ar-v5.html",
       "schema": "factura-ar-v5.schema.json"
+    },
+    {
+      "key": "factura-ar",
+      "version": "6",
+      "template": "factura-ar-v6.html",
+      "schema": "factura-ar-v6.schema.json"
     }
   ]
 }

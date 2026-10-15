@@ -111,7 +111,7 @@ La configuración fiscal vigente es V2:
 }
 ```
 
-Este fragmento ilustra las claves; no sustituir el archivo completo. Las variables del Compose prevalecen sobre el JSON para sus claves correspondientes, incluida la configuración PDF. En el `.env` de Cadencia se pueden definir `Pdf__TemplateKey=factura-ar` y `Pdf__TemplateVersion=5`; el Compose usa esos mismos valores como defaults cuando no están presentes. Los callers que envían `templateId=null` y `templateVersion=null` usan esa referencia runtime, mientras un par explícito sigue actuando como override. Cambiar esas variables modifica la plantilla por defecto para nuevas generaciones/regeneraciones sin alterar la verdad fiscal ni el CAE. JWT/Auth0 ya no es el mecanismo de autenticación del MCP: se usan API keys Bearer con consumer, scopes y grants. `dcArcaConfig` es legacy y no es la fuente autoritativa del emisor V2.
+Este fragmento ilustra las claves; no sustituir el archivo completo. Las variables del Compose prevalecen sobre el JSON para sus claves correspondientes, incluida la configuración PDF. En el `.env` de Cadencia se pueden definir `Pdf__TemplateKey=factura-ar` y `Pdf__TemplateVersion=6`; si esas variables existen, prevalecen sobre los fallbacks del Compose. Los callers que envían `templateId=null` y `templateVersion=null` usan esa referencia runtime, mientras un par explícito sigue actuando como override. Cambiar esas variables modifica la plantilla por defecto para nuevas generaciones/regeneraciones sin alterar la verdad fiscal ni el CAE. JWT/Auth0 ya no es el mecanismo de autenticación del MCP: se usan API keys Bearer con consumer, scopes y grants. `dcArcaConfig` es legacy y no es la fuente autoritativa del emisor V2.
 
 **No publicar** el archivo `.env`, valores de `PDF_API_KEY`, passwords de PFX ni el resultado completo de `docker inspect` cuando incluya variables sensibles.
 
@@ -149,11 +149,24 @@ git switch main
 git pull --ff-only origin main
 git log -1 --oneline
 
+# Antes de cambiar el runtime a v6, publicar/verificar la nueva versión con
+# una credencial temporal de gestión del mismo owner que Pdf__ApiKey.
+# Preparar CREADORPDF_TEMPLATE_API_KEY según docs/RUNBOOK_PDF_TEMPLATES.md.
+CREADORPDF_TEMPLATE_API_KEY="${CREADORPDF_TEMPLATE_API_KEY:?falta credencial temporal de gestión}" \
+  ./deploy/cadencia/bootstrap-pdf-template.sh
+
 # La opción --env-file es NECESARIA: de lo contrario APPSETTINGS_PATH,
 # CERTIFICATE_PATH, PRODUCTION_CERTIFICATE_PATH, PDF_API_KEY y DOMAIN pueden quedar vacíos.
-# Pdf__TemplateKey/Pdf__TemplateVersion también se leen desde .env; si faltan,
-# Compose aplica factura-ar/5 como defaults operativos.
+# Pdf__TemplateKey/Pdf__TemplateVersion también se leen desde .env.
+# Desde #97 el fallback operativo es factura-ar/6. Migrar únicamente el override
+# legado exacto Pdf__TemplateVersion=5; preservar pins deliberados a v3/v4 u otra versión.
+if grep -q '^Pdf__TemplateVersion=5$' .env; then
+  sed -i 's/^Pdf__TemplateVersion=5$/Pdf__TemplateVersion=6/' .env
+fi
+grep '^Pdf__TemplateVersion=' .env || echo 'Pdf__TemplateVersion no fijado en .env; Compose usará el fallback factura-ar/6'
+
 docker compose --env-file .env -f deploy/cadencia/docker-compose.yml config --services
+docker compose --env-file .env -f deploy/cadencia/docker-compose.yml config | grep -E 'Pdf__Template(Key|Version)'
 
 docker compose --env-file .env -f deploy/cadencia/docker-compose.yml \
   up -d --build --no-deps mcpserver

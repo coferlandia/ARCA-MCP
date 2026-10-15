@@ -844,6 +844,31 @@ El template se validó con un render real usando el mismo stack que `creadorpdf`
 
 Durante esa verificación se encontró un bug real en `creadorpdf` `main` (no en ARCA-MCP): `app/dynamic_render.py` bloqueaba en su `url_fetcher` **cualquier** URL, incluidas las `data:` que no implican red ni filesystem, por lo que el QR (y cualquier imagen embebida en base64) quedaba como texto alternativo en vez de renderizarse. Se corrigió y pusheó a `enerone/creadorpdf` `main` en el commit `5c4a506` (permite `data:`, sigue bloqueando `http(s)/file/ftp` en ese path, igual que ya hacía `app/weasyprint_fetcher.py` para el template built-in). Verificar que el `creadorpdf` desplegado en Cadencia incluya ese commit antes de dar por buena la visualización del QR en `factura-ar:5`.
 
+## 18.2 `factura-ar:6` — corrección contractual de presentación (#97)
+
+El incidente de #97 se observó con `factura-ar:5` ya publicada. Como la identidad lógica `key+version` es inmutable, **v5 no se sobrescribe**: el contrato corregido se publica como `factura-ar:6`.
+
+v6 conserva el layout de v5 salvo los fallbacks semánticos siguientes:
+
+- `emisor.ingresosBrutos` es opcional/null; el valor explícito gana y, si falta, se muestra `fiscal.emisorCuit` formateado `XX-XXXXXXXX-X` cuando tiene 11 dígitos, o crudo en caso contrario.
+- `emisor.fechaInicioActividades` es opcional/null y la línea se omite si no existe.
+- `conceptos[].unidadMedida` es opcional/null con fallback visual `unidades`.
+- `condicionVenta` es opcional/null con fallback visual `Contado`.
+- `emisor.condicionIva`, los datos base del emisor/receptor y los importes comerciales requeridos conservan su obligatoriedad.
+- `fiscal` y `arcaQr` siguen siendo server-owned; no cambia `FiscalDocumentSnapshotContract.Version`.
+
+El manifest declara `factura-ar:6` y el default runtime pasa a `Pdf__TemplateVersion=6`. Los snapshots que ya referencian versiones anteriores continúan resolviendo su referencia histórica; los callers que envían un par explícito `templateId/templateVersion` conservan ese override.
+
+Para desplegar #97:
+
+1. publicar `factura-ar:6` con el bootstrap idempotente de la sección 10;
+2. confirmar `owner=dcarca`, `version=6` y `status=published`;
+3. antes del restart, actualizar de forma durable el host: si el `.env` contiene `Pdf__TemplateVersion=5`, cambiarlo explícitamente a `Pdf__TemplateVersion=6`; un override persistido prevalece sobre el fallback del Compose;
+4. verificar con `docker compose --env-file .env -f deploy/cadencia/docker-compose.yml config` que el servicio efectivo recibe `Pdf__TemplateVersion: "6"`, y recién entonces desplegar/reiniciar ARCA-MCP;
+5. regenerar un comprobante ya autorizado que fallaba con v5, sin reemitir CAE;
+6. verificar IIBB explícito/fallback, fecha de inicio opcional, unidad explícita/fallback y condición de venta explícita/fallback;
+7. conservar `factura-ar:5` publicado e intacto para referencias históricas.
+
 ## 19. Checklist para publicar una versión nueva
 
 1. Crear nuevos archivos versionados en `deploy/cadencia/pdf-templates/`.
