@@ -10,21 +10,32 @@ namespace dcArca.McpServer;
 public sealed class ArcaAdministrationTools
 {
     private readonly FiscalRepresentationAdministration _admin;
+    private readonly FiscalPadronAdministration _padron;
     private readonly FiscalOperationAdministration _operations;
     private readonly IHttpContextAccessor _accessor;
 
     public ArcaAdministrationTools(
         FiscalRepresentationAdministration admin,
+        FiscalPadronAdministration padron,
         FiscalOperationAdministration operations,
         IHttpContextAccessor accessor)
     {
         _admin = admin;
+        _padron = padron;
         _operations = operations;
         _accessor = accessor;
     }
 
     private ClaimsPrincipal Principal => _accessor.HttpContext?.User
         ?? throw new FiscalContextAccessException("AUTHENTICATED_PRINCIPAL_REQUIRED", "No existe identidad administrativa.");
+
+    [McpServerTool, Description("Consulta Padrón con la identidad principal server-owned de la credencial técnica. No requiere representación fiscal ni punto de venta.")]
+    [Authorize(Policy = "ArcaAdministrar")]
+    public Task<dcArca.Core.Models.dcPadronPersonaResult> ConsultarPadronAdministrativo(
+        string contextId,
+        long cuit,
+        CancellationToken cancellationToken = default)
+        => _padron.GetPersonaAsync(Principal, contextId, cuit, cancellationToken);
 
     [McpServerTool, Description("Registra una representación candidata en el catálogo local. No la activa.")]
     [Authorize(Policy = "ArcaAdministrar")]
