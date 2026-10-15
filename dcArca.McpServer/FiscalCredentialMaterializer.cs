@@ -18,11 +18,21 @@ public sealed record FiscalCredentialMaterialization(
     public FiscalEnvironmentEndpoints Endpoints => new(Config.WsaaUrl, Config.WsfeUrl, Config.PadronUrl);
 }
 
+public sealed record FiscalPadronMaterialization(
+    dcArcaConfig Config,
+    dcArcaAuthService PadronAuth,
+    FiscalCredentialHostBinding HostBinding);
+
 public interface IFiscalCredentialMaterializer
 {
     FiscalCredentialMaterialization Materialize(
         RepresentedFiscalContextRecord context,
         CredentialAssignmentRecord assignment);
+
+    FiscalPadronMaterialization MaterializePadron(
+        FiscalTechnicalContextRecord context,
+        CredentialAssignmentRecord assignment)
+        => throw new NotSupportedException("TECHNICAL_PADRON_MATERIALIZATION_NOT_IMPLEMENTED");
 }
 
 public sealed class FiscalCredentialMaterializer : IFiscalCredentialMaterializer
