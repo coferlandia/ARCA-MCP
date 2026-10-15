@@ -281,6 +281,10 @@ table.detalle tbody td { border: none; padding: 2.4mm 1.2mm 0 1.2mm; font-size: 
 {% macro dec2(value) -%}
 {{ ("%.2f"|format(value))|replace(".", ",") }}
 {%- endmacro %}
+{% macro date_ar(value) -%}
+{% set text = "%s"|format(value) %}
+{% if text|length == 8 %}{{ text[6:8] }}/{{ text[4:6] }}/{{ text[0:4] }}{% elif text|length == 10 and text[4:5] == "-" and text[7:8] == "-" %}{{ text[8:10] }}/{{ text[5:7] }}/{{ text[0:4] }}{% else %}{{ text }}{% endif %}
+{%- endmacro %}
 
 {% for copia in ["ORIGINAL", "DUPLICADO", "TRIPLICADO"] %}
 <div class="copy-sheet">
@@ -320,7 +324,7 @@ table.detalle tbody td { border: none; padding: 2.4mm 1.2mm 0 1.2mm; font-size: 
         {% endif %}
       </div>
       {% if emisor.fechaInicioActividades is defined and emisor.fechaInicioActividades %}
-      <div class="meta-row"><strong>Fecha de Inicio de Actividades:</strong>&nbsp;&nbsp; {{ emisor.fechaInicioActividades }}</div>
+      <div class="meta-row"><strong>Fecha de Inicio de Actividades:</strong>&nbsp;&nbsp; {{ date_ar(emisor.fechaInicioActividades) }}</div>
       {% endif %}
     </div>
   </div>
