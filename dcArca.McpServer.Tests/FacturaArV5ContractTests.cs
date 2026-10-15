@@ -204,7 +204,7 @@ public class FacturaArV5ContractTests
     public void SchemaAceptaFacturaABConIvaServerOwned(int tipoComprobante)
     {
         using var schema = LoadSchema();
-        using var fixture = JsonDocument.Parse($"""
+        var fixtureJson = """
         {
           "emisor": {
             "razonSocial": "Empresa Sintetica",
@@ -225,7 +225,7 @@ public class FacturaArV5ContractTests
           "fiscal": {
             "emisorCuit": 20236438989,
             "puntoVenta": 1,
-            "tipoComprobante": {{tipoComprobante}},
+            "tipoComprobante": __TIPO_COMPROBANTE__,
             "numeroComprobante": 4,
             "fechaComprobante": "20261015",
             "importeNeto": 82.64,
@@ -244,7 +244,9 @@ public class FacturaArV5ContractTests
             "caeVencimiento": "20261025"
           }
         }
-        """);
+        """;
+        using var fixture = JsonDocument.Parse(
+            fixtureJson.Replace("__TIPO_COMPROBANTE__", tipoComprobante.ToString(), StringComparison.Ordinal));
 
         Assert.True(
             MatchesSchemaContract(schema.RootElement, fixture.RootElement),
