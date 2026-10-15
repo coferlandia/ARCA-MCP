@@ -98,6 +98,9 @@ The command must produce no tracked sensitive-key/certificate files.
 ### Work Tracking
 
 - GitHub Issues: planned, active, blocked and completed project work.
+- GitHub Project `Status = Done` is a delivery invariant, not an implementation-progress label. For any work that changes versioned repository content, set `Done` only after the resolving commit/PR is verified as integrated into the delivery branch (`main` unless the repository explicitly defines another delivery branch).
+- Passing review/CI, finishing implementation, or having a merge-ready PR is not sufficient for `Done`; keep the item in a non-terminal state such as `In Progress`, `In Review`, or `Ready to merge` until integration is verified.
+- Apply the same rule to Epics: an Epic cannot be `Done` while any required integration PR is still unmerged or an explicit post-merge acceptance gate remains pending. Administrative closures such as `duplicate` or `not planned` are exempt because they do not claim integrated delivery.
 - Pull Requests and Git history: implementation/review evidence.
 - When merging a PR should close a tracked issue, the PR body must use a GitHub closing keyword such as `Closes #N`, `Fixes #N`, or `Resolves #N`. Use `Refs #N` deliberately only when the issue must remain open after merge because a post-merge gate still exists (for example, homologation smoke, deployment validation, or operational acceptance).
 - Do not mirror this state into repository-local TODO/HISTORY files.

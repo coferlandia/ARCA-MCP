@@ -1,5 +1,11 @@
 # Changelog — coferlandia-project-manager
 
+## 0.9.1 — 2026-10-14
+
+### Fixed
+
+- Defines GitHub Project `done` as verified delivery-branch integration, preventing Epics/issues from appearing complete while their required PRs are still unmerged.
+
 ## 0.9.0 — 2026-10-01
 
 ### Changed

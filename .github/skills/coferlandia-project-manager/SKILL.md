@@ -12,7 +12,7 @@ compatibility: >
   local `.agent/work-items/` contracts when GitHub is unavailable or local tracking is selected.
 metadata:
   author: coferlandia
-  version: "0.9.0"
+  version: "0.9.1"
   category: ops
   status: active
   tested: "2026-10-01 - Architecture Gate selection plus optional Product Knowledge Impact planning handoff covered by cross-skill tests."
@@ -162,6 +162,26 @@ In GitHub mode:
 - preserve later decisions, deviations, reviews, and evidence chronologically;
 - use native Epic/sub-issue relationships when available and the repository's explicit fallback
   linkage convention otherwise.
+
+#### GitHub Project completion invariant
+
+Treat a Project item's terminal `done` value as evidence of delivered integration, never merely
+finished implementation. For any issue or Epic whose outcome changes versioned repository content:
+
+- do not project the item to `done` while its resolving commit/PR is not verified as contained in
+  the repository delivery branch (`main` unless that repository explicitly defines another);
+- review approval, green CI, an implementation-complete branch, or a merge-ready PR are pre-terminal
+  states and must remain mapped to the closest available non-terminal Project status;
+- for an Epic, require every integration PR needed by the Epic contract to be merged and every
+  explicit post-merge acceptance gate to be satisfied before projecting the Epic to `done`;
+- when the Project lacks a distinct `In Review` or `Ready to merge` value, prefer keeping the item
+  in `in_progress` rather than falsely projecting completion;
+- administrative dispositions such as `duplicate`, `not planned`, or equivalent cancellation may
+  close without repository integration, but must not be represented as successfully delivered work.
+
+When GitHub state and repository integration disagree, repository integration is authoritative for
+delivery completion. Never advance `done` to make the board look current; reconcile the Project
+status back to the real delivery state instead.
 
 When GitHub is unavailable or local tracking was explicitly selected:
 
