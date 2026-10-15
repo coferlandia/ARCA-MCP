@@ -376,11 +376,12 @@ public class dcPadronClient : IdcPadronClient, IDisposable
         {
             foreach (XmlNode node in caracterNodes)
             {
-                var descripcion = ChildValue(node, "descripcionCaracterizacion")
-                    ?? ChildValue(node, "descripcion");
+                // Compatibilidad estricta: #100 es aditivo y no redefine el valor legacy.
+                var descripcion = node.SelectSingleNode("descripcion")?.InnerText
+                    ?? node.InnerText;
                 if (!string.IsNullOrWhiteSpace(descripcion))
                 {
-                    result.Caracterizaciones.Add(descripcion);
+                    result.Caracterizaciones.Add(descripcion.Trim());
                 }
             }
         }
