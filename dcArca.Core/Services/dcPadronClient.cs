@@ -39,11 +39,15 @@ public class dcPadronClient : IdcPadronClient, IDisposable
             ? "https://awshomo.arca.gov.ar/sr-padron/webservices/personaServiceA5"
             : config.PadronUrl;
 
+        var principalCuit = string.IsNullOrWhiteSpace(config.PrincipalCuit)
+            ? config.Cuit // Compatibilidad explícita para consumidores legacy directos de Core.
+            : config.PrincipalCuit;
+
         _authService = authService ?? new dcArcaAuthService(
             config.WsaaUrl,
             config.CertificatePath,
             config.CertificatePassword,
-            config.Cuit,
+            principalCuit,
             serviceName: "ws_sr_constancia_inscripcion",
             logger: _logger);
         if (httpClient != null)
@@ -118,7 +122,7 @@ public class dcPadronClient : IdcPadronClient, IDisposable
                     <a5:getPersona_v2>
                         <token>{token}</token>
                         <sign>{sign}</sign>
-                        <cuitRepresentada>{_config.Cuit}</cuitRepresentada>
+                        <cuitRepresentada>{(string.IsNullOrWhiteSpace(_config.PrincipalCuit) ? _config.Cuit : _config.PrincipalCuit)}</cuitRepresentada>
                         <idPersona>{cuit}</idPersona>
                     </a5:getPersona_v2>
                 </soapenv:Body>

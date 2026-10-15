@@ -19,6 +19,8 @@ public sealed class FiscalCredentialHostBinding
 
     public string CredentialId { get; }
     public string CacheIdentity { get; }
+    public string PrincipalCuit => _config.PrincipalCuit;
+    public string RepresentedCuit => _config.RepresentedCuit;
 
     // Never expose the resolver-owned mutable configuration instance.
     public dcArcaConfig Config => Clone(_config);
@@ -27,7 +29,8 @@ public sealed class FiscalCredentialHostBinding
         => new()
         {
             Environment = source.Environment,
-            Cuit = source.Cuit,
+            RepresentedCuit = source.RepresentedCuit,
+            PrincipalCuit = source.PrincipalCuit,
             CertificatePath = source.CertificatePath,
             CertificatePassword = source.CertificatePassword,
             WsaaUrl = source.WsaaUrl,
@@ -39,7 +42,8 @@ public sealed class FiscalCredentialHostBinding
 
 /// <summary>
 /// Resolves an opaque credential reference and a server-owned fiscal environment into an
-/// immutable dcArcaConfig. Callers never provide certificate paths, passwords or endpoints.
+/// immutable dcArcaConfig. Callers never provide certificate paths, passwords, principal CUITs
+/// or endpoints.
 /// </summary>
 public sealed class FiscalCredentialHostBindingResolver
 {
@@ -69,9 +73,34 @@ public sealed class FiscalCredentialHostBindingResolver
         CredentialAssignmentRecord assignment)
     {
         ArgumentNullException.ThrowIfNull(context);
+        return ResolveCore(
+            context.Environment,
+            context.RepresentedCuit.ToString(),
+            context.PointOfSale,
+            assignment);
+    }
+
+    public FiscalCredentialHostBinding Resolve(
+        FiscalTechnicalContextRecord context,
+        CredentialAssignmentRecord assignment)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return ResolveCore(
+            context.Environment,
+            representedCuit: string.Empty,
+            pointOfSale: 0,
+            assignment);
+    }
+
+    private FiscalCredentialHostBinding ResolveCore(
+        string environmentId,
+        string representedCuit,
+        int pointOfSale,
+        CredentialAssignmentRecord assignment)
+    {
         ArgumentNullException.ThrowIfNull(assignment);
 
-        var canonicalEnvironment = FiscalEnvironmentId.RequireCanonical(context.Environment);
+        var canonicalEnvironment = FiscalEnvironmentId.RequireCanonical(environmentId);
         var credential = _configuration.GetSection($"FiscalCredentials:{assignment.CredentialId}");
         var certificatePath = credential["CertificatePath"]?.Trim();
         var certificatePassword = credential["CertificatePassword"] ?? string.Empty;
@@ -83,6 +112,21 @@ public sealed class FiscalCredentialHostBindingResolver
         }
         if (string.IsNullOrWhiteSpace(certificatePath))
             throw new InvalidOperationException("CREDENTIAL_REFERENCE_UNRESOLVED");
+
+        var principalCuit = credential["PrincipalCuit"];
+        if (principalCuit is null
+            && !string.Equals(_legacyEnvironment, NoLegacyFallback, StringComparison.Ordinal)
+            && string.Equals(assignment.CredentialId, "legacy-default", StringComparison.Ordinal))
+        {
+            principalCuit = string.IsNullOrEmpty(_legacyConfig.PrincipalCuit)
+                ? _legacyConfig.Cuit
+                : _legacyConfig.PrincipalCuit;
+        }
+
+        if (principalCuit is null)
+            throw new InvalidOperationException("CREDENTIAL_PRINCIPAL_CUIT_REQUIRED");
+        if (principalCuit.Length != 11 || !principalCuit.All(char.IsDigit))
+            throw new InvalidOperationException("CREDENTIAL_PRINCIPAL_CUIT_INVALID");
 
         var environment = _configuration.GetSection($"FiscalEnvironments:{canonicalEnvironment}");
         var wsaa = environment["WsaaUrl"]?.Trim();
@@ -105,8 +149,9 @@ public sealed class FiscalCredentialHostBindingResolver
             new dcArcaConfig
             {
                 Environment = canonicalEnvironment,
-                Cuit = context.RepresentedCuit.ToString(),
-                PuntoVenta = context.PointOfSale,
+                RepresentedCuit = representedCuit,
+                PrincipalCuit = principalCuit,
+                PuntoVenta = pointOfSale,
                 CertificatePath = certificatePath,
                 CertificatePassword = certificatePassword,
                 WsaaUrl = wsaa,

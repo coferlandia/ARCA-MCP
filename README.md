@@ -13,6 +13,8 @@ Copyright (c) 2025 Diego Cofré Sistemas www.diegocofre.com.ar
 
 Para instalar y consumir `dcArca.McpServer` con API keys, scopes, numeración segura, reconciliación e integración con creadorpdf, ver **[Documentación completa del MCP](docs/MCP_SERVER.md)**.
 
+En MCP V2 las identidades fiscales están separadas explícitamente: `PrincipalCuit` es el titular server-owned de la credencial técnica y Padrón lo envía como `cuitRepresentada`; `RepresentedCuit` es el CUIT del tenant emisor y WSFE lo envía como `Auth.Cuit`. La consulta administrativa `consultar_padron_administrativo(contextId, cuit)` usa el CUIT solicitado sólo como `idPersona`, requiere `arca:administrar` + grant administrativo del contexto y no necesita una representación WSFE ni punto de venta.
+
 ## � Quick Start (5 minutos)
 
 ### 1. Requisitos previos
@@ -31,6 +33,7 @@ Copia `appsettings.example.json` a `appsettings.json` y edita:
 {
   "dcArcaConfig": {
     "Cuit": "TU_CUIT",
+    "PrincipalCuit": "TU_CUIT",
     "CertificatePath": "C:\\Ruta\\Certificado.pfx",
     "CertificatePassword": "TU_PASSWORD" /* Puede dejarse vacío si el .pfx no tiene contraseña */,
     "WsaaUrl": "https://wsaahomo.afip.gov.ar/ws/services/LoginCms",
@@ -167,12 +170,15 @@ openssl pkcs12 -export -nodes -out certificado.pfx -inkey certificado.key -in ce
 
 ## ⚙️ Configuración
 
+Para consumidores directos/legacy de Core y CLI, `Cuit` conserva compatibilidad como CUIT representado de WSFE y `PrincipalCuit` identifica al titular técnico usado por Padrón. En la configuración MCP V2, en cambio, `PrincipalCuit` pertenece a `FiscalCredentials:{credentialId}` y el `RepresentedCuit` proviene de la representación autorizada.
+
 Edita `appsettings.json`:
 
 ```json
 {
   "dcArcaConfig": {
     "Cuit": "20123456789",
+    "PrincipalCuit": "20123456789",
     "CertificatePath": "C:\\Certificados\\certificado.pfx",
     "CertificatePassword": "password123",
     "WsaaUrl": "https://wsaahomo.afip.gov.ar/ws/services/LoginCms",
@@ -239,6 +245,7 @@ Modificá `appsettings.json` con las URLs de producción y la ruta al nuevo cert
 {
   "dcArcaConfig": {
     "Cuit": "TU_CUIT",
+    "PrincipalCuit": "TU_CUIT",
     "CertificatePath": "C:\\Certificados\\certificado_prod.pfx",
     "CertificatePassword": "TU_PASSWORD_SEGURO",
     "WsaaUrl": "https://wsaa.afip.gov.ar/ws/services/LoginCms",

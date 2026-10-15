@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "repository": "coferlandia/ARCA-MCP",
+  "documentation": [
+    "AGENTS.md",
+    ".github/workflows/ci.yml"
+  ],
+  "working_directory": ".",
+  "commands": [
+    {
+      "id": "restore",
+      "command": "dotnet restore dcArca.Core.Tests/dcArca.Core.Tests.csproj && dotnet restore dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj && dotnet restore dcArca.Cli.Tests/dcArca.Cli.Tests.csproj",
+      "purpose": "Restore the test projects affected by fiscal identity and configuration changes"
+    },
+    {
+      "id": "build",
+      "command": "dotnet build dcArca.Core.Tests/dcArca.Core.Tests.csproj --configuration Release --no-restore && dotnet build dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj --configuration Release --no-restore && dotnet build dcArca.Cli.Tests/dcArca.Cli.Tests.csproj --configuration Release --no-restore",
+      "purpose": "Build Core, MCP and CLI test surfaces"
+    },
+    {
+      "id": "test",
+      "command": "dotnet test dcArca.Core.Tests/dcArca.Core.Tests.csproj --configuration Release --no-build && dotnet test dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj --configuration Release --no-build && dotnet test dcArca.Cli.Tests/dcArca.Cli.Tests.csproj --configuration Release --no-build",
+      "purpose": "Run deterministic Core, MCP and CLI regression suites"
+    },
+    {
+      "id": "repository-hygiene",
+      "command": "git diff --check origin/main...HEAD && test -z \"$(git ls-files | grep -Ei '\\.(pfx|p12|p8|key|pem)$' || true)\"",
+      "purpose": "Reject whitespace errors and tracked certificate or private-key files"
+    }
+  ],
+  "required_services": [],
+  "environment": [],
+  "github": {
+    "submission": {
+      "mode": "existing-pr-events",
+      "workflow": ".github/workflows/coferlandia-development-validation.yml"
+    },
+    "candidate_binding": "pull-request-head",
+    "runner_labels": [
+      "ubuntu-latest"
+    ],
+    "shell": "bash",
+    "setup": [
+      {
+        "name": "Set up .NET",
+        "uses": "actions/setup-dotnet@v4",
+        "with": {
+          "dotnet-version": "10.0.x"
+        }
+      }
+    ],
+    "gate": {
+      "name": "Development Validation / Gate",
+      "allowed_conclusions": [
+        "success"
+      ]
+    }
+  },
+  "fingerprint": "27e1e13342e1f83378b05a68e86abad3749e907542965784492244395ade17e6"
+}
