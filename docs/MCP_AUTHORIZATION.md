@@ -6,9 +6,9 @@ ARCA-MCP autentica mediante `Authorization: Bearer sk-arca-...` y un hash persis
 
 1. Scope general de la key: `arca:consultar` (lectura, PDF, diagnóstico, reconciliación), `arca:facturar` (validar, emitir), o `arca:administrar` (provisionamiento, revocación y recuperación administrativa pre-submission).
 2. Grant explícito para el contexto y la operación: `operador-homo:consultar`, `operador-homo:facturar` o `operador-homo:administrar`.
-3. Representación `Active` registrada para ese `consumerId + contextId + representedCuit + pointOfSale`. Un grant de contexto no permite por implicancia todos los representados del mismo certificado.
+3. Para operaciones fiscales ligadas a tenant, representación `Active` registrada para ese `consumerId + contextId + representedCuit + pointOfSale`. Un grant de contexto no permite por implicancia todos los representados del mismo certificado. La excepción intencional es `consultar_padron_administrativo`: opera sobre la credencial técnica del contexto, exige scope+grant `administrar` y no requiere representación/PV.
 
-`arca:facturar` no implica `arca:consultar` ni `arca:administrar`. Las tools administrativas requieren scope administrativo distinto y verifican en el servidor su grant. Una key legacy sin `consumerId` es incompatible con V2 (`LEGACY_KEY_UNSUPPORTED_V2`) y debe reaprovisionarse.
+`arca:facturar` no implica `arca:consultar` ni `arca:administrar`. Las tools administrativas requieren scope administrativo distinto y verifican en el servidor su grant. `consultar_padron_administrativo(contextId, cuit)` sólo acepta el contexto y el CUIT objetivo; el `PrincipalCuit` que viaja como `cuitRepresentada` a Padrón se resuelve server-side desde la credencial y no puede ser sobrescrito por el caller. Una key legacy sin `consumerId` es incompatible con V2 (`LEGACY_KEY_UNSUPPORTED_V2`) y debe reaprovisionarse.
 
 Las keys se guardan con hash SHA-256 (no el secreto en claro) en `ApiKeys:Directory/api_keys.json`. Se crean/revocan con `dcArca.Cli` o `scripts/api-keys/manage-key.sh` sin editar el JSON a mano. Los operadores deben proteger el acceso local al CLI y a los stores. Nunca incluir secrets en Issues o PR.
 

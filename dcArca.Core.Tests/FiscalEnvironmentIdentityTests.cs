@@ -120,6 +120,7 @@ public sealed class FiscalEnvironmentIdentityTests
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["FiscalCredentials:cred-a:CertificatePath"] = "cred-a.pfx",
+                ["FiscalCredentials:cred-a:PrincipalCuit"] = "20123456786",
                 ["FiscalEnvironments:homologacion:WsaaUrl"] = "https://homo.example/wsaa",
                 ["FiscalEnvironments:homologacion:WsfeUrl"] = "https://homo.example/wsfe",
                 ["FiscalEnvironments:homologacion:PadronUrl"] = "https://homo.example/padron"

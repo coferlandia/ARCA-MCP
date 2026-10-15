@@ -84,6 +84,7 @@ builder.Services.AddSingleton<IFiscalAssignmentAuthorizationValidator>(sp => new
     sp.GetRequiredService<IHttpClientFactory>()));
 builder.Services.AddSingleton<FiscalRepresentationLifecyclePolicy>();
 builder.Services.AddSingleton<FiscalRepresentationAdministration>();
+builder.Services.AddSingleton<FiscalPadronAdministration>();
 builder.Services.AddSingleton<PreSubmissionAbandonmentService>();
 builder.Services.AddSingleton<FiscalOperationAdministration>();
 builder.Services.AddSingleton<McpOperationContractService>();
@@ -102,6 +103,10 @@ builder.Services.AddSingleton<IPdfDocumentRenderer>(sp =>
 builder.Services.AddSingleton<IApiKeyStore>(_ => new FileSystemApiKeyStore(apiKeysDirectory));
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHttpClient(nameof(FiscalAssignmentAuthorizationValidator), client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(20);
+});
+builder.Services.AddHttpClient(nameof(FiscalPadronAdministration), client =>
 {
     client.Timeout = TimeSpan.FromSeconds(20);
 });

@@ -1,6 +1,6 @@
 # Configuración y operabilidad de dcArca.McpServer
 
-> **V2 (#62) prevalece sobre ejemplos históricos de contexto único:** `FiscalContexts:Directory/fiscal-catalog-v2.json`, `FiscalCredentials:{credentialId}:CertificatePath/CertificatePassword` y `FiscalEnvironments:{environment}:WsaaUrl/WsfeUrl/PadronUrl` son configuración autoritativa. `dcArcaConfig:Cuit`, `dcArcaConfig:PuntoVenta` y `FiscalContext:ConsumerId` NO seleccionan el emisor MCP: éste procede del grant y de la representación activa. La instalación V1 necesita cutover controlado; no hay bootstrap automático.
+> **V2 (#62) prevalece sobre ejemplos históricos de contexto único:** `FiscalContexts:Directory/fiscal-catalog-v2.json`, `FiscalCredentials:{credentialId}:CertificatePath/CertificatePassword/PrincipalCuit` y `FiscalEnvironments:{environment}:WsaaUrl/WsfeUrl/PadronUrl` son configuración autoritativa. `dcArcaConfig:Cuit`, `dcArcaConfig:PuntoVenta` y `FiscalContext:ConsumerId` NO seleccionan el emisor MCP: éste procede del grant y de la representación activa. La instalación V1 necesita cutover controlado; no hay bootstrap automático.
 
 
 ## Health
@@ -64,9 +64,12 @@ Cada credencial nueva se identifica por un id opaco server-owned:
 ```text
 FiscalCredentials__empresa-2026__CertificatePath=/run/secrets/empresa-2026.pfx
 FiscalCredentials__empresa-2026__CertificatePassword=...
+FiscalCredentials__empresa-2026__PrincipalCuit=20XXXXXXXXX
 ```
 
-El `credentialId` almacenado en el contexto sería `empresa-2026`. El caller MCP no puede enviar ni modificar esos valores.
+El `credentialId` almacenado en el contexto sería `empresa-2026`. `PrincipalCuit` identifica al titular técnico de esa credencial y es obligatorio en V2: debe contener exactamente 11 dígitos. Se usa como `cuitRepresentada` de Padrón; no es el CUIT representado por WSFE. El caller MCP no puede enviar ni modificar estos valores.
+
+`/health/ready` falla cerrado con `CREDENTIAL_PRINCIPAL_CUIT_REQUIRED` o `CREDENTIAL_PRINCIPAL_CUIT_INVALID` cuando una assignment activa no cumple este contrato. No existe fallback V2 desde el CUIT de una representación.
 
 El certificado y sus secretos deben provenir del host/secret manager y no del repositorio.
 
@@ -96,7 +99,7 @@ Una credencial candidata debe validarse antes de activarse. La validación no em
 
 La activación falla si no existe evidencia validada. Una falla de red, WSAA, WSFE, autorización o PV deja la asignación sin verificar.
 
-El cache WSAA se namespacia por ambiente + `credentialId` + servicio para impedir que dos certificados distintos que representen el mismo CUIT compartan token/sign.
+El cache WSAA se namespacia por ambiente + `credentialId` + servicio. Para Padrón no incluye el CUIT representado de un tenant: dos representaciones que usan la misma credencial técnica comparten el namespace de autenticación de Padrón, mientras ambientes, credenciales o servicios diferentes permanecen aislados.
 
 ## PDF
 

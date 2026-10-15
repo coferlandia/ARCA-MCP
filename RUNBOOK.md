@@ -83,11 +83,13 @@ La configuración fiscal vigente es V2:
   "FiscalCredentials": {
     "cadencia-homo": {
       "CertificatePath": "/certs/certificado.pfx",
-      "CertificatePassword": "<valor-privado>"
+      "CertificatePassword": "<valor-privado>",
+      "PrincipalCuit": "<CUIT_PRINCIPAL_11_DIGITOS>"
     },
     "cadencia-prod": {
       "CertificatePath": "/certs/diegocofre-prod.pfx",
-      "CertificatePassword": "<valor-privado>"
+      "CertificatePassword": "<valor-privado>",
+      "PrincipalCuit": "<CUIT_PRINCIPAL_11_DIGITOS>"
     }
   },
   "FiscalEnvironments": {
@@ -162,11 +164,24 @@ docker exec dcarca-mcpserver curl -fsS http://127.0.0.1:8080/health/live
 docker exec dcarca-mcpserver curl -fsS http://127.0.0.1:8080/health/ready
 ```
 
-Esperado: contenedor `healthy`, `{"status":"alive"}`, `{"status":"ready"}`. `/health/ready` valida exclusivamente estructura local: recovery gate, catálogo V2, environments canónicos/configurados y referencias de credenciales activas. No llama ARCA ni abre el PFX; por lo tanto un 200 no demuestra autorización WSAA/WSFE ni habilitación del PV. Un catálogo vacío pero provisionable puede estar ready. Si devuelve 503, corregir el código seguro informado antes de habilitar nuevas emisiones.
+Esperado: contenedor `healthy`, `{"status":"alive"}`, `{"status":"ready"}`. `/health/ready` valida exclusivamente estructura local: recovery gate, catálogo V2, environments canónicos/configurados, referencias de credenciales activas y un `PrincipalCuit` de exactamente 11 dígitos por credencial activa. Un valor ausente o inválido devuelve respectivamente `CREDENTIAL_PRINCIPAL_CUIT_REQUIRED` o `CREDENTIAL_PRINCIPAL_CUIT_INVALID`. No llama ARCA ni abre el PFX; por lo tanto un 200 no demuestra autorización WSAA/WSFE ni habilitación del PV. Un catálogo vacío pero provisionable puede estar ready. Si devuelve 503, corregir el código seguro informado antes de habilitar nuevas emisiones.
 
 La advertencia sobre Docker Bake/buildx no fue bloqueante. Los avisos ASP.NET DataProtection observados no bloquearon el arranque y deberán evaluarse si el proceso necesita persistir esas claves.
 
 No usar `docker compose down -v`. No recrear con `docker run` manual: se perderían los montajes y la definición real de redes/Traefik. Para rollback binario revisar compatibilidad de schema; no restaurar `/data` antiguo automáticamente. El lector actual soporta operaciones v2 legacy sin provenance y v3 con provenance; las operaciones nuevas o reescritas se escriben en schema v4 para preservar también el cierre `AbandonedBeforeSubmission`. Un binario pre-v4 debe fallar cerrado al encontrarlas; no bajar manualmente `SchemaVersion`, quitar provenance ni borrar auditoría/estado de abandono para forzar compatibilidad.
+
+## 5.1. Rollout de PrincipalCuit y smoke de Padrón administrativo
+
+Antes de desplegar una versión que incluya #96, agregar en la configuración privada del host —nunca en Git— `FiscalCredentials__<credentialId>__PrincipalCuit=<CUIT_PRINCIPAL_11_DIGITOS>` para cada credencial activa de homologación y producción. El valor identifica al titular técnico de la credencial; no es el CUIT representado por un tenant.
+
+Después del deploy:
+
+1. confirmar `/health/ready = 200`;
+2. con una key que tenga `arca:administrar` y grant `<contextId>:administrar`, ejecutar `consultar_padron_administrativo` contra un CUIT objetivo conocido;
+3. comprobar que la consulta funciona incluso si ese CUIT objetivo no tiene representación/PV registrados;
+4. verificar no-regresión WSFE sobre una representación conocida: en homologación puede usarse consulta o emisión controlada; en producción usar por defecto una consulta de comprobante/PV existente y solicitar un CAE nuevo sólo con aprobación explícita. En ambos casos confirmar que conserva su `representedCuit`/PV habitual.
+
+No exponer `PrincipalCuit`, rutas de PFX, passwords, token/sign ni payloads completos de configuración en Issues o PR. Si cualquiera de estos smokes falla, mantener el issue abierto y revertir/configurar antes de habilitar nuevas operaciones.
 
 ## 6. Provisionamiento V2 (homologación actual)
 
