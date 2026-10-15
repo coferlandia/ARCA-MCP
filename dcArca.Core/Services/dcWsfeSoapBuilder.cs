@@ -167,7 +167,7 @@ public sealed class dcWsfeSoapBuilder
         return "            <ar:Auth>\n" +
                $"                <ar:Token>{token}</ar:Token>\n" +
                $"                <ar:Sign>{sign}</ar:Sign>\n" +
-               $"                <ar:Cuit>{_config.Cuit}</ar:Cuit>\n" +
+               $"                <ar:Cuit>{_config.RepresentedCuit}</ar:Cuit>\n" +
                "            </ar:Auth>\n";
     }
 
