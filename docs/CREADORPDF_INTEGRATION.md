@@ -46,7 +46,7 @@ La configuración operativa recomendada para el template actual es:
 
 ```text
 Pdf__TemplateKey=factura-ar
-Pdf__TemplateVersion=5
+Pdf__TemplateVersion=6
 ```
 
 `templateData` sigue siendo input del caller y no participa de esta selección.
@@ -136,7 +136,7 @@ Formato actual:
 - prioriza en su salida `TEMPLATE_KEY`, `TEMPLATE_VERSION`, `TEMPLATE_OWNER` y `TEMPLATE_STATUS`;
 - el ID físico se imprime únicamente como diagnóstico y no debe copiarse a SecretarIA.
 
-La versión `factura-ar:4` mantiene Factura A/B/C y agrega identificación visual explícita para Nota de Crédito A/B/C (tipos 3/8/13). La versión `factura-ar:5` reproduce el layout fiel de ARCA (franja de copia, encabezado con letra/COD, período de servicios, tabla de 8 columnas, recuadro de totales y footer con QR oficial) y genera siempre tres páginas por comprobante: ORIGINAL, DUPLICADO y TRIPLICADO. Las versiones `factura-ar:3` y `factura-ar:4` permanecen disponibles e inmutables para snapshots históricos que las referencian.
+La versión `factura-ar:4` mantiene Factura A/B/C y agrega identificación visual explícita para Nota de Crédito A/B/C (tipos 3/8/13). La versión `factura-ar:5` reproduce el layout fiel de ARCA y queda inmutable. La versión `factura-ar:6` conserva ese layout y corrige el contrato semántico de presentación definido en #97. Todas las versiones anteriores permanecen disponibles e inmutables para snapshots históricos que las referencian.
 
 Una versión publicada es inmutable:
 
@@ -164,7 +164,7 @@ Se configura como:
 Pdf__BaseUrl=http://creadorpdf:8080
 Pdf__ApiKey=...
 Pdf__TemplateKey=factura-ar
-Pdf__TemplateVersion=5
+Pdf__TemplateVersion=6
 ```
 
 ### Deploy/bootstrap
