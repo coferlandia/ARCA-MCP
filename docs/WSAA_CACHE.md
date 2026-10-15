@@ -62,3 +62,10 @@ Versiones anteriores de dcARCA escribían automáticamente un JSON bajo el direc
 - Si los tokens requieren protección adicional en reposo: implemente/injecte un `IWsaaTokenStore` protegido por el host.
 
 Los archivos de cache históricos pueden eliminarse una vez confirmado que ya no son necesarios.
+
+
+## Namespace en MCP V2
+
+En `dcArca.McpServer`, la clave de cache WSAA no se deriva del CUIT representado por un tenant. El namespace es `{environment}:{credentialId}_{service}`.
+
+Para Padrón esto implica que dos tenants o representaciones que usan la misma credencial técnica comparten el mismo namespace `ws_sr_constancia_inscripcion`; la consulta conserva como `cuitRepresentada` el `PrincipalCuit` server-owned y el CUIT solicitado viaja sólo como `idPersona`. Cambiar de ambiente, credencial o servicio produce un namespace distinto.
