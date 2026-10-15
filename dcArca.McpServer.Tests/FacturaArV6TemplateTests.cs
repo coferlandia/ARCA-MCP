@@ -120,7 +120,7 @@ public class FacturaArV6TemplateTests
         var template = LoadTemplate();
 
         Assert.Contains("{% macro dec2(value) -%}", template);
-        Assert.Contains("(\"%.2f\"|format(value))|replace(\".\", \",")", template);
+        Assert.Contains("(\"%.2f\"|format(value))|replace(\".\", \",\")", template);
         Assert.Contains("{{ dec2(item.cantidad) }}", template);
         Assert.Contains("{{ dec2(item.precioUnitario) }}", template);
         Assert.Contains("{{ dec2(item.importe) }}", template);
