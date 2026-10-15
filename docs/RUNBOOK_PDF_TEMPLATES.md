@@ -863,10 +863,11 @@ Para desplegar #97:
 
 1. publicar `factura-ar:6` con el bootstrap idempotente de la sección 10;
 2. confirmar `owner=dcarca`, `version=6` y `status=published`;
-3. desplegar/reiniciar ARCA-MCP con el default runtime 6;
-4. regenerar un comprobante ya autorizado que fallaba con v5, sin reemitir CAE;
-5. verificar IIBB explícito/fallback, fecha de inicio opcional, unidad explícita/fallback y condición de venta explícita/fallback;
-6. conservar `factura-ar:5` publicado e intacto para referencias históricas.
+3. antes del restart, actualizar de forma durable el host: si el `.env` contiene `Pdf__TemplateVersion=5`, cambiarlo explícitamente a `Pdf__TemplateVersion=6`; un override persistido prevalece sobre el fallback del Compose;
+4. verificar con `docker compose --env-file .env -f deploy/cadencia/docker-compose.yml config` que el servicio efectivo recibe `Pdf__TemplateVersion: "6"`, y recién entonces desplegar/reiniciar ARCA-MCP;
+5. regenerar un comprobante ya autorizado que fallaba con v5, sin reemitir CAE;
+6. verificar IIBB explícito/fallback, fecha de inicio opcional, unidad explícita/fallback y condición de venta explícita/fallback;
+7. conservar `factura-ar:5` publicado e intacto para referencias históricas.
 
 ## 19. Checklist para publicar una versión nueva
 
