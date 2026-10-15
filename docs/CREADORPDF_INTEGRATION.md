@@ -301,10 +301,14 @@ Un template puede mostrar líneas monetarias provenientes de `items`, pero los t
 
 `factura-ar-v5.schema.json` amplía exclusivamente presentación respecto de `factura-ar:4`:
 
-- `emisor`: `razonSocial`, `domicilio`, `condicionIva`, `ingresosBrutos`, `fechaInicioActividades` (todos obligatorios como texto a mostrar).
-- `receptor`: `razonSocial` obligatorio, `domicilio` opcional.
-- `condicionVenta`: opcional en la raíz; si falta, el template oculta la línea sin dejar texto vacío.
-- `conceptos[]`: `descripcion`, `cantidad`, `unidadMedida`, `precioUnitario`, `importe` obligatorios; `codigo` opcional; `porcentajeBonificacion`/`importeBonificacion` opcionales con default visual `0,00` cuando están ausentes.
+- `emisor.razonSocial`, `emisor.domicilio` y `emisor.condicionIva` siguen siendo obligatorios.
+- `emisor.ingresosBrutos`: opcional (`string|null`). Si viene con valor se presenta exactamente ese valor; si falta o viene vacío, el template deriva sólo para presentación el CUIT fiscal `fiscal.emisorCuit` con formato `XX-XXXXXXXX-X` cuando tiene 11 dígitos. Si el valor fiscal no tiene 11 dígitos, se muestra sin reformatear; nunca se inventa ni se persiste un IIBB.
+- `emisor.fechaInicioActividades`: opcional (`string|null`). Sólo se muestra cuando existe un valor no vacío; ARCA-MCP no inventa esa fecha.
+- `receptor.razonSocial` es obligatorio y `receptor.domicilio` es opcional.
+- `condicionVenta`: opcional (`string|null`) en la raíz. El valor explícito gana; si falta o viene vacío, el fallback visual es `Contado`.
+- `conceptos[]`: `descripcion`, `cantidad`, `precioUnitario` e `importe` siguen siendo obligatorios; `unidadMedida` pasa a opcional (`string|null`) con fallback visual `unidades`; `codigo` es opcional; `porcentajeBonificacion`/`importeBonificacion` siguen siendo opcionales con default visual `0,00` cuando están ausentes.
+
+Estos fallbacks pertenecen exclusivamente a presentación y no modifican `templateData`, el snapshot fiscal ni la evidencia persistida.
 
 La condición frente al IVA del receptor, el tipo/número de documento, las fechas fiscales, los comprobantes/período asociados de una Nota de Crédito y el CAE/vencimiento se renderizan siempre desde `fiscal`, nunca desde `templateData`. El template numera punto de venta (5 dígitos) y comprobante (8 dígitos) con ceros a la izquierda como en ARCA.
 

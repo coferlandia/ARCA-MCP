@@ -63,8 +63,21 @@ table.detalle thead { display: table-header-group; }
       <div>Comp. Nro: {{ "%08d"|format(fiscal.numeroComprobante) }}</div>
       <div>Fecha de Emisión: {{ fiscal.fechaComprobante[6:8] }}/{{ fiscal.fechaComprobante[4:6] }}/{{ fiscal.fechaComprobante[0:4] }}</div>
       <div>CUIT: {{ fiscal.emisorCuit }}</div>
-      <div>Ingresos Brutos: {{ emisor.ingresosBrutos }}</div>
+      <div>Ingresos Brutos:
+        {% if emisor.ingresosBrutos is defined and emisor.ingresosBrutos %}
+          {{ emisor.ingresosBrutos }}
+        {% else %}
+          {% set emisor_cuit = "%s"|format(fiscal.emisorCuit) %}
+          {% if emisor_cuit|length == 11 %}
+            {{ emisor_cuit[0:2] }}-{{ emisor_cuit[2:10] }}-{{ emisor_cuit[10:11] }}
+          {% else %}
+            {{ fiscal.emisorCuit }}
+          {% endif %}
+        {% endif %}
+      </div>
+      {% if emisor.fechaInicioActividades is defined and emisor.fechaInicioActividades %}
       <div>Fecha de Inicio de Actividades: {{ emisor.fechaInicioActividades }}</div>
+      {% endif %}
     </div>
   </div>
 
@@ -110,7 +123,7 @@ table.detalle thead { display: table-header-group; }
       {%- endif %}
     </div>
     {% if receptor.domicilio is defined and receptor.domicilio %}<div>Domicilio: {{ receptor.domicilio }}</div>{% endif %}
-    {% if condicionVenta is defined and condicionVenta %}<div>Condición de venta: {{ condicionVenta }}</div>{% endif %}
+    <div>Condición de venta: {% if condicionVenta is defined and condicionVenta %}{{ condicionVenta }}{% else %}Contado{% endif %}</div>
   </div>
 
   <div class="detalle-area">
@@ -133,7 +146,7 @@ table.detalle thead { display: table-header-group; }
         <td>{% if item.codigo is defined and item.codigo %}{{ item.codigo }}{% endif %}</td>
         <td>{{ item.descripcion }}</td>
         <td class="num">{{ item.cantidad }}</td>
-        <td>{{ item.unidadMedida }}</td>
+        <td>{% if item.unidadMedida is defined and item.unidadMedida %}{{ item.unidadMedida }}{% else %}unidades{% endif %}</td>
         <td class="num">{{ item.precioUnitario }}</td>
         <td class="num">{% if item.porcentajeBonificacion is defined %}{{ item.porcentajeBonificacion }}{% else %}0,00{% endif %}</td>
         <td class="num">{% if item.importeBonificacion is defined %}{{ item.importeBonificacion }}{% else %}0,00{% endif %}</td>

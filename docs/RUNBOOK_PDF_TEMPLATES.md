@@ -829,6 +829,10 @@ El issue #28 formaliza esta política mediante referencia lógica y manifest de 
 
 El QR (`arcaQr.verificationUrl` / `arcaQr.imageDataUri`) es server-owned: lo construye `ArcaQrPayloadBuilder`/`ArcaQrImageGenerator` desde el `FiscalDocumentSnapshot`, nunca desde `templateData`. Ver `docs/CREADORPDF_INTEGRATION.md`.
 
+### Contrato de presentación de v5
+
+Para `factura-ar:5`, `razonSocial`, `domicilio` y `condicionIva` del emisor permanecen obligatorios. `ingresosBrutos` y `fechaInicioActividades` son opcionales/null; cuando falta IIBB se presenta el CUIT fiscal formateado si tiene 11 dígitos y cuando falta fecha de inicio se omite la línea. `conceptos[].unidadMedida` es opcional/null con fallback visual `unidades`, y `condicionVenta` es opcional/null con fallback visual `Contado`. Ninguno de estos fallbacks altera `templateData` ni se convierte en verdad fiscal server-owned.
+
 Publicar `factura-ar:5` sigue el mismo bootstrap idempotente de la sección 10 (el manifest ya declara la entrada `key=factura-ar, version=5`). Antes de migrar un consumidor a `templateVersion=5`:
 
 1. ejecutar el checklist de la sección 19 contra homologación;
