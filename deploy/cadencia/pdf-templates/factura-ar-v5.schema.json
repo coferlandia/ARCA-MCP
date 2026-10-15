@@ -1,69 +1,28 @@
 {
   "type": "object",
-  "required": [
-    "emisor",
-    "receptor",
-    "conceptos",
-    "fiscal"
-  ],
+  "required": ["emisor", "receptor", "conceptos", "fiscal"],
   "properties": {
     "emisor": {
       "type": "object",
-      "required": [
-        "razonSocial",
-        "domicilio",
-        "condicionIva"
-      ],
+      "required": ["razonSocial", "domicilio", "condicionIva", "ingresosBrutos", "fechaInicioActividades"],
       "properties": {
-        "razonSocial": {
-          "type": "string"
-        },
-        "domicilio": {
-          "type": "string"
-        },
-        "condicionIva": {
-          "type": "string"
-        },
-        "ingresosBrutos": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "fechaInicioActividades": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
+        "razonSocial": { "type": "string" },
+        "domicilio": { "type": "string" },
+        "condicionIva": { "type": "string" },
+        "ingresosBrutos": { "type": "string" },
+        "fechaInicioActividades": { "type": "string" }
       },
       "additionalProperties": true
     },
     "receptor": {
       "type": "object",
-      "required": [
-        "razonSocial"
-      ],
+      "required": ["razonSocial"],
       "properties": {
-        "razonSocial": {
-          "type": "string"
-        },
+        "razonSocial": { "type": "string" },
         "domicilio": {
           "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
+            { "type": "string" },
+            { "type": "null" }
           ]
         }
       },
@@ -71,63 +30,29 @@
     },
     "condicionVenta": {
       "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
+        { "type": "string" },
+        { "type": "null" }
       ]
     },
     "conceptos": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": [
-          "descripcion",
-          "cantidad",
-          "precioUnitario",
-          "importe"
-        ],
+        "required": ["descripcion", "cantidad", "unidadMedida", "precioUnitario", "importe"],
         "properties": {
           "codigo": {
             "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+              { "type": "string" },
+              { "type": "null" }
             ]
           },
-          "descripcion": {
-            "type": "string"
-          },
-          "cantidad": {
-            "type": "number"
-          },
-          "unidadMedida": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "precioUnitario": {
-            "type": "number"
-          },
-          "porcentajeBonificacion": {
-            "type": "number"
-          },
-          "importeBonificacion": {
-            "type": "number"
-          },
-          "importe": {
-            "type": "number"
-          }
+          "descripcion": { "type": "string" },
+          "cantidad": { "type": "number" },
+          "unidadMedida": { "type": "string" },
+          "precioUnitario": { "type": "number" },
+          "porcentajeBonificacion": { "type": "number" },
+          "importeBonificacion": { "type": "number" },
+          "importe": { "type": "number" }
         },
         "additionalProperties": true
       }
@@ -152,17 +77,10 @@
     },
     "arcaQr": {
       "type": "object",
-      "required": [
-        "verificationUrl",
-        "imageDataUri"
-      ],
+      "required": ["verificationUrl", "imageDataUri"],
       "properties": {
-        "verificationUrl": {
-          "type": "string"
-        },
-        "imageDataUri": {
-          "type": "string"
-        }
+        "verificationUrl": { "type": "string" },
+        "imageDataUri": { "type": "string" }
       },
       "additionalProperties": true
     }
