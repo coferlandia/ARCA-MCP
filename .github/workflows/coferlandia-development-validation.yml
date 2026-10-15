@@ -1,0 +1,61 @@
+name: Coferlandia Development Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, converted_to_draft]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coferlandia-development-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validation:
+    name: "Development Validation / Gate"
+    if: github.event.pull_request.draft == true
+    runs-on: ["ubuntu-latest"]
+    steps:
+      - name: Check out exact PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact candidate identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          actual="$(git rev-parse HEAD)"
+          test "$actual" = "$EXPECTED_SHA"
+      - name: Record Development contract
+        shell: bash
+        run: |
+          echo "Development contract fingerprint: 27e1e13342e1f83378b05a68e86abad3749e907542965784492244395ade17e6" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "Candidate SHA: ${{ github.event.pull_request.head.sha }}" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: "Set up .NET"
+        uses: "actions/setup-dotnet@v4"
+        with:
+          dotnet-version: "10.0.x"
+      - name: "Restore the test projects affected by fiscal identity and configuration changes"
+        shell: bash
+        working-directory: "."
+        run: |
+          dotnet restore dcArca.Core.Tests/dcArca.Core.Tests.csproj && dotnet restore dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj && dotnet restore dcArca.Cli.Tests/dcArca.Cli.Tests.csproj
+      - name: "Build Core, MCP and CLI test surfaces"
+        shell: bash
+        working-directory: "."
+        run: |
+          dotnet build dcArca.Core.Tests/dcArca.Core.Tests.csproj --configuration Release --no-restore && dotnet build dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj --configuration Release --no-restore && dotnet build dcArca.Cli.Tests/dcArca.Cli.Tests.csproj --configuration Release --no-restore
+      - name: "Run deterministic Core, MCP and CLI regression suites"
+        shell: bash
+        working-directory: "."
+        run: |
+          dotnet test dcArca.Core.Tests/dcArca.Core.Tests.csproj --configuration Release --no-build && dotnet test dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj --configuration Release --no-build && dotnet test dcArca.Cli.Tests/dcArca.Cli.Tests.csproj --configuration Release --no-build
+      - name: "Reject whitespace errors and tracked certificate or private-key files"
+        shell: bash
+        working-directory: "."
+        run: |
+          git diff --check origin/main...HEAD && test -z "$(git ls-files | grep -Ei '\.(pfx|p12|p8|key|pem)$' || true)"
