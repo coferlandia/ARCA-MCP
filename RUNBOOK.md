@@ -179,7 +179,7 @@ Después del deploy:
 1. confirmar `/health/ready = 200`;
 2. con una key que tenga `arca:administrar` y grant `<contextId>:administrar`, ejecutar `consultar_padron_administrativo` contra un CUIT objetivo conocido;
 3. comprobar que la consulta funciona incluso si ese CUIT objetivo no tiene representación/PV registrados;
-4. ejecutar una consulta/emisión WSFE de una representación conocida y verificar que conserva su `representedCuit`/PV habitual.
+4. verificar no-regresión WSFE sobre una representación conocida: en homologación puede usarse consulta o emisión controlada; en producción usar por defecto una consulta de comprobante/PV existente y solicitar un CAE nuevo sólo con aprobación explícita. En ambos casos confirmar que conserva su `representedCuit`/PV habitual.
 
 No exponer `PrincipalCuit`, rutas de PFX, passwords, token/sign ni payloads completos de configuración en Issues o PR. Si cualquiera de estos smokes falla, mantener el issue abierto y revertir/configurar antes de habilitar nuevas operaciones.
 
