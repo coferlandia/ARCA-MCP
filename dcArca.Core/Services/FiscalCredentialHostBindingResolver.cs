@@ -75,7 +75,38 @@ public sealed class FiscalCredentialHostBindingResolver
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(assignment);
 
-        var canonicalEnvironment = FiscalEnvironmentId.RequireCanonical(context.Environment);
+        return ResolveCore(
+            context.Environment,
+            context.RepresentedCuit.ToString(),
+            context.PointOfSale,
+            assignment);
+    }
+
+    /// <summary>
+    /// Resolves a technical credential for operations that are not bound to a represented
+    /// taxpayer or point of sale, such as administrative Padrón queries.
+    /// </summary>
+    public FiscalCredentialHostBinding Resolve(
+        FiscalTechnicalContextRecord context,
+        CredentialAssignmentRecord assignment)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(assignment);
+
+        return ResolveCore(
+            context.Environment,
+            representedCuit: string.Empty,
+            pointOfSale: 0,
+            assignment);
+    }
+
+    private FiscalCredentialHostBinding ResolveCore(
+        string environmentId,
+        string representedCuit,
+        int pointOfSale,
+        CredentialAssignmentRecord assignment)
+    {
+        var canonicalEnvironment = FiscalEnvironmentId.RequireCanonical(environmentId);
         var credential = _configuration.GetSection($"FiscalCredentials:{assignment.CredentialId}");
         var certificatePath = credential["CertificatePath"]?.Trim();
         var certificatePassword = credential["CertificatePassword"] ?? string.Empty;
@@ -124,9 +155,9 @@ public sealed class FiscalCredentialHostBindingResolver
             new dcArcaConfig
             {
                 Environment = canonicalEnvironment,
-                RepresentedCuit = context.RepresentedCuit.ToString(),
+                RepresentedCuit = representedCuit,
                 PrincipalCuit = principalCuit,
-                PuntoVenta = context.PointOfSale,
+                PuntoVenta = pointOfSale,
                 CertificatePath = certificatePath,
                 CertificatePassword = certificatePassword,
                 WsaaUrl = wsaa,
