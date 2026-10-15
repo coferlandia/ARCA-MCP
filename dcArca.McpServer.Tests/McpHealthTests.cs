@@ -252,6 +252,75 @@ public class McpHealthTests : IClassFixture<WebApplicationFactory<Program>>, IDi
     }
 
     [Fact]
+    public async Task AssignmentActivoSinPrincipalCuit_Returns503()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemFiscalTechnicalContextStore(temp.Path);
+        await store.AddContextAsync(new FiscalTechnicalContextRecord(
+            "ctx-homo",
+            "homologacion",
+            FiscalContextOperationalState.Disabled,
+            1,
+            []));
+        await store.AddCandidateAssignmentAsync("ctx-homo", "rev-1", "cred-a", "setup");
+        await store.MarkAssignmentValidatedAsync("ctx-homo", "rev-1", "validated", "setup");
+        await store.ActivateAssignmentAsync("ctx-homo", "rev-1", "setup");
+        await store.SetContextStateAsync("ctx-homo", FiscalContextOperationalState.Active, "setup");
+
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("FiscalContexts:Directory", temp.Path);
+            builder.UseSetting("FiscalEnvironments:homologacion:WsaaUrl", "https://wsaa.example.invalid");
+            builder.UseSetting("FiscalEnvironments:homologacion:WsfeUrl", "https://wsfe.example.invalid");
+            builder.UseSetting("FiscalEnvironments:homologacion:PadronUrl", "https://padron.example.invalid");
+            builder.UseSetting("FiscalCredentials:cred-a:CertificatePath", "never-opened-placeholder.pfx");
+        });
+        var client = factory.CreateClient();
+
+        var ready = await client.GetAsync("/health/ready");
+        var body = await ready.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
+        Assert.Contains("CREDENTIAL_PRINCIPAL_CUIT_REQUIRED", body);
+        Assert.DoesNotContain("cred-a", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AssignmentActivoConPrincipalCuitInvalido_Returns503()
+    {
+        using var temp = new TempDirectory();
+        var store = new FileSystemFiscalTechnicalContextStore(temp.Path);
+        await store.AddContextAsync(new FiscalTechnicalContextRecord(
+            "ctx-homo",
+            "homologacion",
+            FiscalContextOperationalState.Disabled,
+            1,
+            []));
+        await store.AddCandidateAssignmentAsync("ctx-homo", "rev-1", "cred-a", "setup");
+        await store.MarkAssignmentValidatedAsync("ctx-homo", "rev-1", "validated", "setup");
+        await store.ActivateAssignmentAsync("ctx-homo", "rev-1", "setup");
+        await store.SetContextStateAsync("ctx-homo", FiscalContextOperationalState.Active, "setup");
+
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("FiscalContexts:Directory", temp.Path);
+            builder.UseSetting("FiscalEnvironments:homologacion:WsaaUrl", "https://wsaa.example.invalid");
+            builder.UseSetting("FiscalEnvironments:homologacion:WsfeUrl", "https://wsfe.example.invalid");
+            builder.UseSetting("FiscalEnvironments:homologacion:PadronUrl", "https://padron.example.invalid");
+            builder.UseSetting("FiscalCredentials:cred-a:CertificatePath", "never-opened-placeholder.pfx");
+            builder.UseSetting("FiscalCredentials:cred-a:PrincipalCuit", "20A23456789");
+        });
+        var client = factory.CreateClient();
+
+        var ready = await client.GetAsync("/health/ready");
+        var body = await ready.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, ready.StatusCode);
+        Assert.Contains("CREDENTIAL_PRINCIPAL_CUIT_INVALID", body);
+        Assert.DoesNotContain("20A23456789", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ConfigLocalValida_ReadySinConectividadArca()
     {
         using var temp = new TempDirectory();
