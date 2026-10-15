@@ -829,10 +829,6 @@ El issue #28 formaliza esta política mediante referencia lógica y manifest de 
 
 El QR (`arcaQr.verificationUrl` / `arcaQr.imageDataUri`) es server-owned: lo construye `ArcaQrPayloadBuilder`/`ArcaQrImageGenerator` desde el `FiscalDocumentSnapshot`, nunca desde `templateData`. Ver `docs/CREADORPDF_INTEGRATION.md`.
 
-### Contrato de presentación de v5
-
-Para `factura-ar:5`, `razonSocial`, `domicilio` y `condicionIva` del emisor permanecen obligatorios. `ingresosBrutos` y `fechaInicioActividades` son opcionales/null; cuando falta IIBB se presenta el CUIT fiscal formateado si tiene 11 dígitos y cuando falta fecha de inicio se omite la línea. `conceptos[].unidadMedida` es opcional/null con fallback visual `unidades`, y `condicionVenta` es opcional/null con fallback visual `Contado`. Ninguno de estos fallbacks altera `templateData` ni se convierte en verdad fiscal server-owned.
-
 Publicar `factura-ar:5` sigue el mismo bootstrap idempotente de la sección 10 (el manifest ya declara la entrada `key=factura-ar, version=5`). Antes de migrar un consumidor a `templateVersion=5`:
 
 1. ejecutar el checklist de la sección 19 contra homologación;
@@ -847,6 +843,30 @@ El template se validó con un render real usando el mismo stack que `creadorpdf`
 **Verificación de extremo a extremo realizada durante #86:** `enerone/creadorpdf` tiene dos ramas relevantes: `creadorpdf-v1-impl` (sólo el registro de templates embebidos en código, sin API administrado) y `main` (con la "internal template platform": `POST /v1/templates`, `/v1/templates/{id}/publish`, `/v1/templates/managed`, `/v1/admin/api-keys`, render con `SandboxedEnvironment(undefined=StrictUndefined, autoescape=True)` + validación JSON Schema Draft 2020-12). `main` coincide exactamente con lo que documenta esta sección y con lo que esperan `CreadorPdfTemplateResolver`/`PdfClient`. Se corrió `main` localmente (mismas versiones de Jinja2/WeasyPrint/pydyf que usa el servicio) y se ejecutó el flujo real completo: crear credencial admin → `create-key` scope `templates:write/publish/read/documents:render` → `POST /v1/templates` con el HTML/schema reales de `factura-ar:5` → `POST /.../publish` → `GET /v1/templates/managed` → `POST /v1/documents` con el mismo payload que arma `PdfDocumentRenderer` (bloque `fiscal` + `arcaQr`). Resultado: 201/200 en cada paso y un PDF de 3 páginas válido. Si el `creadorpdf` desplegado en Cadencia todavía está en `creadorpdf-v1-impl`, actualizarlo a `main` antes de bootstrapear `factura-ar:5`.
 
 Durante esa verificación se encontró un bug real en `creadorpdf` `main` (no en ARCA-MCP): `app/dynamic_render.py` bloqueaba en su `url_fetcher` **cualquier** URL, incluidas las `data:` que no implican red ni filesystem, por lo que el QR (y cualquier imagen embebida en base64) quedaba como texto alternativo en vez de renderizarse. Se corrigió y pusheó a `enerone/creadorpdf` `main` en el commit `5c4a506` (permite `data:`, sigue bloqueando `http(s)/file/ftp` en ese path, igual que ya hacía `app/weasyprint_fetcher.py` para el template built-in). Verificar que el `creadorpdf` desplegado en Cadencia incluya ese commit antes de dar por buena la visualización del QR en `factura-ar:5`.
+
+## 18.2 `factura-ar:6` — corrección contractual de presentación (#97)
+
+El incidente de #97 se observó con `factura-ar:5` ya publicada. Como la identidad lógica `key+version` es inmutable, **v5 no se sobrescribe**: el contrato corregido se publica como `factura-ar:6`.
+
+v6 conserva el layout de v5 salvo los fallbacks semánticos siguientes:
+
+- `emisor.ingresosBrutos` es opcional/null; el valor explícito gana y, si falta, se muestra `fiscal.emisorCuit` formateado `XX-XXXXXXXX-X` cuando tiene 11 dígitos, o crudo en caso contrario.
+- `emisor.fechaInicioActividades` es opcional/null y la línea se omite si no existe.
+- `conceptos[].unidadMedida` es opcional/null con fallback visual `unidades`.
+- `condicionVenta` es opcional/null con fallback visual `Contado`.
+- `emisor.condicionIva`, los datos base del emisor/receptor y los importes comerciales requeridos conservan su obligatoriedad.
+- `fiscal` y `arcaQr` siguen siendo server-owned; no cambia `FiscalDocumentSnapshotContract.Version`.
+
+El manifest declara `factura-ar:6` y el default runtime pasa a `Pdf__TemplateVersion=6`. Los snapshots que ya referencian versiones anteriores continúan resolviendo su referencia histórica; los callers que envían un par explícito `templateId/templateVersion` conservan ese override.
+
+Para desplegar #97:
+
+1. publicar `factura-ar:6` con el bootstrap idempotente de la sección 10;
+2. confirmar `owner=dcarca`, `version=6` y `status=published`;
+3. desplegar/reiniciar ARCA-MCP con el default runtime 6;
+4. regenerar un comprobante ya autorizado que fallaba con v5, sin reemitir CAE;
+5. verificar IIBB explícito/fallback, fecha de inicio opcional, unidad explícita/fallback y condición de venta explícita/fallback;
+6. conservar `factura-ar:5` publicado e intacto para referencias históricas.
 
 ## 19. Checklist para publicar una versión nueva
 
