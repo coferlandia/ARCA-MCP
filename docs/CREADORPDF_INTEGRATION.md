@@ -31,7 +31,27 @@ Por compatibilidad del schema MCP actual, el parámetro público continúa llam�
 }
 ```
 
-`PdfTemplateReference.Key` y `Version` representan esa identidad lógica. ARCA-MCP resuelve internamente:
+`PdfTemplateReference.Key` y `Version` representan esa identidad lógica.
+
+### Default runtime y override del caller
+
+Las tools `emitir_comprobante_con_pdf` y `generar_pdf_comprobante` comparten una única resolución de referencia efectiva:
+
+- `templateId=null` y `templateVersion=null` (o ambos vacíos) usan `Pdf:TemplateKey` + `Pdf:TemplateVersion`;
+- ambos valores informados constituyen un override explícito y no dependen del default runtime;
+- un par parcial falla con `PDF_TEMPLATE_REFERENCE_INVALID`;
+- si el caller necesita el default y la configuración está incompleta, falla con `PDF_TEMPLATE_DEFAULT_NOT_CONFIGURED`.
+
+La configuración operativa recomendada para el template actual es:
+
+```text
+Pdf__TemplateKey=factura-ar
+Pdf__TemplateVersion=5
+```
+
+`templateData` sigue siendo input del caller y no participa de esta selección.
+
+ARCA-MCP resuelve internamente:
 
 ```text
 factura-ar:3
@@ -51,15 +71,9 @@ El owner nunca es input del caller. La visibilidad queda determinada por la API 
 
 Durante la migración se acepta `templateId="tpl_..."` como pass-through explícito. Ese modo existe sólo para consumidores legacy y está deprecated.
 
-Nuevos consumidores —incluida SecretarIA— deben persistir:
+Nuevos consumidores —incluida SecretarIA— pueden enviar `templateId=null` y `templateVersion=null` para seguir siempre el default runtime, conservando `templateData` normalmente. Sólo necesitan persistir/enviar un par lógico explícito cuando quieran fijar una versión concreta como override o reproducir deliberadamente una representación histórica.
 
-```text
-templateKey
-templateVersion
-templateData snapshot
-```
-
-y no deben usar como dependencia de negocio:
+No deben usar como dependencia de negocio:
 
 ```text
 tpl_*
@@ -149,6 +163,8 @@ Se configura como:
 ```text
 Pdf__BaseUrl=http://creadorpdf:8080
 Pdf__ApiKey=...
+Pdf__TemplateKey=factura-ar
+Pdf__TemplateVersion=5
 ```
 
 ### Deploy/bootstrap
@@ -412,8 +428,8 @@ La tool `generar_pdf_comprobante` recibe:
 ```text
 numeroComprobante
 tipoComprobante
-templateId      # semántica actual: templateKey lógico
-templateVersion
+templateId      # nullable; semántica actual: templateKey lógico
+templateVersion # nullable; null/null usa el default runtime
 templateData
 contextId (cuando sea necesario desambiguar)
 ```
@@ -436,7 +452,7 @@ renderer PDF
 
 Esta operación nunca llama a `FECAESolicitar` ni al sequencer de emisión. Si ARCA no está accesible o la consulta no contiene evidencia suficiente para un snapshot seguro, no se genera un PDF fiscal inventado.
 
-SecretarIA debe conservar `templateKey`, `templateVersion` y `templateData` si desea reproducir la misma representación visual. La verdad fiscal se obtiene del contexto y de ARCA, no de esos datos.
+SecretarIA puede enviar `templateId=null` y `templateVersion=null` para regenerar con el default runtime vigente y seguir enviando `templateData`. Si alguna integración necesita fijar una representación visual concreta, debe conservar y enviar ambos valores como override explícito. La verdad fiscal se obtiene del contexto y de ARCA, no de esos datos.
 
 ## Qué debe hacer el caller ante un fallo PDF
 

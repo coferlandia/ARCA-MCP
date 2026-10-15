@@ -199,6 +199,46 @@ public sealed class McpFiscalErrorBoundaryTests : IClassFixture<WebApplicationFa
     }
 
     [Fact]
+    public async Task EmitirPdf_ParTemplateIncompleto_DevuelveErrorEstructuradoAntesDeResolverContexto()
+    {
+        using var temp = new TempCatalog();
+        var catalog = new FileSystemFiscalTechnicalContextStore(temp.Path);
+        using var factory = CreateFactory(catalog);
+        using var client = factory.CreateClient();
+
+        var body = await CallAsync(client, "arca:facturar", "emitir_comprobante_con_pdf", new
+        {
+            factura = new { tipoComprobante = 6 },
+            idempotencyKey = "idem-template-partial",
+            templateId = "factura-ar",
+            templateVersion = (string?)null,
+            templateData = new { }
+        });
+
+        AssertStructuredError(body, "PDF_TEMPLATE_REFERENCE_INVALID");
+    }
+
+    [Fact]
+    public async Task GenerarPdf_SinDefaults_DevuelveErrorEstructuradoAntesDeResolverContexto()
+    {
+        using var temp = new TempCatalog();
+        var catalog = new FileSystemFiscalTechnicalContextStore(temp.Path);
+        using var factory = CreateFactory(catalog);
+        using var client = factory.CreateClient();
+
+        var body = await CallAsync(client, "arca:consultar", "generar_pdf_comprobante", new
+        {
+            numeroComprobante = 1,
+            tipoComprobante = 6,
+            templateId = (string?)null,
+            templateVersion = (string?)null,
+            templateData = new { }
+        });
+
+        AssertStructuredError(body, "PDF_TEMPLATE_DEFAULT_NOT_CONFIGURED");
+    }
+
+    [Fact]
     public async Task ExcepcionInesperada_DevuelveCodigoGenerico_NoFiltraDetalle_YSeLoguea()
     {
         using var temp = new TempCatalog();

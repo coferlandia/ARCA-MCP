@@ -18,6 +18,8 @@ services:
       Recovery__Directory: /data/recovery
       Pdf__BaseUrl: ${PDF_BASE_URL:-http://creadorpdf:8080}
       Pdf__ApiKey: ${PDF_API_KEY}
+      Pdf__TemplateKey: ${Pdf__TemplateKey:-factura-ar}
+      Pdf__TemplateVersion: "${Pdf__TemplateVersion:-5}"
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8080/health/live"]
       interval: 30s
