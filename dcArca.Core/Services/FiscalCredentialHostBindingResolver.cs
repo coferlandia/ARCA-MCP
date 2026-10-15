@@ -19,6 +19,8 @@ public sealed class FiscalCredentialHostBinding
 
     public string CredentialId { get; }
     public string CacheIdentity { get; }
+    public string PrincipalCuit => _config.PrincipalCuit;
+    public string RepresentedCuit => _config.RepresentedCuit;
 
     // Never expose the resolver-owned mutable configuration instance.
     public dcArcaConfig Config => Clone(_config);
@@ -27,7 +29,8 @@ public sealed class FiscalCredentialHostBinding
         => new()
         {
             Environment = source.Environment,
-            Cuit = source.Cuit,
+            RepresentedCuit = source.RepresentedCuit,
+            PrincipalCuit = source.PrincipalCuit,
             CertificatePath = source.CertificatePath,
             CertificatePassword = source.CertificatePassword,
             WsaaUrl = source.WsaaUrl,
@@ -39,7 +42,8 @@ public sealed class FiscalCredentialHostBinding
 
 /// <summary>
 /// Resolves an opaque credential reference and a server-owned fiscal environment into an
-/// immutable dcArcaConfig. Callers never provide certificate paths, passwords or endpoints.
+/// immutable dcArcaConfig. Callers never provide certificate paths, passwords, principal CUITs
+/// or endpoints.
 /// </summary>
 public sealed class FiscalCredentialHostBindingResolver
 {
@@ -84,6 +88,21 @@ public sealed class FiscalCredentialHostBindingResolver
         if (string.IsNullOrWhiteSpace(certificatePath))
             throw new InvalidOperationException("CREDENTIAL_REFERENCE_UNRESOLVED");
 
+        var principalCuit = credential["PrincipalCuit"];
+        if (principalCuit is null
+            && !string.Equals(_legacyEnvironment, NoLegacyFallback, StringComparison.Ordinal)
+            && string.Equals(assignment.CredentialId, "legacy-default", StringComparison.Ordinal))
+        {
+            principalCuit = string.IsNullOrEmpty(_legacyConfig.PrincipalCuit)
+                ? _legacyConfig.Cuit
+                : _legacyConfig.PrincipalCuit;
+        }
+
+        if (principalCuit is null)
+            throw new InvalidOperationException("CREDENTIAL_PRINCIPAL_CUIT_REQUIRED");
+        if (principalCuit.Length != 11 || !principalCuit.All(char.IsDigit))
+            throw new InvalidOperationException("CREDENTIAL_PRINCIPAL_CUIT_INVALID");
+
         var environment = _configuration.GetSection($"FiscalEnvironments:{canonicalEnvironment}");
         var wsaa = environment["WsaaUrl"]?.Trim();
         var wsfe = environment["WsfeUrl"]?.Trim();
@@ -105,7 +124,8 @@ public sealed class FiscalCredentialHostBindingResolver
             new dcArcaConfig
             {
                 Environment = canonicalEnvironment,
-                Cuit = context.RepresentedCuit.ToString(),
+                RepresentedCuit = context.RepresentedCuit.ToString(),
+                PrincipalCuit = principalCuit,
                 PuntoVenta = context.PointOfSale,
                 CertificatePath = certificatePath,
                 CertificatePassword = certificatePassword,
