@@ -50,6 +50,11 @@ Las operaciones idempotentes persisten esa revisión histórica: rotar una API k
 
 `arca:facturar` no implica `arca:consultar`, ni al revés.
 
+### `arca:administrar`
+
+- `consultar_padron_administrativo(contextId, cuit)` — consulta registral con la identidad técnica server-owned, sin exigir representación/PV. La respuesta conserva las propiedades legacy y expone además `DomicilioFiscal`, `Impuestos` estructurados con `Origen`, y `Monotributo` con categoría/actividades/impuestos cuando ARCA los publica.
+- `FechaInscripcion` sólo se informa si el XML contiene un campo explícito `datosGenerales.fechaInscripcion`; `FechaInscripcionFuente` identifica esa procedencia. Los `periodo` de impuestos, actividades y categorías no se convierten en fecha de inscripción.
+
 ## Errores estructurados de tool calls
 
 Las tools fiscales exponen errores de dominio esperados como un resultado MCP con `isError=true`. El contrato estable para consumidores está en `structuredContent`:
