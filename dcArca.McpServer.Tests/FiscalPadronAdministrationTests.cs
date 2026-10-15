@@ -126,6 +126,19 @@ public sealed class FiscalPadronAdministrationTests
     }
 
     [Fact]
+    public async Task AdministrativePadron_KeepsAbsentStructuredFactsNullOrEmpty()
+    {
+        var result = await QueryAsync(SuccessResponse());
+
+        Assert.True(result.Success);
+        Assert.Null(result.DomicilioFiscal);
+        Assert.Empty(result.Impuestos);
+        Assert.Null(result.Monotributo);
+        Assert.Null(result.FechaInscripcion);
+        Assert.Null(result.FechaInscripcionFuente);
+    }
+
+    [Fact]
     public async Task AdministrativePadron_ReportsExplicitRegistrationDateWithProvenance()
     {
         var result = await QueryAsync(StructuredResponse(includeExplicitRegistrationDate: true));
