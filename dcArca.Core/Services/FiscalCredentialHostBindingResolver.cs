@@ -73,8 +73,6 @@ public sealed class FiscalCredentialHostBindingResolver
         CredentialAssignmentRecord assignment)
     {
         ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(assignment);
-
         return ResolveCore(
             context.Environment,
             context.RepresentedCuit.ToString(),
@@ -82,17 +80,11 @@ public sealed class FiscalCredentialHostBindingResolver
             assignment);
     }
 
-    /// <summary>
-    /// Resolves a technical credential for operations that are not bound to a represented
-    /// taxpayer or point of sale, such as administrative Padrón queries.
-    /// </summary>
     public FiscalCredentialHostBinding Resolve(
         FiscalTechnicalContextRecord context,
         CredentialAssignmentRecord assignment)
     {
         ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(assignment);
-
         return ResolveCore(
             context.Environment,
             representedCuit: string.Empty,
@@ -106,6 +98,8 @@ public sealed class FiscalCredentialHostBindingResolver
         int pointOfSale,
         CredentialAssignmentRecord assignment)
     {
+        ArgumentNullException.ThrowIfNull(assignment);
+
         var canonicalEnvironment = FiscalEnvironmentId.RequireCanonical(environmentId);
         var credential = _configuration.GetSection($"FiscalCredentials:{assignment.CredentialId}");
         var certificatePath = credential["CertificatePath"]?.Trim();
