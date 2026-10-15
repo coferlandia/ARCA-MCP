@@ -201,13 +201,6 @@ public sealed class FiscalRepresentationAdministration
             lifecycle.SafeMessage);
     }
 
-    public Task<dcArca.Core.Models.dcPadronPersonaResult> QueryPadronAsync(
-        ClaimsPrincipal principal,
-        string contextId,
-        long cuit,
-        CancellationToken cancellationToken)
-        => throw new NotSupportedException("ADMINISTRATIVE_PADRON_QUERY_NOT_IMPLEMENTED");
-
     public async Task<FiscalRepresentationRecord> RevokeAsync(
         ClaimsPrincipal principal, string contextId, string consumerId, long representedCuit,
         int pointOfSale, CancellationToken cancellationToken)
