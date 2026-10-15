@@ -83,6 +83,12 @@ public sealed class FiscalLocalReadinessValidator
                     $"FiscalCredentials:{assignment.CredentialId}");
                 if (Missing(credential["CertificatePath"]))
                     return NotReady("CREDENTIAL_REFERENCE_UNRESOLVED");
+
+                var principalCuit = credential["PrincipalCuit"];
+                if (principalCuit is null)
+                    return NotReady("CREDENTIAL_PRINCIPAL_CUIT_REQUIRED");
+                if (principalCuit.Length != 11 || !principalCuit.All(char.IsDigit))
+                    return NotReady("CREDENTIAL_PRINCIPAL_CUIT_INVALID");
             }
 
             if (context.OperationalState == FiscalContextOperationalState.Active
