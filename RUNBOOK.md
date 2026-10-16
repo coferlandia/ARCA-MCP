@@ -1,6 +1,6 @@
 # ARCA-MCP — Runbook operativo
 
-> Manual de operación cotidiana de la instancia Cadencia. Actualizado con la topología y pruebas realizadas el 10/10/2026. El repositorio es público: no registrar contraseñas, API keys, PFX, token/sign, SOAP ni datos personales. Las rutas y el dominio de despliegue aquí citados ya están definidos en el Compose versionado; cualquier cambio privado del host debe verificarse en el propio servidor.
+> Manual de operación cotidiana de la instancia Cadencia. Actualizado con la topología y procedimientos verificados hasta el 16/10/2026. El repositorio es público: no registrar contraseñas, API keys, PFX, token/sign, SOAP ni datos personales. Las rutas y el dominio de despliegue aquí citados ya están definidos en el Compose versionado; cualquier cambio privado del host debe verificarse en el propio servidor.
 
 ## 1. Repositorios y ejecutables
 
@@ -247,8 +247,53 @@ CreadorPDF expone la administración de keys en `/v1/admin/api-keys` protegida p
 
 Flujo operativo:
 
-1. crear una key temporal, por ejemplo `dcarca-template-deploy`, owner `dcarca`;
-2. conservar en variables de shell sólo su `id` y `secret`;
+1. crear una key temporal, por ejemplo `dcarca-template-deploy`, owner `dcarca`. En Cadencia se verificó este procedimiento desde el host, sin depender de `curl` dentro del contenedor:
+
+   ```bash
+   CONTAINER="${CREADORPDF_CONTAINER:-creadorpdf-creadorpdf-1}"
+   ADMIN_TOKEN="$(docker exec "$CONTAINER" printenv CREADORPDF_ADMIN_TOKEN)"
+   [ -n "$ADMIN_TOKEN" ]
+
+   CREATE_RESPONSE="$(
+     ADMIN_TOKEN="$ADMIN_TOKEN" python3 - <<'PY'
+   import json
+   import os
+   import urllib.request
+
+   payload = json.dumps({
+       "name": "dcarca-template-deploy",
+       "owner_id": "dcarca",
+       "scopes": ["templates:read", "templates:write", "templates:publish"],
+   }).encode()
+
+   req = urllib.request.Request(
+       "http://127.0.0.1:8080/v1/admin/api-keys",
+       data=payload,
+       method="POST",
+       headers={
+           "Authorization": f"Bearer {os.environ['ADMIN_TOKEN']}",
+           "Content-Type": "application/json",
+       },
+   )
+
+   with urllib.request.urlopen(req, timeout=10) as response:
+       print(response.read().decode())
+   PY
+   )"
+
+   KEY_ID="$(
+     printf '%s' "$CREATE_RESPONSE" |
+       python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'
+   )"
+   CREADORPDF_TEMPLATE_API_KEY="$(
+     printf '%s' "$CREATE_RESPONSE" |
+       python3 -c 'import json,sys; print(json.load(sys.stdin)["secret"])'
+   )"
+   unset CREATE_RESPONSE ADMIN_TOKEN
+   echo "Key temporal creada: $KEY_ID"
+   ```
+
+2. conservar en variables de shell sólo su `id` y `secret`; no imprimir nunca el secret;
 3. ejecutar desde la raíz del repo:
 
    ```bash
@@ -272,8 +317,34 @@ Flujo operativo:
    ' sh "$PDF_BASE_URL"
    ```
 
-6. revocar la key temporal con `DELETE /v1/admin/api-keys/{key_id}`;
-7. limpiar de la shell las variables sensibles.
+6. revocar la key temporal con `DELETE /v1/admin/api-keys/{key_id}`. Procedimiento verificado desde el host:
+
+   ```bash
+   ADMIN_TOKEN="$(docker exec "$CONTAINER" printenv CREADORPDF_ADMIN_TOKEN)"
+   [ -n "$ADMIN_TOKEN" ]
+
+   ADMIN_TOKEN="$ADMIN_TOKEN" KEY_ID="$KEY_ID" python3 - <<'PY'
+   import os
+   import urllib.request
+
+   req = urllib.request.Request(
+       f"http://127.0.0.1:8080/v1/admin/api-keys/{os.environ['KEY_ID']}",
+       method="DELETE",
+       headers={"Authorization": f"Bearer {os.environ['ADMIN_TOKEN']}"},
+   )
+
+   with urllib.request.urlopen(req, timeout=10) as response:
+       print(response.read().decode())
+   PY
+   ```
+
+7. limpiar de la shell las variables sensibles:
+
+   ```bash
+   unset ADMIN_TOKEN CREADORPDF_TEMPLATE_API_KEY KEY_ID
+   ```
+
+Si el bootstrap falla antes de la revocación, no crear otra key a ciegas: conservar el `KEY_ID`, diagnosticar el error y revocar explícitamente esa credencial temporal.
 
 Las versiones publicadas son inmutables. Si el mismo `name + version` ya existe publicado con contenido distinto al repositorio, no sobrescribirlo: incrementar la versión y actualizar el runtime deliberadamente.
 
