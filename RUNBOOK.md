@@ -1,6 +1,6 @@
 # ARCA-MCP — Runbook operativo
 
-> Manual de operación cotidiana de la instancia Cadencia. Actualizado con la topología y pruebas realizadas el 10/10/2026. El repositorio es público: no registrar contraseñas, API keys, PFX, token/sign, SOAP ni datos personales. Las rutas y el dominio de despliegue aquí citados ya están definidos en el Compose versionado; cualquier cambio privado del host debe verificarse en el propio servidor.
+> Manual de operación cotidiana de la instancia Cadencia. Actualizado con la topología y procedimientos verificados hasta el 16/10/2026. El repositorio es público: no registrar contraseñas, API keys, PFX, token/sign, SOAP ni datos personales. Las rutas y el dominio de despliegue aquí citados ya están definidos en el Compose versionado; cualquier cambio privado del host debe verificarse en el propio servidor.
 
 ## 1. Repositorios y ejecutables
 
@@ -71,8 +71,6 @@ git check-ignore -v dcArca.McpServer/appsettings.prod.json secrets/diegocofre-ho
 ```
 
 Los scripts SCP **no** descargan/suben `/data`, **no** eliminan archivos sobrantes, **no** hacen rollback y **no** reinician Docker. En configuración productiva, el contenedor lee `/app/appsettings.json`. Las credenciales fiscales siempre referencian rutas **internas** del contenedor: homologación conserva `/certs/certificado.pfx` por compatibilidad con la assignment activa y producción usa `/certs/diegocofre-prod.pfx`. No utilizar rutas Windows/Ubuntu dentro de `FiscalCredentials`.
-
-La configuración fiscal vigente es V2. Los IDs de ambiente fiscal son estrictamente `homologacion` y `produccion`; no crear secciones alias (`homo`, `prod`, mayúsculas, espacios, etc.). La CLI puede normalizar casing/whitespace al crear un contexto nuevo, pero un catálogo persistido no canónico debe corregirse mediante procedimiento explícito y nunca se reinterpreta silenciosamente.
 
 La configuración fiscal vigente es V2. Los IDs de ambiente fiscal son estrictamente `homologacion` y `produccion`; no crear secciones alias (`homo`, `prod`, mayúsculas, espacios, etc.). La CLI puede normalizar casing/whitespace al crear un contexto nuevo, pero un catálogo persistido no canónico debe corregirse mediante procedimiento explícito y nunca se reinterpreta silenciosamente.
 
@@ -185,7 +183,52 @@ No usar `docker compose down -v`. No recrear con `docker run` manual: se perder�
 
 ## 5.1. Rollout de PrincipalCuit y smoke de Padrón administrativo
 
-Antes de desplegar una versión que incluya #96, agregar en la configuración privada del host —nunca en Git— `FiscalCredentials__<credentialId>__PrincipalCuit=<CUIT_PRINCIPAL_11_DIGITOS>` para cada credencial activa de homologación y producción. El valor identifica al titular técnico de la credencial; no es el CUIT representado por un tenant.
+Antes de desplegar una versión que requiera identidad principal separada, agregar `PrincipalCuit` a cada credencial activa de la configuración privada del host. En Cadencia la fuente es `/home/ubuntu/apps/dcarca-mcpserver-config/appsettings.json`, sincronizada con `scripts/download-config.sh` y `scripts/upload-config.sh`; no hace falta convertir estas claves a variables de entorno si ya viven en ese JSON.
+
+Ejemplo conceptual, sin valores reales:
+
+```json
+{
+  "FiscalCredentials": {
+    "cadencia-homo": {
+      "CertificatePath": "/certs/certificado.pfx",
+      "CertificatePassword": "<valor-privado>",
+      "PrincipalCuit": "<CUIT_PRINCIPAL_11_DIGITOS>"
+    },
+    "cadencia-prod": {
+      "CertificatePath": "/certs/diegocofre-prod.pfx",
+      "CertificatePassword": "<valor-privado>",
+      "PrincipalCuit": "<CUIT_PRINCIPAL_11_DIGITOS>"
+    }
+  }
+}
+```
+
+`PrincipalCuit` identifica al titular técnico de la credencial/certificado. No es el CUIT representado por un tenant: Padrón lo usa como `cuitRepresentada`, mientras WSFE sigue usando el `RepresentedCuit` de la representación autorizada como `Auth.Cuit`.
+
+Después de subir la configuración privada, recrear únicamente el servicio MCP para que vuelva a montar `/app/appsettings.json`:
+
+```bash
+cd /home/ubuntu/apps/dcarca-mcpserver
+docker compose --env-file .env -f deploy/cadencia/docker-compose.yml \
+  up -d --no-deps mcpserver
+```
+
+El readiness debe responder 200:
+
+```bash
+docker exec dcarca-mcpserver \
+  curl -fsS http://127.0.0.1:8080/health/ready
+```
+
+Si devuelve 503, leer el cuerpo sin `-f`:
+
+```bash
+docker exec dcarca-mcpserver \
+  curl -sS -i http://127.0.0.1:8080/health/ready
+```
+
+`CREDENTIAL_PRINCIPAL_CUIT_REQUIRED` significa que alguna credencial referenciada por una assignment activa no tiene `PrincipalCuit`; `CREDENTIAL_PRINCIPAL_CUIT_INVALID` significa que no son exactamente 11 dígitos. El readiness es local: no abre el PFX ni autentica contra ARCA.
 
 Después del deploy:
 
@@ -195,6 +238,124 @@ Después del deploy:
 4. verificar no-regresión WSFE sobre una representación conocida: en homologación puede usarse consulta o emisión controlada; en producción usar por defecto una consulta de comprobante/PV existente y solicitar un CAE nuevo sólo con aprobación explícita. En ambos casos confirmar que conserva su `representedCuit`/PV habitual.
 
 No exponer `PrincipalCuit`, rutas de PFX, passwords, token/sign ni payloads completos de configuración en Issues o PR. Si cualquiera de estos smokes falla, mantener el issue abierto y revertir/configurar antes de habilitar nuevas operaciones.
+
+## 5.2. Publicación de una nueva plantilla CreadorPDF
+
+Antes de apuntar el runtime a una versión nueva de `factura-ar`, publicar esa versión con una credencial temporal de gestión cuyo `owner_id` sea `dcarca` y cuyos scopes sean `templates:read`, `templates:write` y `templates:publish`.
+
+CreadorPDF expone la administración de keys en `/v1/admin/api-keys` protegida por `CREADORPDF_ADMIN_TOKEN`. El contenedor productivo puede no incluir `curl`; en ese caso usar `python3` del host para llamar a la API y obtener el token con `docker exec ... printenv`. No imprimir el admin token ni el secreto de la key temporal.
+
+Flujo operativo:
+
+1. crear una key temporal, por ejemplo `dcarca-template-deploy`, owner `dcarca`. En Cadencia se verificó este procedimiento desde el host, sin depender de `curl` dentro del contenedor:
+
+   ```bash
+   CONTAINER="${CREADORPDF_CONTAINER:-creadorpdf-creadorpdf-1}"
+   ADMIN_TOKEN="$(docker exec "$CONTAINER" printenv CREADORPDF_ADMIN_TOKEN)"
+   [ -n "$ADMIN_TOKEN" ]
+
+   CREATE_RESPONSE="$(
+     ADMIN_TOKEN="$ADMIN_TOKEN" python3 - <<'PY'
+   import json
+   import os
+   import urllib.request
+
+   payload = json.dumps({
+       "name": "dcarca-template-deploy",
+       "owner_id": "dcarca",
+       "scopes": ["templates:read", "templates:write", "templates:publish"],
+   }).encode()
+
+   req = urllib.request.Request(
+       "http://127.0.0.1:8080/v1/admin/api-keys",
+       data=payload,
+       method="POST",
+       headers={
+           "Authorization": f"Bearer {os.environ['ADMIN_TOKEN']}",
+           "Content-Type": "application/json",
+       },
+   )
+
+   with urllib.request.urlopen(req, timeout=10) as response:
+       print(response.read().decode())
+   PY
+   )"
+
+   KEY_ID="$(
+     printf '%s' "$CREATE_RESPONSE" |
+       python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'
+   )"
+   CREADORPDF_TEMPLATE_API_KEY="$(
+     printf '%s' "$CREATE_RESPONSE" |
+       python3 -c 'import json,sys; print(json.load(sys.stdin)["secret"])'
+   )"
+   unset CREATE_RESPONSE ADMIN_TOKEN
+   echo "Key temporal creada: $KEY_ID"
+   ```
+
+2. conservar en variables de shell sólo su `id` y `secret`; no imprimir nunca el secret;
+3. ejecutar desde la raíz del repo:
+
+   ```bash
+   CREADORPDF_TEMPLATE_API_KEY="$CREADORPDF_TEMPLATE_API_KEY" \
+     ./deploy/cadencia/bootstrap-pdf-template.sh
+   ```
+
+4. confirmar que el bootstrap informa `TEMPLATE_KEY=factura-ar`, la versión esperada, `TEMPLATE_OWNER=dcarca` y `TEMPLATE_STATUS=published`;
+5. verificar con la key runtime de ARCA-MCP que la versión publicada es visible:
+
+   ```bash
+   ARCA_CONTAINER="${ARCA_CONTAINER:-dcarca-mcpserver}"
+   PDF_BASE_URL="${PDF_BASE_URL:-http://creadorpdf:8080}"
+
+   docker exec "$ARCA_CONTAINER" sh -lc '
+     set -eu
+     key="$(printenv Pdf__ApiKey)"
+     [ -n "$key" ]
+     curl -fsS "$1/v1/templates/managed" \
+       -H "Authorization: Bearer $key"
+   ' sh "$PDF_BASE_URL"
+   ```
+
+6. revocar la key temporal con `DELETE /v1/admin/api-keys/{key_id}`. Procedimiento verificado desde el host:
+
+   ```bash
+   ADMIN_TOKEN="$(docker exec "$CONTAINER" printenv CREADORPDF_ADMIN_TOKEN)"
+   [ -n "$ADMIN_TOKEN" ]
+
+   ADMIN_TOKEN="$ADMIN_TOKEN" KEY_ID="$KEY_ID" python3 - <<'PY'
+   import os
+   import urllib.request
+
+   req = urllib.request.Request(
+       f"http://127.0.0.1:8080/v1/admin/api-keys/{os.environ['KEY_ID']}",
+       method="DELETE",
+       headers={"Authorization": f"Bearer {os.environ['ADMIN_TOKEN']}"},
+   )
+
+   with urllib.request.urlopen(req, timeout=10) as response:
+       print(response.read().decode())
+   PY
+   ```
+
+7. limpiar de la shell las variables sensibles:
+
+   ```bash
+   unset ADMIN_TOKEN CREADORPDF_TEMPLATE_API_KEY KEY_ID
+   ```
+
+Si el bootstrap falla antes de la revocación, no crear otra key a ciegas: conservar el `KEY_ID`, diagnosticar el error y revocar explícitamente esa credencial temporal.
+
+Las versiones publicadas son inmutables. Si el mismo `name + version` ya existe publicado con contenido distinto al repositorio, no sobrescribirlo: incrementar la versión y actualizar el runtime deliberadamente.
+
+La configuración efectiva del template se comprueba antes del deploy con:
+
+```bash
+docker compose --env-file .env -f deploy/cadencia/docker-compose.yml \
+  config | grep -E 'Pdf__Template(Key|Version)'
+```
+
+En Cadencia el fallback actual es `factura-ar:6`. Si `.env` no fija `Pdf__TemplateVersion`, Compose debe mostrar igualmente `Pdf__TemplateVersion: "6"`.
 
 ## 6. Provisionamiento V2 (homologación actual)
 
