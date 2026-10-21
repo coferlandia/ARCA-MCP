@@ -127,6 +127,37 @@ public class ExistingInvoicePdfServiceTests
     }
 
     [Fact]
+    public async Task RegeneracionDeNotaConAsociacionConsultable_RenderizaSinReemitir()
+    {
+        // Rojo esperado hasta el Paso 4: FromConsult() todavia lanza FISCAL_DOCUMENT_ASSOCIATION_UNAVAILABLE
+        // incondicionalmente para notas. Cuando el Paso 4 arregle FromConsult(), este test debe pasar a verde.
+        var fiscal = ConsultedWithAssociation();
+        fiscal.TipoComprobante = dcTipoComprobante.NotaCreditoB;
+        var wsfe = new FakeWsfeClient { ConsultResult = fiscal };
+        var renderer = new FakeRenderer();
+        var service = new ExistingInvoicePdfService(wsfe, renderer, Config());
+
+        var result = await service.RenderAsync(
+            dcTipoComprobante.NotaCreditoB,
+            123,
+            new PdfTemplateReference("tpl", "1.0.0"),
+            JsonSerializer.SerializeToElement(new { }));
+
+        Assert.True(result.Fiscal.Success);
+        Assert.Equal("CAE123", result.Fiscal.Cae);
+        Assert.Equal(PdfRenderStatus.Rendered, result.Pdf.Status);
+        Assert.Equal(1, wsfe.ConsultCallCount);
+        Assert.Equal(0, wsfe.EmitCallCount);
+        Assert.Equal(1, renderer.RenderCallCount);
+        var preservado = Assert.Single(renderer.LastFiscal!.ComprobantesAsociados);
+        Assert.Equal((int)dcTipoComprobante.FacturaB, preservado.Tipo);
+        Assert.Equal(7, preservado.PuntoVenta);
+        Assert.Equal(99, preservado.Numero);
+        Assert.Equal("20123456786", preservado.Cuit);
+        Assert.Equal("20260930", preservado.Fecha);
+    }
+
+    [Fact]
     public async Task PrecondicionLocalInvalida_NoConsultaArca()
     {
         var wsfe = new FakeWsfeClient { ConsultResult = Consulted() };
@@ -201,6 +232,47 @@ public class ExistingInvoicePdfServiceTests
         Cae = "CAE123",
         CaeVencimiento = "20261011",
         Resultado = "A"
+    };
+
+    private static dcFacturaResponse ConsultedWithAssociation() => new()
+    {
+        Success = true,
+        NumeroComprobante = 123,
+        PuntoVenta = 7,
+        TipoComprobante = dcTipoComprobante.FacturaB,
+        Concepto = dcConcepto.Productos,
+        DocTipo = dcTipoDocumento.CUIT,
+        DocNro = 20333444559,
+        CondicionIvaReceptor = dcCondicionIvaReceptor.ResponsableInscripto,
+        FechaComprobante = "20261001",
+        ImporteNeto = 100m,
+        ImporteIva = 21m,
+        ImporteTotal = 121m,
+        Iva =
+        [
+            new dcFacturaResponse.IvaDetalle
+            {
+                Alicuota = dcAlicuotaIva.Veintiuno,
+                BaseImponible = 100m,
+                Importe = 21m
+            }
+        ],
+        MonedaId = "PES",
+        MonedaCotizacion = 1m,
+        Cae = "CAE123",
+        CaeVencimiento = "20261011",
+        Resultado = "A",
+        CbtesAsoc =
+        [
+            new dcFacturaResponse.CbteAsocDetalle
+            {
+                Tipo = (int)dcTipoComprobante.FacturaB,
+                PtoVta = 7,
+                Nro = 99,
+                Cuit = "20123456786",
+                CbteFch = "20260930"
+            }
+        ]
     };
 
     private sealed class FakeWsfeClient : IdcWsfeClient
