@@ -284,6 +284,33 @@ public sealed class dcWsfeSoapParser
                     });
                 }
             }
+
+            result.CbtesAsoc.Clear();
+            var cbtesAsocNodes = resultGetNode.SelectNodes("ar:CbtesAsoc/ar:CbteAsoc", nsmgr);
+            if (cbtesAsocNodes != null)
+            {
+                foreach (XmlNode cbteAsoc in cbtesAsocNodes)
+                {
+                    result.CbtesAsoc.Add(new dcFacturaResponse.CbteAsocDetalle
+                    {
+                        Tipo = TryGetInt(cbteAsoc, nsmgr, "ar:Tipo"),
+                        PtoVta = TryGetInt(cbteAsoc, nsmgr, "ar:PtoVta"),
+                        Nro = TryGetLong(cbteAsoc, nsmgr, "ar:Nro"),
+                        Cuit = cbteAsoc.SelectSingleNode("ar:Cuit", nsmgr)?.InnerText,
+                        CbteFch = cbteAsoc.SelectSingleNode("ar:CbteFch", nsmgr)?.InnerText
+                    });
+                }
+            }
+
+            var periodoAsocNode = resultGetNode.SelectSingleNode("ar:PeriodoAsoc", nsmgr);
+            if (periodoAsocNode != null)
+            {
+                result.PeriodoAsoc = new dcFacturaResponse.PeriodoAsocDetalle
+                {
+                    FchDesde = periodoAsocNode.SelectSingleNode("ar:FchDesde", nsmgr)?.InnerText,
+                    FchHasta = periodoAsocNode.SelectSingleNode("ar:FchHasta", nsmgr)?.InnerText
+                };
+            }
         }
         else
         {
