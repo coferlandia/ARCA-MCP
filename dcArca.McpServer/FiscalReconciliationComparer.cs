@@ -113,8 +113,10 @@ public static class FiscalReconciliationComparer
         var tributosResult = CompareTributos(expected.Tributos, consulted.Tributos, consultEvidence.Tributos);
         if (tributosResult is not null) return tributosResult;
 
-        // FECompConsultar does not currently expose associated-document or associated-period
-        // information through dcFacturaResponse. Never infer equality for those fiscal fields.
+        // FECompConsultar now exposes associated-document and associated-period information
+        // through dcFacturaResponse (CbtesAsoc/PeriodoAsoc), but this comparator does not yet
+        // use that data to declare equivalence between a persisted operation with associations
+        // and the consulted response. Never infer equality for those fiscal fields.
         if (expected.ComprobanteAsociado.Tipo.HasValue
             || expected.ComprobanteAsociado.PuntoVenta.HasValue
             || expected.ComprobanteAsociado.Numero.HasValue
