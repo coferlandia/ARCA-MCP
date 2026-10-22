@@ -15,17 +15,19 @@ public class dcWsfeConsultAssociationTests
         var response = _parser.ParseFECompConsultarResponse(
             Soap(
                 cbtesAsoc: new[] {
-                    new { Tipo = "80", PtoVta = "5", Nro = "123", Cuit = "20123456789", CbteFch = "20260101" }
+                    new { Tipo = "11", PtoVta = "7", Nro = "123", Cuit = "20123456786", CbteFch = "20261001" }
                 }),
             1);
 
+        Assert.True(response.Success);
+        Assert.Equal(dcTipoComprobante.NotaCreditoC, response.TipoComprobante);
         Assert.Single(response.CbtesAsoc);
         var cbteAsoc = response.CbtesAsoc[0];
-        Assert.Equal(80, cbteAsoc.Tipo);
-        Assert.Equal(5, cbteAsoc.PtoVta);
+        Assert.Equal(11, cbteAsoc.Tipo);
+        Assert.Equal(7, cbteAsoc.PtoVta);
         Assert.Equal(123L, cbteAsoc.Nro);
-        Assert.Equal("20123456789", cbteAsoc.Cuit);
-        Assert.Equal("20260101", cbteAsoc.CbteFch);
+        Assert.Equal("20123456786", cbteAsoc.Cuit);
+        Assert.Equal("20261001", cbteAsoc.CbteFch);
     }
 
     [Fact]
@@ -98,6 +100,35 @@ public class dcWsfeConsultAssociationTests
     }
 
     [Fact]
+    public void MalformedRequiredNumericField_RemainsNullForFailClosedValidation()
+    {
+        var response = _parser.ParseFECompConsultarResponse(
+            Soap(
+                cbtesAsoc: new[] {
+                    new { Tipo = "not-an-int", PtoVta = "7", Nro = "123", Cuit = (string?)null, CbteFch = (string?)null }
+                }),
+            1);
+
+        var cbteAsoc = Assert.Single(response.CbtesAsoc);
+        Assert.Null(cbteAsoc.Tipo);
+        Assert.Equal(7, cbteAsoc.PtoVta);
+        Assert.Equal(123L, cbteAsoc.Nro);
+    }
+
+    [Fact]
+    public void PartialPeriodoAsoc_PreservesMissingBoundaryAsNull()
+    {
+        var response = _parser.ParseFECompConsultarResponse(
+            Soap(
+                periodoAsoc: new { FchDesde = "20260901", FchHasta = (string?)null }),
+            1);
+
+        Assert.NotNull(response.PeriodoAsoc);
+        Assert.Equal("20260901", response.PeriodoAsoc!.FchDesde);
+        Assert.Null(response.PeriodoAsoc.FchHasta);
+    }
+
+    [Fact]
     public void NoAssociations_ReturnsEmptyListsAndNull()
     {
         var response = _parser.ParseFECompConsultarResponse(Soap(), 1);
@@ -145,12 +176,14 @@ public class dcWsfeConsultAssociationTests
         var periodoAsocXml = string.Empty;
         if (periodoAsoc != null)
         {
-            var fchDesde = periodoAsoc.GetType().GetProperty("FchDesde")?.GetValue(periodoAsoc)?.ToString() ?? "";
-            var fchHasta = periodoAsoc.GetType().GetProperty("FchHasta")?.GetValue(periodoAsoc)?.ToString() ?? "";
+            var fchDesde = periodoAsoc.GetType().GetProperty("FchDesde")?.GetValue(periodoAsoc)?.ToString();
+            var fchHasta = periodoAsoc.GetType().GetProperty("FchHasta")?.GetValue(periodoAsoc)?.ToString();
+            var desdeElement = fchDesde != null ? $"<ar:FchDesde>{fchDesde}</ar:FchDesde>" : "";
+            var hastaElement = fchHasta != null ? $"<ar:FchHasta>{fchHasta}</ar:FchHasta>" : "";
             periodoAsocXml = $"""
                 <ar:PeriodoAsoc>
-                  <ar:FchDesde>{fchDesde}</ar:FchDesde>
-                  <ar:FchHasta>{fchHasta}</ar:FchHasta>
+                  {desdeElement}
+                  {hastaElement}
                 </ar:PeriodoAsoc>
                 """;
         }
@@ -166,7 +199,7 @@ public class dcWsfeConsultAssociationTests
                   <ar:DocNro>20123456786</ar:DocNro>
                   <ar:CbteDesde>1</ar:CbteDesde>
                   <ar:CbteHasta>1</ar:CbteHasta>
-                  <ar:CbteTipo>6</ar:CbteTipo>
+                  <ar:CbteTipo>13</ar:CbteTipo>
                   <ar:PtoVta>7</ar:PtoVta>
                   <ar:CbteFch>20261003</ar:CbteFch>
                   <ar:ImpTotal>121</ar:ImpTotal>
