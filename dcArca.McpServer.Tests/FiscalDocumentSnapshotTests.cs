@@ -325,6 +325,65 @@ public class FiscalDocumentSnapshotTests
     }
 
     [Fact]
+    public void NotaConCbtesAsocValidosEInvalidos_FallaCerradoSinDescartarEvidencia()
+    {
+        var consulted = ComplexConsulted(124, 7,
+            cbteAsocs: new List<dcFacturaResponse.CbteAsocDetalle>
+            {
+                new dcFacturaResponse.CbteAsocDetalle
+                {
+                    Tipo = (int)dcTipoComprobante.FacturaB,
+                    PtoVta = 7,
+                    Nro = 99
+                },
+                new dcFacturaResponse.CbteAsocDetalle
+                {
+                    Tipo = (int)dcTipoComprobante.FacturaB,
+                    PtoVta = 7,
+                    Nro = null
+                }
+            });
+        consulted.TipoComprobante = dcTipoComprobante.NotaCreditoB;
+
+        var error = Assert.Throws<FiscalDocumentSnapshotException>(() =>
+            FiscalDocumentSnapshotFactory.FromConsult(
+                consulted,
+                new FiscalDocumentContext("produccion", "20123456786", 7)));
+
+        Assert.Equal("FISCAL_DOCUMENT_ASSOCIATION_UNAVAILABLE", error.Code);
+    }
+
+    [Fact]
+    public void NotaConCbteAsocValidoYPeriodoAsocIncompleto_FallaCerrado()
+    {
+        var consulted = ComplexConsulted(
+            124,
+            7,
+            cbteAsocs: new List<dcFacturaResponse.CbteAsocDetalle>
+            {
+                new dcFacturaResponse.CbteAsocDetalle
+                {
+                    Tipo = (int)dcTipoComprobante.FacturaB,
+                    PtoVta = 7,
+                    Nro = 99
+                }
+            },
+            periodoAsoc: new dcFacturaResponse.PeriodoAsocDetalle
+            {
+                FchDesde = "20260901",
+                FchHasta = null
+            });
+        consulted.TipoComprobante = dcTipoComprobante.NotaCreditoB;
+
+        var error = Assert.Throws<FiscalDocumentSnapshotException>(() =>
+            FiscalDocumentSnapshotFactory.FromConsult(
+                consulted,
+                new FiscalDocumentContext("produccion", "20123456786", 7)));
+
+        Assert.Equal("FISCAL_DOCUMENT_ASSOCIATION_UNAVAILABLE", error.Code);
+    }
+
+    [Fact]
     public void NotaSinAsociacionDetectable_PeriodoAsocConSoloUnafecha_FallaCerrado()
     {
         var consulted = ComplexConsulted(124, 7,
