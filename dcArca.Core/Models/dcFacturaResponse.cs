@@ -229,6 +229,16 @@ public class dcFacturaResponse
     /// </summary>
     public List<TributoDetalle> Tributos { get; set; } = new();
 
+    /// <summary>
+    /// Comprobantes asociados (CbtesAsoc) devueltos por FECompConsultar.
+    /// </summary>
+    public List<CbteAsocDetalle> CbtesAsoc { get; set; } = new();
+
+    /// <summary>
+    /// Período asociado (PeriodoAsoc) devuelto por FECompConsultar.
+    /// </summary>
+    public PeriodoAsocDetalle? PeriodoAsoc { get; set; }
+
     public sealed class IvaDetalle
     {
         public dcAlicuotaIva? Alicuota { get; set; }
@@ -243,5 +253,23 @@ public class dcFacturaResponse
         public decimal BaseImponible { get; set; }
         public decimal Alicuota { get; set; }
         public decimal Importe { get; set; }
+    }
+
+    public sealed class CbteAsocDetalle
+    {
+        // Tipo/PtoVta/Nro son nullable a propósito: el parser (Paso 2) nunca debe inventar
+        // 0 para un nodo SOAP ausente o malformado. La capa de snapshot decide "utilizable"
+        // exigiendo Tipo > 0 && PtoVta > 0 && Nro > 0 explícitamente, no la nulabilidad acá.
+        public int? Tipo { get; set; }
+        public int? PtoVta { get; set; }
+        public long? Nro { get; set; }
+        public string? Cuit { get; set; }
+        public string? CbteFch { get; set; }
+    }
+
+    public sealed class PeriodoAsocDetalle
+    {
+        public string? FchDesde { get; set; }
+        public string? FchHasta { get; set; }
     }
 }

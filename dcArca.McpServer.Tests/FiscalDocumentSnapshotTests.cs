@@ -175,9 +175,225 @@ public class FiscalDocumentSnapshotTests
     }
 
     [Fact]
+    public void NotaCreditoCConsultada_ConFacturaCAsociada_PreservaAsociacion()
+    {
+        var consulted = ComplexConsulted(124, 7,
+            cbteAsocs: new List<dcFacturaResponse.CbteAsocDetalle>
+            {
+                new dcFacturaResponse.CbteAsocDetalle
+                {
+                    Tipo = (int)dcTipoComprobante.FacturaC,
+                    PtoVta = 7,
+                    Nro = 99,
+                    Cuit = "20123456786",
+                    CbteFch = "20260930"
+                }
+            });
+        consulted.TipoComprobante = dcTipoComprobante.NotaCreditoC;
+
+        var snapshot = FiscalDocumentSnapshotFactory.FromConsult(
+            consulted,
+            new FiscalDocumentContext("produccion", "20123456786", 7));
+
+        Assert.Equal((int)dcTipoComprobante.NotaCreditoC, snapshot.TipoComprobante);
+        Assert.Equal("fe-comp-consultar-validated", snapshot.Provenance.FiscalData);
+        var associated = Assert.Single(snapshot.ComprobantesAsociados);
+        Assert.Equal((int)dcTipoComprobante.FacturaC, associated.Tipo);
+        Assert.Equal(7, associated.PuntoVenta);
+        Assert.Equal(99, associated.Numero);
+        Assert.Equal("20123456786", associated.Cuit);
+        Assert.Equal("20260930", associated.Fecha);
+        Assert.Contains("comprobantesAsociados", snapshot.AvailableFields);
+    }
+
+    [Fact]
+    public void NotaConsultada_ConMultiplesCbtesAsoc_PreservaOrdenYCantidad()
+    {
+        var consulted = ComplexConsulted(124, 7,
+            cbteAsocs: new List<dcFacturaResponse.CbteAsocDetalle>
+            {
+                new dcFacturaResponse.CbteAsocDetalle
+                {
+                    Tipo = (int)dcTipoComprobante.FacturaB,
+                    PtoVta = 7,
+                    Nro = 99
+                },
+                new dcFacturaResponse.CbteAsocDetalle
+                {
+                    Tipo = (int)dcTipoComprobante.FacturaB,
+                    PtoVta = 7,
+                    Nro = 100
+                },
+                new dcFacturaResponse.CbteAsocDetalle
+                {
+                    Tipo = (int)dcTipoComprobante.FacturaB,
+                    PtoVta = 8,
+                    Nro = 50
+                }
+            });
+        consulted.TipoComprobante = dcTipoComprobante.NotaCreditoB;
+
+        var snapshot = FiscalDocumentSnapshotFactory.FromConsult(
+            consulted,
+            new FiscalDocumentContext("produccion", "20123456786", 7));
+
+        Assert.Equal(3, snapshot.ComprobantesAsociados.Count);
+        Assert.Equal(99, snapshot.ComprobantesAsociados[0].Numero);
+        Assert.Equal(100, snapshot.ComprobantesAsociados[1].Numero);
+        Assert.Equal(50, snapshot.ComprobantesAsociados[2].Numero);
+        Assert.Equal(8, snapshot.ComprobantesAsociados[2].PuntoVenta);
+        Assert.Contains("comprobantesAsociados", snapshot.AvailableFields);
+    }
+
+    [Fact]
+    public void NotaConsultada_ConSoloPeriodoAsocCompleto_PreservaAsociacion()
+    {
+        var consulted = ComplexConsulted(124, 7,
+            periodoAsoc: new dcFacturaResponse.PeriodoAsocDetalle
+            {
+                FchDesde = "20260901",
+                FchHasta = "20260930"
+            });
+        consulted.TipoComprobante = dcTipoComprobante.NotaCreditoB;
+
+        var snapshot = FiscalDocumentSnapshotFactory.FromConsult(
+            consulted,
+            new FiscalDocumentContext("produccion", "20123456786", 7));
+
+        Assert.NotNull(snapshot.PeriodoAsociado);
+        Assert.Equal("20260901", snapshot.PeriodoAsociado!.Desde);
+        Assert.Equal("20260930", snapshot.PeriodoAsociado.Hasta);
+        Assert.Contains("periodoAsociado", snapshot.AvailableFields);
+    }
+
+    [Fact]
     public void RegeneracionDeNotaSinAsociacionDevueltaPorConsulta_FallaCerrado()
     {
         var consulted = ComplexConsulted(124, 7);
+        consulted.TipoComprobante = dcTipoComprobante.NotaCreditoB;
+
+        var error = Assert.Throws<FiscalDocumentSnapshotException>(() =>
+            FiscalDocumentSnapshotFactory.FromConsult(
+                consulted,
+                new FiscalDocumentContext("produccion", "20123456786", 7)));
+
+        Assert.Equal("FISCAL_DOCUMENT_ASSOCIATION_UNAVAILABLE", error.Code);
+    }
+
+    [Fact]
+    public void NotaSinAsociacionDetectable_CbteAsocSinNumero_FallaCerrado()
+    {
+        var consulted = ComplexConsulted(124, 7,
+            cbteAsocs: new List<dcFacturaResponse.CbteAsocDetalle>
+            {
+                new dcFacturaResponse.CbteAsocDetalle
+                {
+                    Tipo = (int)dcTipoComprobante.FacturaB,
+                    PtoVta = 7,
+                    Nro = null  // Incompleto: falta Nro
+                }
+            });
+        consulted.TipoComprobante = dcTipoComprobante.NotaCreditoB;
+
+        var error = Assert.Throws<FiscalDocumentSnapshotException>(() =>
+            FiscalDocumentSnapshotFactory.FromConsult(
+                consulted,
+                new FiscalDocumentContext("produccion", "20123456786", 7)));
+
+        Assert.Equal("FISCAL_DOCUMENT_ASSOCIATION_UNAVAILABLE", error.Code);
+    }
+
+    [Fact]
+    public void NotaSinAsociacionDetectable_CbteAsocSinPtoVta_FallaCerrado()
+    {
+        var consulted = ComplexConsulted(124, 7,
+            cbteAsocs: new List<dcFacturaResponse.CbteAsocDetalle>
+            {
+                new dcFacturaResponse.CbteAsocDetalle
+                {
+                    Tipo = (int)dcTipoComprobante.FacturaB,
+                    PtoVta = null,  // Incompleto: falta PtoVta
+                    Nro = 99
+                }
+            });
+        consulted.TipoComprobante = dcTipoComprobante.NotaCreditoB;
+
+        var error = Assert.Throws<FiscalDocumentSnapshotException>(() =>
+            FiscalDocumentSnapshotFactory.FromConsult(
+                consulted,
+                new FiscalDocumentContext("produccion", "20123456786", 7)));
+
+        Assert.Equal("FISCAL_DOCUMENT_ASSOCIATION_UNAVAILABLE", error.Code);
+    }
+
+    [Fact]
+    public void NotaConCbtesAsocValidosEInvalidos_FallaCerradoSinDescartarEvidencia()
+    {
+        var consulted = ComplexConsulted(124, 7,
+            cbteAsocs: new List<dcFacturaResponse.CbteAsocDetalle>
+            {
+                new dcFacturaResponse.CbteAsocDetalle
+                {
+                    Tipo = (int)dcTipoComprobante.FacturaB,
+                    PtoVta = 7,
+                    Nro = 99
+                },
+                new dcFacturaResponse.CbteAsocDetalle
+                {
+                    Tipo = (int)dcTipoComprobante.FacturaB,
+                    PtoVta = 7,
+                    Nro = null
+                }
+            });
+        consulted.TipoComprobante = dcTipoComprobante.NotaCreditoB;
+
+        var error = Assert.Throws<FiscalDocumentSnapshotException>(() =>
+            FiscalDocumentSnapshotFactory.FromConsult(
+                consulted,
+                new FiscalDocumentContext("produccion", "20123456786", 7)));
+
+        Assert.Equal("FISCAL_DOCUMENT_ASSOCIATION_UNAVAILABLE", error.Code);
+    }
+
+    [Fact]
+    public void NotaConCbteAsocValidoYPeriodoAsocIncompleto_FallaCerrado()
+    {
+        var consulted = ComplexConsulted(
+            124,
+            7,
+            cbteAsocs: new List<dcFacturaResponse.CbteAsocDetalle>
+            {
+                new dcFacturaResponse.CbteAsocDetalle
+                {
+                    Tipo = (int)dcTipoComprobante.FacturaB,
+                    PtoVta = 7,
+                    Nro = 99
+                }
+            },
+            periodoAsoc: new dcFacturaResponse.PeriodoAsocDetalle
+            {
+                FchDesde = "20260901",
+                FchHasta = null
+            });
+        consulted.TipoComprobante = dcTipoComprobante.NotaCreditoB;
+
+        var error = Assert.Throws<FiscalDocumentSnapshotException>(() =>
+            FiscalDocumentSnapshotFactory.FromConsult(
+                consulted,
+                new FiscalDocumentContext("produccion", "20123456786", 7)));
+
+        Assert.Equal("FISCAL_DOCUMENT_ASSOCIATION_UNAVAILABLE", error.Code);
+    }
+
+    [Fact]
+    public void NotaSinAsociacionDetectable_PeriodoAsocConSoloUnafecha_FallaCerrado()
+    {
+        var consulted = ComplexConsulted(124, 7,
+            periodoAsoc: new dcFacturaResponse.PeriodoAsocDetalle
+            {
+                FchDesde = "20260901",
+                FchHasta = null  // Incompleto: falta FchHasta
+            });
         consulted.TipoComprobante = dcTipoComprobante.NotaCreditoB;
 
         var error = Assert.Throws<FiscalDocumentSnapshotException>(() =>
@@ -257,7 +473,11 @@ public class FiscalDocumentSnapshotTests
         Resultado = "A"
     };
 
-    private static dcFacturaResponse ComplexConsulted(long number, int pointOfSale)
+    private static dcFacturaResponse ComplexConsulted(
+        long number,
+        int pointOfSale,
+        List<dcFacturaResponse.CbteAsocDetalle>? cbteAsocs = null,
+        dcFacturaResponse.PeriodoAsocDetalle? periodoAsoc = null)
     {
         var response = new dcFacturaResponse
         {
@@ -292,7 +512,9 @@ public class FiscalDocumentSnapshotTests
             MonedaCotizacion = 1450.25m,
             Cae = "CAE123",
             CaeVencimiento = "20261011",
-            Resultado = "A"
+            Resultado = "A",
+            CbtesAsoc = cbteAsocs ?? new(),
+            PeriodoAsoc = periodoAsoc
         };
         response.ConsultEvidence = ConsultEvidenceTestData.ValidFor(response);
         return response;

@@ -50,7 +50,7 @@ Algún dato fiscal comparable difiere. Devuelve `RECONCILIATION_MISMATCH`, manti
 
 Falta evidencia necesaria para demostrar equivalencia. Devuelve `RECONCILIATION_EVIDENCE_INSUFFICIENT`, mantiene `Uncertain` y conserva la reserva.
 
-Esto incluye registros legacy migrados sin proyección fiscal estructurada. También incluye actualmente operaciones con comprobante/período asociado cuando `FECompConsultar` no expone esos campos en el DTO de consulta: el sistema prefiere bloquear antes que inferir una igualdad que no puede verificar.
+Esto incluye registros legacy migrados sin proyección fiscal estructurada. `FECompConsultar` ya conserva `CbtesAsoc` y `PeriodoAsoc` en el DTO de consulta para reconstrucción documental, pero el comparador de reconciliación todavía no usa esos campos para declarar equivalencia de una operación incierta con asociaciones. Esas operaciones continúan en `InsufficientEvidence`: el sistema prefiere bloquear antes que inferir una igualdad que aún no verifica explícitamente.
 
 ## Consulta negativa
 

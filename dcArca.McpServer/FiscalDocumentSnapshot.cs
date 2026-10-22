@@ -273,20 +273,46 @@ public static class FiscalDocumentSnapshotFactory
             throw Error("FISCAL_DOCUMENT_INCOMPLETE", "La consulta no devolvió el vencimiento de la autorización fiscal.");
         ValidateConsultAmounts(response);
         ValidateServiceDates(response);
+
+        // Gate fail-closed para notas: toda evidencia de asociación presente debe ser utilizable.
+        // No se descartan silenciosamente elementos malformados aunque exista otra asociación válida.
         if (IsNote(tipo))
         {
-            throw Error(
-                "FISCAL_DOCUMENT_ASSOCIATION_UNAVAILABLE",
-                "La consulta fiscal actual no expone la asociación necesaria para regenerar una nota sin inventar datos.");
+            var hasInvalidAssociatedDocument = response.CbtesAsoc.Any(c =>
+                !c.Tipo.HasValue || c.Tipo <= 0
+                || !c.PtoVta.HasValue || c.PtoVta <= 0
+                || !c.Nro.HasValue || c.Nro <= 0);
+
+            var hasUsableAssociatedDocument = response.CbtesAsoc.Count > 0
+                && !hasInvalidAssociatedDocument;
+
+            var hasIncompleteAssociatedPeriod = response.PeriodoAsoc != null
+                && (string.IsNullOrWhiteSpace(response.PeriodoAsoc.FchDesde)
+                    || string.IsNullOrWhiteSpace(response.PeriodoAsoc.FchHasta));
+
+            var hasCompleteAssociatedPeriod = response.PeriodoAsoc != null
+                && !hasIncompleteAssociatedPeriod;
+
+            if (hasInvalidAssociatedDocument
+                || hasIncompleteAssociatedPeriod
+                || (!hasUsableAssociatedDocument && !hasCompleteAssociatedPeriod))
+            {
+                throw Error(
+                    "FISCAL_DOCUMENT_ASSOCIATION_UNAVAILABLE",
+                    "La consulta fiscal no contiene una asociación completa y utilizable para regenerar la nota sin inventar ni descartar datos.");
+            }
         }
+
+        var associations = BuildAssociationsFromConsult(response);
+        var period = BuildAssociatedPeriodFromConsult(response);
 
         var available = BuildAvailableFields(
             response.CondicionIvaReceptor.HasValue,
             !string.IsNullOrWhiteSpace(response.FechaServicioDesde),
             !string.IsNullOrWhiteSpace(response.FechaServicioHasta),
             !string.IsNullOrWhiteSpace(response.FechaVencimientoPago),
-            hasAssociatedDocuments: false,
-            hasAssociatedPeriod: false,
+            associations.Length > 0,
+            period is not null,
             hasCaeExpiry: true,
             hasResult: !string.IsNullOrWhiteSpace(response.Resultado));
 
@@ -321,6 +347,8 @@ public static class FiscalDocumentSnapshotFactory
                 item.Id, item.Descripcion, item.BaseImponible, item.Alicuota, item.Importe)).ToArray(),
             MonedaId = response.MonedaId,
             MonedaCotizacion = response.MonedaCotizacion,
+            ComprobantesAsociados = associations,
+            PeriodoAsociado = period,
             Cae = response.Cae,
             CaeVencimiento = response.CaeVencimiento,
             Resultado = response.Resultado
@@ -458,6 +486,35 @@ public static class FiscalDocumentSnapshotFactory
         => !string.IsNullOrWhiteSpace(request.PeriodoAsocDesde) && !string.IsNullOrWhiteSpace(request.PeriodoAsocHasta)
             ? new FiscalAssociatedPeriodSnapshot(request.PeriodoAsocDesde, request.PeriodoAsocHasta)
             : null;
+
+    private static FiscalAssociatedDocumentSnapshot[] BuildAssociationsFromConsult(dcFacturaResponse response)
+    {
+        return response.CbtesAsoc
+            .Where(c => c.Tipo.HasValue && c.Tipo > 0
+                     && c.PtoVta.HasValue && c.PtoVta > 0
+                     && c.Nro.HasValue && c.Nro > 0)
+            .Select(c => new FiscalAssociatedDocumentSnapshot(
+                c.Tipo!.Value,
+                c.PtoVta!.Value,
+                c.Nro!.Value,
+                string.IsNullOrWhiteSpace(c.Cuit) ? null : c.Cuit,
+                string.IsNullOrWhiteSpace(c.CbteFch) ? null : c.CbteFch))
+            .ToArray();
+    }
+
+    private static FiscalAssociatedPeriodSnapshot? BuildAssociatedPeriodFromConsult(dcFacturaResponse response)
+    {
+        if (response.PeriodoAsoc == null)
+            return null;
+
+        if (string.IsNullOrWhiteSpace(response.PeriodoAsoc.FchDesde)
+            || string.IsNullOrWhiteSpace(response.PeriodoAsoc.FchHasta))
+            return null;
+
+        return new FiscalAssociatedPeriodSnapshot(
+            response.PeriodoAsoc.FchDesde,
+            response.PeriodoAsoc.FchHasta);
+    }
 
     private static IReadOnlyList<string> BuildAvailableFields(
         bool hasIvaCondition,
