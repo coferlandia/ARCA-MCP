@@ -255,13 +255,15 @@ El parser SOAP histórico representa algunos nodos ausentes como `0` o `""`. El 
 
 La emisión/replay conoce el request fiscal validado y por eso el snapshot preserva `CbteAsoc` o `PeriodoAsoc`.
 
-La implementación actual de `FECompConsultar` todavía no expone esas asociaciones en `dcFacturaResponse`. Por lo tanto, la regeneración histórica de una nota falla cerrado con:
+La regeneración por consulta también puede reconstruir una Nota de Crédito/Débito cuando `FECompConsultar` devuelve evidencia suficiente en `CbtesAsoc` o `PeriodoAsoc`. El adapter SOAP conserva esos campos en `dcFacturaResponse` y `FiscalDocumentSnapshotFactory.FromConsult()` los materializa sin consultar datos comerciales ni `templateData`.
+
+El comportamiento permanece fail-closed: si no existe asociación suficiente, si un `CbteAsoc` presente carece de tipo/punto de venta/número utilizables, o si un `PeriodoAsoc` presente está incompleto, la regeneración falla con:
 
 ```text
 FISCAL_DOCUMENT_ASSOCIATION_UNAVAILABLE
 ```
 
-hasta que el adapter de consulta incorpore ese dato. No se inventa ni se reutiliza una asociación aportada por presentación.
+No se inventan campos faltantes ni se descartan silenciosamente asociaciones malformadas. La operación conserva la autorización existente y nunca llama a `FECAESolicitar`.
 
 ## QR oficial server-owned (`arcaQr`)
 
