@@ -175,28 +175,30 @@ public class FiscalDocumentSnapshotTests
     }
 
     [Fact]
-    public void NotaConsultada_ConUnCbteAsocUtilizable_PreservaAsociacion()
+    public void NotaCreditoCConsultada_ConFacturaCAsociada_PreservaAsociacion()
     {
         var consulted = ComplexConsulted(124, 7,
             cbteAsocs: new List<dcFacturaResponse.CbteAsocDetalle>
             {
                 new dcFacturaResponse.CbteAsocDetalle
                 {
-                    Tipo = (int)dcTipoComprobante.FacturaB,
+                    Tipo = (int)dcTipoComprobante.FacturaC,
                     PtoVta = 7,
                     Nro = 99,
                     Cuit = "20123456786",
                     CbteFch = "20260930"
                 }
             });
-        consulted.TipoComprobante = dcTipoComprobante.NotaCreditoB;
+        consulted.TipoComprobante = dcTipoComprobante.NotaCreditoC;
 
         var snapshot = FiscalDocumentSnapshotFactory.FromConsult(
             consulted,
             new FiscalDocumentContext("produccion", "20123456786", 7));
 
+        Assert.Equal((int)dcTipoComprobante.NotaCreditoC, snapshot.TipoComprobante);
+        Assert.Equal("fe-comp-consultar-validated", snapshot.Provenance.FiscalData);
         var associated = Assert.Single(snapshot.ComprobantesAsociados);
-        Assert.Equal((int)dcTipoComprobante.FacturaB, associated.Tipo);
+        Assert.Equal((int)dcTipoComprobante.FacturaC, associated.Tipo);
         Assert.Equal(7, associated.PuntoVenta);
         Assert.Equal(99, associated.Numero);
         Assert.Equal("20123456786", associated.Cuit);
