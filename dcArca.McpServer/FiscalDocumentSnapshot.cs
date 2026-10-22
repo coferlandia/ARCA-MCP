@@ -274,23 +274,32 @@ public static class FiscalDocumentSnapshotFactory
         ValidateConsultAmounts(response);
         ValidateServiceDates(response);
 
-        // Gate fail-closed para notas: requiere evidencia de asociación
+        // Gate fail-closed para notas: toda evidencia de asociación presente debe ser utilizable.
+        // No se descartan silenciosamente elementos malformados aunque exista otra asociación válida.
         if (IsNote(tipo))
         {
-            var hasUsableAssociatedDocument = response.CbtesAsoc.Any(c =>
-                c.Tipo.HasValue && c.Tipo > 0
-                && c.PtoVta.HasValue && c.PtoVta > 0
-                && c.Nro.HasValue && c.Nro > 0);
+            var hasInvalidAssociatedDocument = response.CbtesAsoc.Any(c =>
+                !c.Tipo.HasValue || c.Tipo <= 0
+                || !c.PtoVta.HasValue || c.PtoVta <= 0
+                || !c.Nro.HasValue || c.Nro <= 0);
+
+            var hasUsableAssociatedDocument = response.CbtesAsoc.Count > 0
+                && !hasInvalidAssociatedDocument;
+
+            var hasIncompleteAssociatedPeriod = response.PeriodoAsoc != null
+                && (string.IsNullOrWhiteSpace(response.PeriodoAsoc.FchDesde)
+                    || string.IsNullOrWhiteSpace(response.PeriodoAsoc.FchHasta));
 
             var hasCompleteAssociatedPeriod = response.PeriodoAsoc != null
-                && !string.IsNullOrWhiteSpace(response.PeriodoAsoc.FchDesde)
-                && !string.IsNullOrWhiteSpace(response.PeriodoAsoc.FchHasta);
+                && !hasIncompleteAssociatedPeriod;
 
-            if (!hasUsableAssociatedDocument && !hasCompleteAssociatedPeriod)
+            if (hasInvalidAssociatedDocument
+                || hasIncompleteAssociatedPeriod
+                || (!hasUsableAssociatedDocument && !hasCompleteAssociatedPeriod))
             {
                 throw Error(
                     "FISCAL_DOCUMENT_ASSOCIATION_UNAVAILABLE",
-                    "La consulta fiscal actual no expone la asociación necesaria para regenerar una nota sin inventar datos.");
+                    "La consulta fiscal no contiene una asociación completa y utilizable para regenerar la nota sin inventar ni descartar datos.");
             }
         }
 
