@@ -255,6 +255,7 @@ publish_template() {
     # Extract version number from template name (e.g., factura-ar-v6 -> v6)
     local version_num
     version_num=$(echo "${TEMPLATE}" | grep -oE 'v[0-9]+' || echo "dev")
+    local full_version="${version_num}-dev-$(date +%s)"
 
     # Create template (POST /v1/templates)
     local create_response
@@ -264,7 +265,7 @@ publish_template() {
         -H "Content-Type: application/json" \
         -d "$(jq -n \
             --arg name "factura-ar" \
-            --arg version "${version_num}-dev-$(date +%s)" \
+            --arg version "${full_version}" \
             --argjson schema "$(echo "${template_schema}")" \
             --arg template "${template_html}" \
             '{
@@ -293,14 +294,16 @@ publish_template() {
         -d '{}' \
         2>&1 || error "Failed to publish template")
 
-    log "✓ Template published: ${template_id}"
-    echo "${template_id}"
+    log "✓ Template published: ${template_id} (version ${full_version})"
+    # POST /v1/documents requires {id, version} together (TemplateReference), not id alone.
+    echo "${template_id}|${full_version}"
 }
 
 render_document() {
     local template_id="$1"
-    local api_key="$2"
-    local fixture_name="$3"
+    local template_version="$2"
+    local api_key="$3"
+    local fixture_name="$4"
 
     log "Rendering PDF with fixture: ${fixture_name}..."
 
@@ -319,10 +322,12 @@ render_document() {
         -H "Content-Type: application/json" \
         -d "$(jq -n \
             --arg template_id "${template_id}" \
+            --arg template_version "${template_version}" \
             --argjson data "$(echo "${template_data}")" \
             '{
                 template: {
-                    id: $template_id
+                    id: $template_id,
+                    version: $template_version
                 },
                 data: $data
             }')" \
@@ -370,10 +375,12 @@ main() {
     local api_key_id="${api_key_data#*|}"
     debug "API key: ${api_key_id}"
 
-    local template_id
-    template_id=$(publish_template "${api_key}")
+    local template_result
+    template_result=$(publish_template "${api_key}")
+    local template_id="${template_result%%|*}"
+    local template_version="${template_result#*|}"
 
-    render_document "${template_id}" "${api_key}" "${FIXTURE}"
+    render_document "${template_id}" "${template_version}" "${api_key}" "${FIXTURE}"
 
     log ""
     log "=========================================="

@@ -101,7 +101,7 @@ def measure_page(page: Any, page_idx: int) -> Dict[str, Any]:
 
     # Extract all text with location info
     text_objs = page.extract_text_lines()
-    words = page.extract_words()
+    words = page.extract_words(extra_attrs=["size"])
     rects = page.rects
 
     # Find key text elements and measure their bounding boxes
@@ -258,13 +258,14 @@ def find_rect_containing_bbox(rects: List[Dict], x0: float, top: float, x1: floa
     Returns:
         Bbox dict with the found rectangle, or None
     """
+    best = None
+    best_area = None
     for rect in rects:
         try:
-            # rect is a dict with x0, top, x1, bottom (or sometimes top1, bottom1)
-            rect_x0 = rect.get('x0', rect.get('x0'))
-            rect_top = rect.get('top', rect.get('top'))
-            rect_x1 = rect.get('x1', rect.get('x1'))
-            rect_bottom = rect.get('bottom', rect.get('bottom'))
+            rect_x0 = rect['x0']
+            rect_top = rect['top']
+            rect_x1 = rect['x1']
+            rect_bottom = rect['bottom']
 
             # Check if this rect contains the bbox (with tolerance)
             if (rect_x0 <= x0 + tolerance and
@@ -272,19 +273,25 @@ def find_rect_containing_bbox(rects: List[Dict], x0: float, top: float, x1: floa
                 rect_top <= top + tolerance and
                 rect_bottom >= bottom - tolerance):
 
-                return {
-                    "x0": round(rect_x0, 1),
-                    "top": round(rect_top, 1),
-                    "x1": round(rect_x1, 1),
-                    "bottom": round(rect_bottom, 1),
-                    "width": round(rect_x1 - rect_x0, 1),
-                    "height": round(rect_bottom - rect_top, 1),
-                    "source": "page_rects_border"
-                }
+                area = (rect_x1 - rect_x0) * (rect_bottom - rect_top)
+                # Several containers can enclose the same text (e.g. the whole
+                # header border as well as the small voucher box inside it);
+                # keep the tightest-fitting (smallest-area) one.
+                if best_area is None or area < best_area:
+                    best_area = area
+                    best = {
+                        "x0": round(rect_x0, 1),
+                        "top": round(rect_top, 1),
+                        "x1": round(rect_x1, 1),
+                        "bottom": round(rect_bottom, 1),
+                        "width": round(rect_x1 - rect_x0, 1),
+                        "height": round(rect_bottom - rect_top, 1),
+                        "source": "page_rects_border"
+                    }
         except (KeyError, TypeError, ValueError):
             continue
 
-    return None
+    return best
 
 
 def find_element_bbox(words: List[Dict], predicate) -> Optional[Dict[str, float]]:
@@ -392,7 +399,7 @@ def find_qr_region(page: Any) -> Optional[Dict[str, float]]:
     """
     # Try to find images (QR is usually an image)
     try:
-        images = page.find_images()
+        images = page.images
         if images:
             # Assume last image is QR (typically in footer)
             img = images[-1]

@@ -358,18 +358,73 @@ The PDF filename is timestamped to avoid collisions: `rendered_<unix-timestamp>.
 
 **Important**: This directory is outside the repository and not tracked by Git. PDFs are **not committed**.
 
+## Running Visual Geometry Tests
+
+The `FacturaArV7VisualGeometryTests` suite validates the real-world layout of rendered factura-ar-v7 PDFs by measuring page geometry, element dimensions, and positioning.
+
+### Prerequisites
+
+- Docker running with creadorpdf container available
+- Python 3 installed with pdfplumber library: `pip install pdfplumber`
+
+### Test Execution
+
+Tests are **gated by the `ARCA_PDF_VISUAL_TESTS=1` environment variable**.
+
+Without the variable, tests skip immediately (no Docker required, no network access):
+
+```bash
+# Default: skip visual tests, fast green on any machine
+dotnet test dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj --configuration Release
+```
+
+With the environment variable (requires Docker):
+
+```bash
+# Run visual geometry tests
+ARCA_PDF_VISUAL_TESTS=1 dotnet test dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj \
+  --configuration Release \
+  --filter "FullyQualifiedName~FacturaArV7VisualGeometry"
+```
+
+Example output:
+```
+FacturaArV7VisualGeometryTests.FacturaC1Item_Renders3Pages_WithCorrectGeometry PASSED
+FacturaArV7VisualGeometryTests.NotaCreditoC1Item_Renders3Pages_WithCorrectGeometry PASSED
+```
+
+### What the Tests Verify
+
+For each test fixture (Factura C 1-item, Nota de Crédito C 1-item):
+
+1. **Page Count**: Exactly 3 A4 pages (595×842 pt)
+2. **Voucher Letter/Code Box**: Width measured 44-50 pt (objective ~47 pt = 17 mm)
+3. **Totals Containment**: All total amount values remain within the totals box boundary (tolerance ±2 pt)
+4. **QR Code**: Present and measurable on each page
+
+### Pre-Publication Requirement
+
+This test **must pass** before publishing any new version of the factura-ar template to a production creadorpdf instance:
+
+```bash
+# Standard pre-publication check
+ARCA_PDF_VISUAL_TESTS=1 dotnet test dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj \
+  --configuration Release \
+  --filter "FacturaArV7VisualGeometry"
+```
+
 ## Running in CI/CD
 
 This harness is designed for **local development and troubleshooting only**. It requires Docker and network access (GitHub clone).
 
-For automated geometry verification in CI, see the planned Step 6 (`FacturaArV7VisualGeometryTests.cs`), which gates the tests behind an environment variable `ARCA_PDF_VISUAL_TESTS=1` and runs only when explicitly enabled.
+For automated geometry verification in CI, enable the `ARCA_PDF_VISUAL_TESTS=1` environment variable and Docker to run the visual tests (see above).
 
 To include in CI:
 
 ```bash
-# Enable visual tests and run them
+# Enable visual tests and run them (requires Docker in CI environment)
 export ARCA_PDF_VISUAL_TESTS=1
-dotnet test --filter FacturaArV7VisualGeometry
+dotnet test dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj --configuration Release --filter "FacturaArV7VisualGeometry"
 ```
 
 ## References
