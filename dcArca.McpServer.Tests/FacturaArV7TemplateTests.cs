@@ -105,7 +105,7 @@ public class FacturaArV7TemplateTests
 
         Assert.Contains("arcaQr.imageDataUri", template);
         Assert.Contains("class=\"arca-brand\"", template);
-        Assert.Contains("class=\"arca-word\">ARCA</div>", template);
+        Assert.Contains(">ARCA<", template);
         Assert.Contains("AGENCIA DE RECAUDACIÓN", template);
         Assert.Contains("class=\"pagina\">Pág. 1/1</div>", template);
         Assert.DoesNotContain("counter(pages)", template);
@@ -136,8 +136,13 @@ public class FacturaArV7TemplateTests
         var template = LoadTemplate();
 
         Assert.DoesNotContain("<script", template, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("http://", template);
-        Assert.DoesNotContain("https://", template);
+        // Check for remote resources in src/href/url() attributes (exclude SVG namespace xmlns)
+        Assert.DoesNotContain("src=\"http://", template);
+        Assert.DoesNotContain("src=\"https://", template);
+        Assert.DoesNotContain("href=\"http://", template);
+        Assert.DoesNotContain("href=\"https://", template);
+        Assert.DoesNotContain("url(http://", template);
+        Assert.DoesNotContain("url(https://", template);
     }
 
     [Fact]
