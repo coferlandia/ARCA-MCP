@@ -7,12 +7,15 @@ set -euo pipefail
 #   - Clone enerone/creadorpdf (main branch) to a temporary directory
 #   - Start creadorpdf using Docker Compose
 #   - Create temporary admin credentials
-#   - Publish factura-ar-v6 template from this repo
+#   - Publish invoice template from this repo (v6 or v7)
 #   - Render a test PDF using synthetic fixtures
 #   - Save PDF to scratchpad for measurement
 #
 # Usage:
-#   ./scripts/dev/pdf_local_render.sh [--fixture factura-c-1item|nota-credito-c-1item] [--output-dir /tmp/...]
+#   ./scripts/dev/pdf_local_render.sh [FIXTURE] [OUTPUT_DIR] [TEMPLATE]
+#   Examples:
+#     ./scripts/dev/pdf_local_render.sh factura-c-1item "" factura-ar-v7
+#     ./scripts/dev/pdf_local_render.sh nota-credito-c-1item /tmp factura-ar-v6
 #
 # Environment variables:
 #   - CREATORPDF_CLONE_DIR: override temp directory for cloned repo (default: scratchpad)
@@ -26,6 +29,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 FIXTURE="${1:-factura-c-1item}"
 OUTPUT_DIR="${2:-}"
+TEMPLATE="${3:-factura-ar-v6}"
 
 # Derived paths
 TEMPLATE_DIR="${REPO_ROOT}/deploy/cadencia/pdf-templates"
@@ -231,22 +235,26 @@ EOF
 publish_template() {
     local api_key="$1"
 
-    log "Publishing factura-ar-v6 template..."
+    log "Publishing ${TEMPLATE} template..."
 
     # Read template files
     local template_html
     local template_schema
 
-    if [ ! -f "${TEMPLATE_DIR}/factura-ar-v6.html" ]; then
-        error "Template HTML not found at ${TEMPLATE_DIR}/factura-ar-v6.html"
+    if [ ! -f "${TEMPLATE_DIR}/${TEMPLATE}.html" ]; then
+        error "Template HTML not found at ${TEMPLATE_DIR}/${TEMPLATE}.html"
     fi
 
-    if [ ! -f "${TEMPLATE_DIR}/factura-ar-v6.schema.json" ]; then
-        error "Template schema not found at ${TEMPLATE_DIR}/factura-ar-v6.schema.json"
+    if [ ! -f "${TEMPLATE_DIR}/${TEMPLATE}.schema.json" ]; then
+        error "Template schema not found at ${TEMPLATE_DIR}/${TEMPLATE}.schema.json"
     fi
 
-    template_html=$(cat "${TEMPLATE_DIR}/factura-ar-v6.html")
-    template_schema=$(cat "${TEMPLATE_DIR}/factura-ar-v6.schema.json")
+    template_html=$(cat "${TEMPLATE_DIR}/${TEMPLATE}.html")
+    template_schema=$(cat "${TEMPLATE_DIR}/${TEMPLATE}.schema.json")
+
+    # Extract version number from template name (e.g., factura-ar-v6 -> v6)
+    local version_num
+    version_num=$(echo "${TEMPLATE}" | grep -oE 'v[0-9]+' || echo "dev")
 
     # Create template (POST /v1/templates)
     local create_response
@@ -256,7 +264,7 @@ publish_template() {
         -H "Content-Type: application/json" \
         -d "$(jq -n \
             --arg name "factura-ar" \
-            --arg version "6-dev-$(date +%s)" \
+            --arg version "${version_num}-dev-$(date +%s)" \
             --argjson schema "$(echo "${template_schema}")" \
             --arg template "${template_html}" \
             '{
@@ -339,7 +347,7 @@ main() {
     log "ARCA PDF Local Render Harness (v6 Template)"
     log "=========================================="
     log "Repo root: ${REPO_ROOT}"
-    log "Template: ${TEMPLATE_DIR}/factura-ar-v6.html"
+    log "Template: ${TEMPLATE_DIR}/${TEMPLATE}.html"
     log "Fixture: ${FIXTURE}"
     log "Output: ${PDF_OUTPUT}"
     log "CreadorPDF URL: ${CREATORPDF_BASE_URL}"
