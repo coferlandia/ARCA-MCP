@@ -1,0 +1,72 @@
+{
+  "emisor": {
+    "razonSocial": "Empresa Ejemplo SRL",
+    "domicilio": "Avenida Siempre Viva 742",
+    "condicionIva": "Responsable Inscripto",
+    "ingresosBrutos": "223654123",
+    "fechaInicioActividades": "01/06/2010"
+  },
+  "receptor": {
+    "razonSocial": "Cliente Prueba",
+    "domicilio": "Calle Ficticia 999"
+  },
+  "condicionVenta": "Contado",
+  "conceptos": [
+    {
+      "codigo": "ART-001",
+      "descripcion": "Devolucion de producto sintetico",
+      "cantidad": 2,
+      "unidadMedida": "unidades",
+      "precioUnitario": 50,
+      "porcentajeBonificacion": 0,
+      "importeBonificacion": 0,
+      "importe": 100
+    }
+  ],
+  "comprobantesAsociados": [
+    {
+      "tipoComprobante": 11,
+      "numero": 41,
+      "fecha": "20261010"
+    }
+  ],
+  "fiscal": {
+    "emisorCuit": "20236438989",
+    "puntoVenta": 1,
+    "tipoComprobante": 13,
+    "concepto": 1,
+    "numeroComprobante": 5,
+    "fechaComprobante": "20261015",
+    "importeNeto": 82.64,
+    "importeNoGravado": 0,
+    "importeExento": 0,
+    "importeIva": 17.36,
+    "importeTributos": 0,
+    "importeTotal": 100,
+    "iva": [
+      {
+        "alicuota": 21,
+        "baseImponible": 82.64,
+        "importe": 17.36
+      }
+    ],
+    "monedaId": "PES",
+    "monedaCotizacion": 1,
+    "cae": "12345678901235",
+    "caeVencimiento": "20261115",
+    "documentoReceptorTipo": 80,
+    "documentoReceptorNumero": 20333444556,
+    "condicionIvaReceptor": 5,
+    "comprobantesAsociados": [
+      {
+        "tipo": 11,
+        "puntoVenta": 1,
+        "numero": 41
+      }
+    ]
+  },
+  "arcaQr": {
+    "verificationUrl": "https://www.afip.gob.ar/e-factura/Consulta.asp?chv=12345678901235567890123456789012345678901245",
+    "imageDataUri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+  }
+}
