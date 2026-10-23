@@ -88,9 +88,10 @@ public class FacturaArV7TemplateTests
 
         Assert.Contains("class=\"invoice-header\"", template);
         Assert.Contains("class=\"voucher-class\"", template);
-        Assert.Contains("grid-template-columns: 1fr 1fr", template);
-        Assert.Contains("left: 50%", template);
-        Assert.Contains("transform: translateX(-50%)", template);
+        Assert.Contains("grid-template-columns: 1fr 17mm 1fr", template);
+        Assert.DoesNotContain("left: 50%", template);
+        Assert.DoesNotContain("transform: translateX(-50%)", template);
+        Assert.Contains("flex-direction: column", template);
         Assert.Contains("class=\"receiver-box\"", template);
         Assert.Contains("class=\"totals-box\"", template);
         Assert.Contains("class=\"footer-grid\"", template);

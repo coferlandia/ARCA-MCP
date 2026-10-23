@@ -20,21 +20,11 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 8.4pt; line-height:
 }
 
 .invoice-header {
-  position: relative;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 17mm 1fr;
   min-height: 48mm;
   border: 0.3mm solid #222;
   border-top: none;
-}
-.invoice-header::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 0;
-  border-left: 0.3mm solid #222;
 }
 .issuer-panel {
   padding: 7mm 3mm 2.5mm 2mm;
@@ -46,20 +36,19 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 8.4pt; line-height:
   margin-bottom: 7mm;
 }
 .document-panel {
-  padding: 2.4mm 2mm 2mm 14mm;
+  padding: 2.4mm 2mm 2mm 2mm;
 }
 .voucher-class {
-  position: absolute;
-  z-index: 2;
-  left: 50%;
-  top: -0.3mm;
-  transform: translateX(-50%);
   width: 17mm;
   min-height: 16mm;
   border: 0.45mm solid #222;
   background: #fff;
   text-align: center;
   padding: 0.5mm 0.8mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 .voucher-letter {
   font-size: 21pt;
@@ -164,16 +153,16 @@ table.detalle tbody td { border: none; padding: 2.4mm 1.2mm 0 1.2mm; font-size: 
 .num { text-align: right; white-space: nowrap; }
 
 .totals-box {
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
   width: 100%;
   min-height: 38mm;
   border: 0.3mm solid #222;
   break-inside: avoid;
 }
 .totals-table {
-  position: absolute;
-  right: 2.5mm;
-  bottom: 3mm;
+  margin: 0 2.5mm 3mm auto;
   width: 76mm;
   border-collapse: collapse;
   font-size: 8.7pt;
