@@ -136,7 +136,7 @@ Formato actual:
 - prioriza en su salida `TEMPLATE_KEY`, `TEMPLATE_VERSION`, `TEMPLATE_OWNER` y `TEMPLATE_STATUS`;
 - el ID físico se imprime únicamente como diagnóstico y no debe copiarse a SecretarIA.
 
-La versión `factura-ar:4` mantiene Factura A/B/C y agrega identificación visual explícita para Nota de Crédito A/B/C (tipos 3/8/13). La versión `factura-ar:5` reproduce el layout fiel de ARCA y queda inmutable. La versión `factura-ar:6` conserva ese layout y corrige el contrato semántico de presentación definido en #97. Todas las versiones anteriores permanecen disponibles e inmutables para snapshots históricos que las referencian.
+La versión `factura-ar:4` mantiene Factura A/B/C y agrega identificación visual explícita para Nota de Crédito A/B/C (tipos 3/8/13). La versión `factura-ar:5` reproduce el layout fiel de ARCA y queda inmutable. La versión `factura-ar:6` conserva ese layout y corrige el contrato semántico de presentación definido en #97, quedando publicada e inmutable. La versión `factura-ar:7` es sucesora de v6, mantiene el contrato de datos de #97 sin cambios y corrige solo problemas de layout/CSS (paginación, caja de letra/COD, alineación de totales). Todas las versiones permanecen disponibles e inmutables para snapshots históricos que las referencian.
 
 Una versión publicada es inmutable:
 
@@ -146,6 +146,10 @@ cambio de HTML/schema = nueva version
 ```
 
 El bootstrap nunca sobrescribe silenciosamente una versión publicada. Si creadorpdf no expone contenido/hash suficiente para comparar drift, se confía en esta regla de versionado inmutable y la limitación queda explícita.
+
+### Limitación conocida de WeasyPrint 62.3 con CSS Grid
+
+Durante el desarrollo de `factura-ar:7` se identificó una limitación en WeasyPrint 62.3: cuando un elemento `position:absolute` tiene como contenedor inmediato un elemento con `display:grid`, WeasyPrint ignora propiedades `width` y `transform:translateX()` del elemento posicionado y le aplica en su lugar el ancho de la celda de grid que le corresponde. Esto causó que la caja de letra/COD (objetivo ~47pt) se expandiera a 285pt. La solución fue reemplazar `position:absolute` con un layout basado en grid de columnas explícitas (1fr 17mm 1fr) y posicionar el elemento por flujo normal. Esta limitación debe tenerse en cuenta al diseñar templates futuros: evitar `position:absolute` dentro de contenedores `display:grid` cuando se requiera dimensión exacta.
 
 ## Credenciales y scopes
 

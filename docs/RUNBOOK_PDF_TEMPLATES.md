@@ -214,7 +214,9 @@ Templates actualmente incorporados:
 ```text
 factura-ar-v3.html / factura-ar-v3.schema.json   (inmutable)
 factura-ar-v4.html / factura-ar-v4.schema.json   (inmutable)
-factura-ar-v5.html / factura-ar-v5.schema.json   (layout ARCA fiel + QR oficial, 3 páginas)
+factura-ar-v5.html / factura-ar-v5.schema.json   (inmutable, layout ARCA fiel + QR oficial, 3 páginas)
+factura-ar-v6.html / factura-ar-v6.schema.json   (inmutable, contrato #97, 3 páginas)
+factura-ar-v7.html / factura-ar-v7.schema.json   (correcciones de layout/CSS sobre v6)
 ```
 
 ### Bootstrap
@@ -869,6 +871,72 @@ Para el rollout conjunto de #97/#86 (diferido hasta completar el desarrollo rela
 6. verificar IIBB explícito/fallback, fecha de inicio opcional, unidad explícita/fallback y condición de venta explícita/fallback;
 7. comparar visualmente las tres copias contra el modelo privado (header, receptor, tabla, caja de totales, QR/marca ARCA, página y CAE);
 8. conservar `factura-ar:5` publicado e intacto para referencias históricas.
+
+## 18.3 `factura-ar:7` — correcciones de layout/CSS (#86)
+
+`factura-ar:7` es sucesora de `factura-ar:6` y mantiene íntegramente el contrato de datos de #97 (campos obligatorios/opcionales sin cambios, fallbacks de presentación idénticos, ownership server-owned de `fiscal` y `arcaQr`). Los cambios son exclusivamente de layout/CSS, corrigiendo tres defectos medidos con render real:
+
+1. **Caja de letra/COD**: v6 medía 285.4pt en lugar de ~47pt (17mm). Causa raíz: WeasyPrint 62.3 ignora `width`/`transform:translateX()` en `position:absolute` cuando el contenedor inmediato es `display:grid`; le aplica el ancho de la celda de grid en su lugar. Solución: `.invoice-header` pasó a grid de 3 columnas (`1fr 17mm 1fr`) con la caja central posicionada por flujo normal (flex para centrar contenido), sin `position:absolute`.
+2. **Totales**: importes quedaban 12–58pt por arriba del borde superior de su recuadro. Causa raíz: `position:absolute` dentro de `position:relative` no se reposicionaba correctamente cuando WeasyPrint recalculaba fragmentación de página con `break-inside:avoid`. Solución: `.totals-box` pasó a `display:flex; flex-direction:column; justify-content:flex-end`; `.totals-table` usa `margin` en lugar de `position:absolute`.
+3. **Paginación**: v6 generaba 6 páginas (footer con QR/CAE se separaba a página aparte, incluso con un solo ítem). `.detail-area { min-height: 106mm; }` sigue intacta en v7 — no se tocó. Se confirmó que corregir los dos `position:absolute` de arriba resuelve la paginación como efecto colateral: esas dos fallas de WeasyPrint distorsionaban el cálculo general de fragmentación de página, no solo la posición de los elementos afectados. No hay una "solución" propia para la paginación en este paso; es consecuencia de los otros dos fixes, confirmada con render real para Factura C y Nota de Crédito C de 1 ítem (sección 18.4).
+
+Mejoras de presentación:
+
+- Header de tabla de detalle: densidad reducida de ~26pt a 20.9pt de alto (manteniendo anchos de columna intactos).
+- Logo ARCA footer: migración de texto CSS a SVG inline autocontenido (no requiere recurso remoto, sigue siendo compatible con creadorpdf).
+
+Validación durante desarrollo:
+
+- Render real local reproducido con el mismo stack de `creadorpdf` (Jinja2 + WeasyPrint 62.3).
+- Test de integración gated `ARCA_PDF_VISUAL_TESTS=1` que mide geometría real (páginas, bboxes) y valida: exactamente 3 páginas A4, caja letra/COD 44–50pt, importes de totales contenidos en su recuadro, QR presente (ver sección 18.4).
+- Cobertura de casos de borde: Factura A con IVA discriminado, Factura C de 1 ítem, Nota de Crédito C con franja de asociación, comprobante con ~12 ítems (3 páginas sin desborde).
+
+v6 permanece publicado e inmutable. El default runtime continúa en `Pdf__TemplateVersion=6`; migración a v7 es fuera de alcance de este trabajo (ver sección 18.5).
+
+## 18.4 Render y medición local de templates
+
+Para validar cambios de layout antes de publicar a un creadorpdf real, existe un harness de desarrollo local:
+
+```text
+scripts/dev/pdf_local_render.sh     # levanta creadorpdf local (Docker), publica template, renderiza PDF
+scripts/dev/pdf_measure.py          # mide geometría real: páginas, bboxes de bloques clave
+scripts/dev/fixtures/              # fixtures sintéticas (sin datos reales)
+scripts/dev/README.md               # documentación completa del harness
+```
+
+Flujo:
+
+1. Ejecutar `scripts/dev/pdf_local_render.sh` para levantar creadorpdf local, publicar el template desde `deploy/cadencia/pdf-templates/` (HTML + schema versionados), y renderizar un PDF con un fixture sintético.
+2. Ejecutar `scripts/dev/pdf_measure.py <pdf>` para obtener JSON con cantidad de páginas, tamaño A4, y bboxes (x/y/ancho/alto en pt) de bloques clave: caja letra/COD, bloque "FACTURA"/"NOTA DE CRÉDITO", recuadro de totales, importes de totales, QR, marca ARCA, CAE, footer por página.
+3. Comparar contra métricas esperadas (ver tabla en sección 18.4.1).
+
+### 18.4.1 Métricas de referencia para `factura-ar:7`
+
+| Métrica | Mín | Máx | Unidad | Notas |
+| --- | --- | --- | --- | --- |
+| Páginas | 3 | 3 | unidades | Factura C 1 ítem, NC C, Factura A IVA, Factura C 12 ítems |
+| Tamaño página | 595 | 595 | pt (ancho) | A4 estándar ±1pt tolerancia |
+| Tamaño página | 842 | 842 | pt (alto) | A4 estándar ±1pt tolerancia |
+| Caja letra/COD ancho | 44 | 50 | pt | ~17mm, centrada en header |
+| Importes totales dentro recuadro | −2 | +2 | pt tolerancia | No deben sobresalir |
+| QR presente | sí | sí | booleano | En cada página, junto a CAE/vencimiento de esa misma copia |
+| Marca ARCA presente | sí | sí | booleano | En el footer de cada página (ORIGINAL/DUPLICADO/TRIPLICADO) |
+
+Si alguna métrica incumple, revisar la sección de causas raíz de 18.3 y el CSS de `factura-ar-v7.html`.
+
+## 18.5 Fuera de alcance de este trabajo
+
+Este trabajo (#86) entrega `factura-ar:7` validado con render real local, test de integración gated, y documentación. **NO INCLUYE**:
+
+1. **Publicación a creadorpdf real**: v7 no se publica a una instancia operativa de creadorpdf ni a Cadencia. El harness `scripts/dev/` usa una instancia Docker desechable (sin datos persistidos).
+
+2. **Cambio del default runtime**: `Pdf__TemplateVersion` continúa en `6`. El override de v7 requiere:
+   - actualización explícita de `Pdf__TemplateVersion=7` en `.env` o docker-compose;
+   - validación visual nuevamente contra el modelo privado de referencia con CAE real (gate manual, no automatizable en CI).
+
+3. **Rollout coordinado**: la migración de callers a v7 (si decidida) será ejecutada separadamente, siguiendo el checklist de la sección 19, con validación E2E en homologación y canary en producción.
+
+4. **Reemisión de comprobantes**: cambiar template/templateVersion de un comprobante ya autorizado no genera un CAE nuevo. La regeneración vía `generar_pdf_comprobante` con v7 de un comprobante histórico emitido con v6 es segura y no requiere autorización fiscal adicional.
 
 ## 19. Checklist para publicar una versión nueva
 

@@ -1,0 +1,89 @@
+{
+  "emisor": {
+    "razonSocial": "Empresa Ejemplo SRL",
+    "domicilio": "Avenida Siempre Viva 742",
+    "condicionIva": "Responsable Inscripto",
+    "ingresosBrutos": "223654123",
+    "fechaInicioActividades": "01/06/2010"
+  },
+  "receptor": {
+    "razonSocial": "Cliente Responsable Inscripto",
+    "domicilio": "Calle Ficticia 999"
+  },
+  "condicionVenta": "Contado",
+  "conceptos": [
+    {
+      "codigo": "PROD-001",
+      "descripcion": "Producto importado sujeto a IVA 21%",
+      "cantidad": 2,
+      "unidadMedida": "unidades",
+      "precioUnitario": 1000,
+      "porcentajeBonificacion": 0,
+      "importeBonificacion": 0,
+      "importe": 2000
+    },
+    {
+      "codigo": "PROD-002",
+      "descripcion": "Producto con IVA reducido 10.5%",
+      "cantidad": 5,
+      "unidadMedida": "unidades",
+      "precioUnitario": 200,
+      "porcentajeBonificacion": 0,
+      "importeBonificacion": 0,
+      "importe": 1000
+    },
+    {
+      "codigo": "PROD-003",
+      "descripcion": "Servicio profesional sujeto a IVA 27%",
+      "cantidad": 1,
+      "unidadMedida": "horas",
+      "precioUnitario": 500,
+      "porcentajeBonificacion": 0,
+      "importeBonificacion": 0,
+      "importe": 500
+    }
+  ],
+  "fiscal": {
+    "emisorCuit": "20236438989",
+    "puntoVenta": 1,
+    "tipoComprobante": 1,
+    "concepto": 1,
+    "numeroComprobante": 100,
+    "fechaComprobante": "20261023",
+    "importeNeto": 2972.973,
+    "importeNoGravado": 0,
+    "importeExento": 0,
+    "importeIva": 927.027,
+    "importeTributos": 0,
+    "importeTotal": 3900,
+    "iva": [
+      {
+        "alicuota": 21,
+        "baseImponible": 1652.893,
+        "importe": 347.108
+      },
+      {
+        "alicuota": 10.5,
+        "baseImponible": 904.977,
+        "importe": 95.023
+      },
+      {
+        "alicuota": 27,
+        "baseImponible": 415.103,
+        "importe": 112.078
+      }
+    ],
+    "monedaId": "PES",
+    "monedaCotizacion": 1,
+    "cae": "12345678901236",
+    "caeVencimiento": "20261215",
+    "documentoReceptorTipo": 80,
+    "documentoReceptorNumero": 20555666777,
+    "condicionIvaReceptor": 1,
+    "comprobantesAsociados": []
+  },
+  "arcaQr": {
+    "verificationUrl": "https://www.afip.gob.ar/e-factura/Consulta.asp?chv=12345678901236567890123456789012345678901246",
+    "imageDataUri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIwAAACMAQAAAACGu3yTAAABTUlEQVR4nKVWwYnEQAyTl/zlDrb/stKBXIEOzcLB7euIDYHxPIQlW+OU8RXz+r4B/nk1VYVGVXX1SR5jXTAGGkCsOcnzujAF9JtAESdZ1HVigDbqnBd1nbCsGm+xaMwMw7CTPMcqNaDfNMljLDhBCuAnWWDJhAQGEOQKywFzeJqBXHFk1FJqk5jDgiMjlskgUdRzrHK+xg3gPWLj3miPNPIUZaQRK46AQMiKclxpb8JSMCPXAuvClGLs+Po+sm04ypFKNGhyNfe0ECTmrQjZpR8V8xwL7DyEWAfMyB53b/uoUAxiSC/0AkMtc2ZFvB1Hhtp5JMyN9td4wO7RW73cHfi00Y7wmbKdXsh4RbEM18aPr0zBtLIbG4Tv5d4mG1YPqpvLXTuCClRLd2+8rawiIcaOBTbzJVs+SKcLu/143oqofnq5eQuzO/7G8//CH26fANXS/xs2AAAAAElFTkSuQmCC"
+  }
+}
