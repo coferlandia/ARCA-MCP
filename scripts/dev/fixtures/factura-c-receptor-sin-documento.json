@@ -1,0 +1,50 @@
+{
+  "emisor": {
+    "razonSocial": "Diego Cofre Sistemas",
+    "domicilio": "Necochea 2463, Martinez, Buenos Aires, 1640",
+    "condicionIva": "Responsable Monotributo"
+  },
+  "receptor": {
+    "razonSocial": "Mr coferland",
+    "domicilio": "Av Zaziza 234, Munro, 1640"
+  },
+  "condicionVenta": "Contado",
+  "conceptos": [
+    {
+      "descripcion": "otra prueba de item",
+      "cantidad": 1,
+      "unidadMedida": "unidades",
+      "precioUnitario": 23.45,
+      "porcentajeBonificacion": 0,
+      "importeBonificacion": 0,
+      "importe": 23.45
+    }
+  ],
+  "fiscal": {
+    "emisorCuit": "20236438989",
+    "puntoVenta": 77,
+    "tipoComprobante": 11,
+    "concepto": 1,
+    "numeroComprobante": 4,
+    "fechaComprobante": "20261016",
+    "importeNeto": 23.45,
+    "importeNoGravado": 0,
+    "importeExento": 0,
+    "importeIva": 0,
+    "importeTributos": 0,
+    "importeTotal": 23.45,
+    "monedaId": "PES",
+    "monedaCotizacion": 1,
+    "cae": "86427944511490",
+    "caeVencimiento": "20261026",
+    "documentoReceptorTipo": 99,
+    "documentoReceptorNumero": 0,
+    "condicionIvaReceptor": 5,
+    "comprobantesAsociados": []
+  },
+  "arcaQr": {
+    "verificationUrl": "https://www.afip.gob.ar/e-factura/Consulta.asp?chv=11111111111111111111111111111111111111111111",
+    "imageDataUri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+  }
+}
+

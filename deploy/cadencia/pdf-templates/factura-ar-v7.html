@@ -67,12 +67,13 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 8.4pt; line-height:
   margin-bottom: 5mm;
 }
 .info-row {
-  display: flex;
-  gap: 1.8mm;
+  display: grid;
+  grid-template-columns: 40mm 1fr;
+  column-gap: 1.8mm;
   margin-bottom: 3.2mm;
 }
 .info-row:last-child { margin-bottom: 0; }
-.info-label { font-weight: 700; white-space: nowrap; }
+.info-label { font-weight: 700; }
 .meta-row {
   margin-bottom: 2.1mm;
   white-space: nowrap;
@@ -115,7 +116,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 8.4pt; line-height:
   margin-bottom: 3.2mm;
 }
 .receiver-row:last-child { margin-bottom: 0; }
-.receiver-row.first { grid-template-columns: 35% 65%; }
+.receiver-row.first { grid-template-columns: 65% 35%; }
 .receiver-row.second { grid-template-columns: 52% 48%; }
 .receiver-row.third { grid-template-columns: 100%; }
 .receiver-cell { min-width: 0; }
@@ -338,13 +339,13 @@ table.detalle tbody td { border: none; padding: 2.4mm 1.2mm 0 1.2mm; font-size: 
 
   <div class="receiver-box">
     <div class="receiver-row first">
+      <div class="receiver-cell"><strong>Apellido y Nombre / Razón Social:</strong> {{ receptor.razonSocial }}</div>
       <div class="receiver-cell">
         {% if fiscal.documentoReceptorNumero is not none and fiscal.documentoReceptorNumero != 0 %}
           <strong>{% if fiscal.documentoReceptorTipo == 80 %}CUIT{% elif fiscal.documentoReceptorTipo == 86 %}CUIL{% elif fiscal.documentoReceptorTipo == 96 %}DNI{% else %}Documento{% endif %}:</strong>
           {{ fiscal.documentoReceptorNumero }}
         {% endif %}
       </div>
-      <div class="receiver-cell"><strong>Apellido y Nombre / Razón Social:</strong> {{ receptor.razonSocial }}</div>
     </div>
     <div class="receiver-row second">
       <div class="receiver-cell"><strong>Condición frente al IVA:</strong>&nbsp;&nbsp;
