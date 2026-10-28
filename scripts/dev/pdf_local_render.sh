@@ -7,7 +7,7 @@ set -euo pipefail
 #   - Clone enerone/creadorpdf (main branch) to a temporary directory
 #   - Start creadorpdf using Docker Compose
 #   - Create temporary admin credentials
-#   - Publish invoice template from this repo (v6 or v7)
+#   - Publish an invoice template from this repo
 #   - Render a test PDF using synthetic fixtures
 #   - Save PDF to scratchpad for measurement
 #
@@ -29,7 +29,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 FIXTURE="${1:-factura-c-1item}"
 OUTPUT_DIR="${2:-}"
-TEMPLATE="${3:-factura-ar-v6}"
+TEMPLATE="${3:-factura-ar-v8}"
 
 # Derived paths
 TEMPLATE_DIR="${REPO_ROOT}/deploy/cadencia/pdf-templates"
@@ -349,7 +349,7 @@ cleanup() {
 # Main execution
 main() {
     log "=========================================="
-    log "ARCA PDF Local Render Harness (v6 Template)"
+    log "ARCA PDF Local Render Harness"
     log "=========================================="
     log "Repo root: ${REPO_ROOT}"
     log "Template: ${TEMPLATE_DIR}/${TEMPLATE}.html"
