@@ -31,6 +31,15 @@ public class FacturaArV9VisualGeometryTests
                     - voucher.GetProperty("x0").GetDouble();
                 Assert.InRange(voucherWidth, 44, 50);
 
+                var issuerName = elements.GetProperty("issuer_name");
+                var reasonSocial = elements.GetProperty("issuer_reason_social_label");
+                Assert.True(
+                    issuerName.GetProperty("x1").GetDouble() <= voucher.GetProperty("x0").GetDouble(),
+                    "El nombre de fantasía no debe invadir la caja de letra/COD.");
+                Assert.True(
+                    issuerName.GetProperty("bottom").GetDouble() <= reasonSocial.GetProperty("top").GetDouble(),
+                    "El nombre de fantasía no debe superponerse con la línea Razón Social.");
+
                 Assert.True(elements.TryGetProperty("qr_code", out _));
 
                 if (elements.TryGetProperty("totals_box", out var box)
