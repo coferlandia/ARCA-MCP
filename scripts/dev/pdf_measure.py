@@ -151,6 +151,28 @@ def measure_page(page: Any, page_idx: int) -> Dict[str, Any]:
         if copy_title:
             page_data["elements"]["copy_title"] = copy_title
 
+        # Issuer identity block. It is the only ~9pt text in the left half between
+        # the copy title and the explicit "Razón Social" row. Measuring it lets
+        # visual tests detect horizontal overlap with the voucher box and vertical
+        # overlap with the legal/business identity rows.
+        reason_social = find_element_bbox(
+            words,
+            lambda w: w['text'].lower().startswith('razón') and 7 <= w['size'] <= 12
+        )
+        if reason_social:
+            page_data["elements"]["issuer_reason_social_label"] = reason_social
+
+        if copy_title and reason_social:
+            issuer_words = [
+                w for w in words
+                if copy_title["bottom"] < w.get("top", 0) < reason_social["top"]
+                and 8.5 <= w.get("size", 0) <= 12
+                and w.get("x0", page.width) < page.width / 2
+            ]
+            issuer_bbox = aggregate_words_bbox(issuer_words)
+            if issuer_bbox:
+                page_data["elements"]["issuer_name"] = issuer_bbox
+
         # CAE text and number
         cae_elem = find_element_bbox(
             words,
@@ -292,6 +314,30 @@ def find_rect_containing_bbox(rects: List[Dict], x0: float, top: float, x1: floa
             continue
 
     return best
+
+
+def aggregate_words_bbox(words: List[Dict]) -> Optional[Dict[str, float]]:
+    """Return one bounding box covering all supplied words."""
+    if not words:
+        return None
+
+    try:
+        x0 = min(word["x0"] for word in words)
+        top = min(word["top"] for word in words)
+        x1 = max(word["x1"] for word in words)
+        bottom = max(word["bottom"] for word in words)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    return {
+        "x0": round(x0, 1),
+        "top": round(top, 1),
+        "x1": round(x1, 1),
+        "bottom": round(bottom, 1),
+        "width": round(x1 - x0, 1),
+        "height": round(bottom - top, 1),
+        "text": " ".join(word.get("text", "") for word in words)
+    }
 
 
 def find_element_bbox(words: List[Dict], predicate) -> Optional[Dict[str, float]]:
