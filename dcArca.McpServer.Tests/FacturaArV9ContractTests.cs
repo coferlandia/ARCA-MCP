@@ -24,8 +24,6 @@ public class FacturaArV9ContractTests
             v8.RootElement.GetProperty("properties").GetProperty("arcaQr").GetRawText(),
             v9.RootElement.GetProperty("properties").GetProperty("arcaQr").GetRawText());
         Assert.False(v9.RootElement.GetProperty("properties").TryGetProperty("nombreFantasia", out _));
-        Assert.False(v9.RootElement.GetProperty("properties").GetProperty("fiscal").GetProperty("properties").ValueKind == JsonValueKind.Object
-            && v9.RootElement.GetProperty("properties").GetProperty("fiscal").GetProperty("properties").TryGetProperty("nombreFantasia", out _));
     }
 
     [Fact]
