@@ -36,6 +36,12 @@
       "version": "8",
       "template": "factura-ar-v8.html",
       "schema": "factura-ar-v8.schema.json"
+    },
+    {
+      "key": "factura-ar",
+      "version": "9",
+      "template": "factura-ar-v9.html",
+      "schema": "factura-ar-v9.schema.json"
     }
   ]
 }

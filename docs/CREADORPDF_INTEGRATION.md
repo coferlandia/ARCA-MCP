@@ -46,7 +46,7 @@ La configuración operativa recomendada para el template actual es:
 
 ```text
 Pdf__TemplateKey=factura-ar
-Pdf__TemplateVersion=6
+Pdf__TemplateVersion=8
 ```
 
 `templateData` sigue siendo input del caller y no participa de esta selección.
@@ -136,7 +136,7 @@ Formato actual:
 - prioriza en su salida `TEMPLATE_KEY`, `TEMPLATE_VERSION`, `TEMPLATE_OWNER` y `TEMPLATE_STATUS`;
 - el ID físico se imprime únicamente como diagnóstico y no debe copiarse a SecretarIA.
 
-La versión `factura-ar:4` mantiene Factura A/B/C y agrega identificación visual explícita para Nota de Crédito A/B/C (tipos 3/8/13). La versión `factura-ar:5` reproduce el layout fiel de ARCA y queda inmutable. La versión `factura-ar:6` conserva ese layout y corrige el contrato semántico de presentación definido en #97, quedando publicada e inmutable. La versión `factura-ar:7` es sucesora de v6, mantiene el contrato de datos de #97 sin cambios y corrige solo problemas de layout/CSS (paginación, caja de letra/COD, alineación de totales). Todas las versiones permanecen disponibles e inmutables para snapshots históricos que las referencian.
+La versión `factura-ar:4` mantiene Factura A/B/C y agrega identificación visual explícita para Nota de Crédito A/B/C (tipos 3/8/13). La versión `factura-ar:5` reproduce el layout fiel de ARCA y queda inmutable. La versión `factura-ar:6` conserva ese layout y corrige el contrato semántico de presentación definido en #97, quedando publicada e inmutable. La versión `factura-ar:7` es sucesora de v6, mantiene el contrato de datos de #97 sin cambios y corrige solo problemas de layout/CSS (paginación, caja de letra/COD, alineación de totales). La versión `factura-ar:8` conserva ese contrato y layout corregido en una identidad nueva, publicada e inmutable, y es el default runtime actual. La versión `factura-ar:9` agrega únicamente `templateData.emisor.nombreFantasia` como dato opcional de presentación: si tiene contenido no blanco se muestra como identidad comercial destacada; si falta, es `null` o está vacío, el encabezado conserva `emisor.razonSocial`. La razón social continúa visible en su línea explícita y `fiscal`/`arcaQr` permanecen íntegramente server-owned. V9 no debe convertirse en default hasta publicarse, pasar el gate visual con WeasyPrint y verificarse visible con la key runtime. Todas las versiones permanecen disponibles e inmutables para snapshots históricos que las referencian.
 
 Una versión publicada es inmutable:
 
@@ -168,7 +168,7 @@ Se configura como:
 Pdf__BaseUrl=http://creadorpdf:8080
 Pdf__ApiKey=...
 Pdf__TemplateKey=factura-ar
-Pdf__TemplateVersion=6
+Pdf__TemplateVersion=8
 ```
 
 ### Deploy/bootstrap
@@ -311,6 +311,17 @@ Un template puede mostrar líneas monetarias provenientes de `items`, pero los t
 - `receptor`: `razonSocial` obligatorio, `domicilio` opcional.
 - `condicionVenta`: opcional en la raíz; si falta, el template oculta la línea sin dejar texto vacío.
 - `conceptos[]`: `descripcion`, `cantidad`, `unidadMedida`, `precioUnitario`, `importe` obligatorios; `codigo` opcional; `porcentajeBonificacion`/`importeBonificacion` opcionales con default visual `0,00` cuando están ausentes.
+
+### `factura-ar:9` — nombre de fantasía del emisor (#110)
+
+`factura-ar:9` hereda íntegramente de V8 el contrato fiscal, QR, tipos de comprobante, copias y geometría base. Agrega exclusivamente:
+
+- `emisor.nombreFantasia`: opcional (`string|null`) y provisto por el caller como dato de presentación;
+- cuando contiene texto no blanco, reemplaza sólo el nombre destacado superior izquierdo;
+- cuando falta, es `null`, vacío o whitespace, el encabezado usa `emisor.razonSocial`;
+- `emisor.razonSocial` continúa siendo obligatorio y siempre se muestra en la línea `Razón Social:`;
+- ARCA-MCP no intenta obtener este valor mediante `FEParamGetPtosVenta`, porque ese contrato no lo expone;
+- el campo no modifica autorización, CAE, QR, snapshot fiscal ni persistencia.
 
 ### `factura-ar:6` — contrato de presentación corregido (#97)
 

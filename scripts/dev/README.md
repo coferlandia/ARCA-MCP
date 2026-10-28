@@ -45,13 +45,16 @@ cd /path/to/ARCA-MCP
 
 # Or render using the Nota de Crédito C fixture
 ./scripts/dev/pdf_local_render.sh nota-credito-c-1item
+
+# V9 con nombre de fantasía largo
+./scripts/dev/pdf_local_render.sh factura-c-nombre-fantasia-largo /tmp factura-ar-v9
 ```
 
 The script will:
 - Clone `enerone/creadorpdf` (if not already cloned) to a temporary directory.
 - Start creadorpdf with Docker Compose.
 - Create a temporary admin API key for template management.
-- Publish `factura-ar-v6.html` and `factura-ar-v6.schema.json` as-is.
+- Publish the selected template HTML/schema as-is (default: `factura-ar-v8`; pass a third argument to select another version).
 - Render a PDF using the chosen fixture.
 - Print the output path to stdout at the end.
 
@@ -360,7 +363,7 @@ The PDF filename is timestamped to avoid collisions: `rendered_<unix-timestamp>.
 
 ## Running Visual Geometry Tests
 
-The `FacturaArV7VisualGeometryTests` suite validates the real-world layout of rendered factura-ar-v7 PDFs by measuring page geometry, element dimensions, and positioning.
+The gated visual suites validate real rendered PDF geometry. V8 preserves the production baseline and `FacturaArV9VisualGeometryTests` adds the long `nombreFantasia` case introduced by #110.
 
 ### Prerequisites
 
@@ -384,18 +387,17 @@ With the environment variable (requires Docker):
 # Run visual geometry tests
 ARCA_PDF_VISUAL_TESTS=1 dotnet test dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj \
   --configuration Release \
-  --filter "FullyQualifiedName~FacturaArV7VisualGeometry"
+  --filter "FullyQualifiedName~FacturaArV9VisualGeometryTests"
 ```
 
 Example output:
 ```
-FacturaArV7VisualGeometryTests.FacturaC1Item_Renders3Pages_WithCorrectGeometry PASSED
-FacturaArV7VisualGeometryTests.NotaCreditoC1Item_Renders3Pages_WithCorrectGeometry PASSED
+FacturaArV9VisualGeometryTests.NombreFantasiaLargo_ConservaGeometriaBase PASSED
 ```
 
 ### What the Tests Verify
 
-For each test fixture (Factura C 1-item, Nota de Crédito C 1-item):
+For the V9 long-name fixture:
 
 1. **Page Count**: Exactly 3 A4 pages (595×842 pt)
 2. **Voucher Letter/Code Box**: Width measured 44-50 pt (objective ~47 pt = 17 mm)
@@ -410,7 +412,7 @@ This test **must pass** before publishing any new version of the factura-ar temp
 # Standard pre-publication check
 ARCA_PDF_VISUAL_TESTS=1 dotnet test dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj \
   --configuration Release \
-  --filter "FacturaArV7VisualGeometry"
+  --filter "FullyQualifiedName~FacturaArV9VisualGeometryTests"
 ```
 
 ## Running in CI/CD
@@ -424,7 +426,7 @@ To include in CI:
 ```bash
 # Enable visual tests and run them (requires Docker in CI environment)
 export ARCA_PDF_VISUAL_TESTS=1
-dotnet test dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj --configuration Release --filter "FacturaArV7VisualGeometry"
+dotnet test dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj --configuration Release --filter "FullyQualifiedName~FacturaArV9VisualGeometryTests"
 ```
 
 ## References
