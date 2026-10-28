@@ -938,6 +938,32 @@ Este trabajo (#86) entrega `factura-ar:7` validado con render real local, test d
 
 4. **Reemisión de comprobantes**: cambiar template/templateVersion de un comprobante ya autorizado no genera un CAE nuevo. La regeneración vía `generar_pdf_comprobante` con v7 de un comprobante histórico emitido con v6 es segura y no requiere autorización fiscal adicional.
 
+## 18.6 Estado operativo actual — `factura-ar:8`
+
+`factura-ar:8` es la versión publicada e inmutable que contiene los fixes de overlap/alineación consolidados después de V7. El fallback versionado de `deploy/cadencia/docker-compose.yml` es `Pdf__TemplateVersion=8`; un override explícito en `.env` continúa teniendo prioridad. V3–V8 permanecen disponibles para referencias históricas y rollback.
+
+## 18.7 `factura-ar:9` — nombre de fantasía del emisor (#110)
+
+V9 parte de V8 sin modificarla y agrega únicamente `emisor.nombreFantasia` como dato opcional de presentación. El nombre de fantasía no participa de `fiscal`, CAE, QR ni emisión. Si el caller no lo informa, lo envía como `null`, vacío o whitespace, el encabezado usa `emisor.razonSocial`.
+
+Antes de activar V9 como default:
+
+1. ejecutar la validación determinística del repositorio;
+2. ejecutar el gate visual real con WeasyPrint usando el fixture largo:
+   ```bash
+   ARCA_PDF_VISUAL_TESTS=1 dotnet test dcArca.McpServer.Tests/dcArca.McpServer.Tests.csproj \
+     --configuration Release \
+     --filter "FullyQualifiedName~FacturaArV9VisualGeometryTests"
+   ```
+3. publicar `factura-ar:9` con `bootstrap-pdf-template.sh`;
+4. comprobar `version=9`, `status=published`, owner esperado y visibilidad con la key runtime;
+5. regenerar un comprobante ya autorizado con nombre de fantasía y otro sin él; no solicitar un CAE nuevo;
+6. verificar las tres copias y que la razón social continúe visible;
+7. recién entonces fijar `Pdf__TemplateVersion=9` en el runtime efectivo;
+8. para rollback, volver a `Pdf__TemplateVersion=8` y recrear sólo el servicio MCP.
+
+ARCA-MCP no descubre este dato mediante `FEParamGetPtosVenta`; el caller es responsable de aportar el nombre comercial configurado.
+
 ## 19. Checklist para publicar una versión nueva
 
 1. Crear nuevos archivos versionados en `deploy/cadencia/pdf-templates/`.
@@ -1052,8 +1078,11 @@ Templates en repo
 Bootstrap
   deploy/cadencia/bootstrap-pdf-template.sh
 
-Template validado
-  factura-ar:3
+Template runtime actual
+  factura-ar:8
+
+Template candidato
+  factura-ar:9 (requiere publicación + gate visual antes de activación)
 
 Diagnóstico principal de ownership
   GET /v1/templates/managed
